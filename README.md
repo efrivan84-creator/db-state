@@ -169,7 +169,7 @@ Default client storage:
 - `sessionStorage` for `sessionId`;
 - `localStorage` for `time1`;
 - `localStorage` for auth `userId/hash`;
-- IndexedDB for entity cache, with memory fallback outside the browser.
+- IndexedDB for entity cache and cached `idsRef`/`countRef` values, with memory fallback outside the browser.
 
 Auto-auth is enabled by default. On WebSocket reconnect or page refresh the client reads saved `userId/hash`, calls `authByHash`, then runs sync. It does not refresh `countRef`/`idsRef` unless sync returns table changes.
 
@@ -291,7 +291,7 @@ For sync permissions, Mongo documents are loaded only when needed. Rules without
 
 Early release (`0.0.x`). API is small and stable in shape, but treat as pre-1.0:
 
-- Realtime CRUD with permissions, offline cache, login, sync — done and tested (38 tests).
+- Realtime CRUD with permissions, offline cache, login, sync — done and tested (40 tests).
 - TypeScript declarations — done, full generic schema typing.
 - Append-only log gives you audit trail and time-travel rollback for free.
 - Permission `if`-condition DSL currently supports equality only — operators like `$in`, `$gte` are on the roadmap.

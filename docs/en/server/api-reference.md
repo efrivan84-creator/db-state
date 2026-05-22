@@ -1,7 +1,5 @@
 # Server API reference
 
-> **English** · [Русский](../../../ru/server/api-reference.md)
-
 Complete reference for `@db-state/server-mongo`.
 
 ## Exports
@@ -152,12 +150,13 @@ interface ListRequest<T> {
   table: string
   filter?: Partial<T> & Record<string, unknown>
   sort?: Record<string, 1 | -1>
+  skip?: number
   limit?: number
   req?: unknown
 }
 ```
 
-Returns ids of documents matching `filter`, after permission filtering on each row.
+Returns ids of documents matching `filter`, after applying `sort`, `skip`, `limit`, and permission filtering on each row.
 
 ### `getUnique(input)`
 
@@ -354,6 +353,7 @@ interface MongoCollectionLike<T> {
 
 interface MongoCursorLike<T> {
   sort(spec: Record<string, 1 | -1>): MongoCursorLike<T>
+  skip(count: number): MongoCursorLike<T>
   limit(count: number): MongoCursorLike<T>
   toArray(): Promise<T[]>
 }

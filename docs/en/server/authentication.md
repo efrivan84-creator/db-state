@@ -1,7 +1,5 @@
 # Server authentication
 
-> **English** · [Русский](../../../ru/server/authentication.md)
-
 The server handles three auth messages over the WebSocket: `dbstate:login`, `dbstate:auth` (hash reconnect), and `dbstate:logout`. All three are processed by `auth.js` independently of the RPC dispatcher.
 
 ## The `_user` table

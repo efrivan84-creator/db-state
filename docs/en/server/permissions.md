@@ -1,7 +1,5 @@
 # Permissions
 
-> **English** · [Русский](../../../ru/server/permissions.md)
-
 This is the most important page in the documentation. Read it once carefully — every other security decision in your app flows from this model.
 
 ## The deny-by-default rule
@@ -287,6 +285,6 @@ For inserts, every field in the new object is validated against `write.fields`. 
 
 Because `_permission` is a normal table, you can build an admin UI to edit rules at runtime. The library re-reads `_permission` on every check (with a small per-sync cache), so changes take effect immediately for new requests.
 
-The demo2 app has a JSON-textarea editor for `_permission` — see [cookbook/admin-panel.md](../cookbook/admin-panel.md#permission-editor).
+The demo2 app has a JSON-textarea editor for `_permission` — see [cookbook/admin-panel.md](../cookbook/admin-panel.md#server-permissions).
 
 Be careful giving non-admin groups write access to `_permission` itself — they could grant themselves new rules.

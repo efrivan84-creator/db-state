@@ -322,6 +322,43 @@ test("idsRef reuses an existing ref for equal query settings", async () => {
   assert.deepEqual(calls, [])
 })
 
+test("idsRef includes skip in query deduplication", async () => {
+  const cache = createMemoryCache()
+  const state = createDbState({
+    autoConnect: false,
+    cache,
+    idsRefreshDelay: 0,
+    safetySyncInterval: 0,
+    ...testStorage(),
+    tables: ["order"]
+  })
+  const calls = []
+  state.socket.rpc = async (method, payload) => {
+    calls.push({ method, payload })
+    return payload.skip === 10 ? ["o11"] : ["o1"]
+  }
+
+  const first = state.order.idsRef({ sort: { _id: 1 }, skip: 0, limit: 10 })
+  const same = state.order.idsRef({ limit: 10, sort: { _id: 1 }, skip: 0 })
+  const secondPage = state.order.idsRef({ sort: { _id: 1 }, skip: 10, limit: 10 })
+
+  assert.equal(first, same)
+  assert.notEqual(first, secondPage)
+
+  await state.applyChange({
+    table: "order",
+    id: "o1",
+    action: "insert",
+    obj: { _id: "o1", status: "open" }
+  })
+  await waitFor(() => first.value.length === 1 && secondPage.value.length === 1)
+
+  assert.deepEqual(calls, [
+    { method: "getIds", payload: { table: "order", sort: { _id: 1 }, skip: 0, limit: 10 } },
+    { method: "getIds", payload: { table: "order", sort: { _id: 1 }, skip: 10, limit: 10 } }
+  ])
+})
+
 test("countRef and idsRef load cached query values without server refresh", async () => {
   const cache = createMemoryCache()
   const firstState = createDbState({

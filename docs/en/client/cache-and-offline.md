@@ -1,7 +1,5 @@
 # Cache and offline
 
-> **English** · [Русский](../../../ru/client/cache-and-offline.md)
-
 The Vue client maintains a persistent **record cache** and several **storage facets**. Together they let you show useful data on cold start, on page refresh, and when the server is unreachable.
 
 ## What is cached and where
@@ -161,7 +159,7 @@ The library **does not queue writes for later replay**. If you call `update()` w
 
 1. Show a "you're offline" indicator (`state.sync.connected === false`).
 2. Disable Save buttons.
-3. Or queue manually using IndexedDB and replay on reconnect — see [advanced patterns](../cookbook/advanced-patterns.md#offline-write-queue).
+3. Or queue manually using IndexedDB and replay on reconnect in your application code.
 
 True offline-write CRDT replication is not the library's design goal — that's [Yjs](https://yjs.dev) territory.
 

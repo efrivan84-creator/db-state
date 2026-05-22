@@ -1,7 +1,5 @@
 # Socket: custom events
 
-> **English** · [Русский](../../../ru/client/socket.md)
-
 The same WebSocket the library uses for sync is **available to your app** for custom events. No second connection, no second protocol — just don't use the reserved `dbstate:*` namespace.
 
 ## Reserved vs. custom events

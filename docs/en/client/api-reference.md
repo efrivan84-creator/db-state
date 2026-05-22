@@ -1,7 +1,5 @@
 # Client API reference
 
-> **English** · [Русский](../../../ru/client/api-reference.md)
-
 Complete reference for `@db-state/vue`. For deep-dive examples, follow the links in each section.
 
 ## Exports

@@ -1,7 +1,5 @@
 # Authentication
 
-> **English** · [Русский](../../../ru/client/authentication.md)
-
 The Vue client supports three flows: explicit login/password, hash-based reconnect, and automatic restore after page refresh.
 
 ## Login
@@ -139,6 +137,7 @@ By default the client uses these keys:
 | `localStorage` | `db-state.userId` | saved auth user id |
 | `localStorage` | `db-state.authHash` | saved auth hash |
 | IndexedDB | `db-state` / `records` | cached documents |
+| IndexedDB | `db-state` / `__dbstate_query` | cached `idsRef` and `countRef` values |
 
 Override per-app if you run multiple db-state instances on the same origin:
 
@@ -179,7 +178,7 @@ By default `sessionId = "${userId}_${random10}"`. Override the prefix to make lo
 
 ## Custom password hasher
 
-The library defaults to PBKDF2 on the server. If you want different hashing (bcrypt, argon2, etc.), see [server/authentication.md](../server/authentication.md#custom-password-adapters) — the client doesn't care which hasher you use, it only sends the plaintext password to the login RPC.
+The library defaults to PBKDF2 on the server. If you want different hashing (bcrypt, argon2, etc.), see [server/authentication.md](../server/authentication.md#password-adapters) — the client doesn't care which hasher you use, it only sends the plaintext password to the login RPC.
 
 ## Anonymous reads
 

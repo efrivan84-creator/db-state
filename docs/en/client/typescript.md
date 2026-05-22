@@ -1,7 +1,5 @@
 # TypeScript
 
-> **English** · [Русский](../../../ru/client/typescript.md)
-
 `@db-state/vue` ships full `.d.ts` declarations. A single generic parameter — your `Schema` — types every method, filter, sort key, update field and load result.
 
 ## Schema generic
@@ -221,4 +219,4 @@ The published packages export their `.d.ts` via the `exports.types` field, so `m
 
 ## Verified examples
 
-The library's own test file at [tmp/ts-check/sample.ts](../../tmp/ts-check/sample.ts) is type-checked by `tsc --strict` as part of CI. If you find a case where the types feel weak or wrong, please open an issue with a minimal `.ts` reproduction.
+The library's own test file at [tmp/ts-check/sample.ts](../../../tmp/ts-check/sample.ts) is type-checked by `tsc --strict` as part of CI. If you find a case where the types feel weak or wrong, please open an issue with a minimal `.ts` reproduction.

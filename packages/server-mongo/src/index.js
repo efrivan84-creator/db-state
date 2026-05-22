@@ -104,10 +104,11 @@ export function createDbStateServer(options) {
     return projectFields(obj, access.fields)
   }
 
-  async function getIds({ table, filter = {}, sort, limit = 0, req }) {
+  async function getIds({ table, filter = {}, sort, skip = 0, limit = 0, req }) {
     assertTable(config, table)
     let cursor = config.mongo.collection(table).find(filter)
     if (sort) cursor = cursor.sort(sort)
+    if (skip) cursor = cursor.skip(skip)
     if (limit) cursor = cursor.limit(limit)
     return (await filterReadable(config, req, table, await cursor.toArray())).map((row) => row._id ?? row.id)
   }

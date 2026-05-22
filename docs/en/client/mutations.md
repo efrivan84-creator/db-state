@@ -1,7 +1,5 @@
 # Mutations
 
-> **English** · [Русский](../../../ru/client/mutations.md)
-
 Three methods write to the server: `add`, `update`, `remove`. Each one runs the change through the server's permission layer, appends it to the log, and broadcasts a `changes_available` notification to other connected clients.
 
 ## `add`

@@ -1,7 +1,5 @@
 # db-state Documentation
 
-> **English** · [Русский](../ru/README.md)
-
 Full documentation for the [db-state](https://github.com/efrivan84-creator/db-state) library — a tiny realtime reactive state layer for Vue 3 + MongoDB.
 
 ## Start here
@@ -47,7 +45,7 @@ End-to-end recipes for common production patterns.
 - [Admin panel](cookbook/admin-panel.md) — typed multi-table CRUD with field-level permissions.
 - [Audit trail](cookbook/audit-trail.md) — "who changed what when" with the existing log.
 - [Offline PWA](cookbook/offline-pwa.md) — service worker + cached reads.
-- [Advanced patterns](cookbook/advanced-patterns.md) — diff-based saves, soft delete, multi-tenant, rate-limited refresh, custom cache backend.
+- [Advanced patterns](cookbook/advanced-patterns.md) — diff-based saves, soft delete, multi-tenant, rate-limited refresh, custom cache backend, scaling broadcasts.
 
 ---
 

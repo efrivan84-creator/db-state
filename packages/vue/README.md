@@ -228,7 +228,7 @@ Defaults:
 - `sessionStorage` stores `sessionId`;
 - `localStorage` stores `time1`;
 - `localStorage` stores auth `userId/hash`;
-- IndexedDB stores cached records;
+- IndexedDB stores cached records and cached `idsRef`/`countRef` values;
 - memory cache is used when IndexedDB is unavailable.
 
 Cache adapters:

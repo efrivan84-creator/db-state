@@ -454,6 +454,30 @@ test("read fields project load and sync changes", async () => {
   ])
 })
 
+test("getIds applies skip before limit", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"]
+  })
+  await allowTable(mongo, "order", "admins")
+
+  await mongo.collection("order").insertOne({ _id: "o1" })
+  await mongo.collection("order").insertOne({ _id: "o2" })
+  await mongo.collection("order").insertOne({ _id: "o3" })
+  await mongo.collection("order").insertOne({ _id: "o4" })
+
+  const ids = await server.getIds({
+    table: "order",
+    sort: { _id: 1 },
+    skip: 1,
+    limit: 2,
+    req: adminReq()
+  })
+
+  assert.deepEqual(ids, ["o2", "o3"])
+})
+
 test("sync does not load changed documents when permission rules have no if", async () => {
   const mongo = createMemoryMongo()
   const server = createDbStateServer({
@@ -670,7 +694,14 @@ class MemoryCollection {
 
     return {
       sort() {
-        items = [...items].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+        items = [...items].sort((a, b) => {
+          if ("createdAt" in a && "createdAt" in b) return a.createdAt.localeCompare(b.createdAt)
+          return String(a._id).localeCompare(String(b._id))
+        })
+        return this
+      },
+      skip(count) {
+        if (count > 0) items = items.slice(count)
         return this
       },
       limit(count) {

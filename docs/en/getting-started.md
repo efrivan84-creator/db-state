@@ -1,7 +1,5 @@
 # Getting started
 
-> **English** · [Русский](../../ru/getting-started.md)
-
 This guide takes you from zero to a working realtime CRUD page in about five minutes.
 
 ## What you'll build

@@ -16,6 +16,7 @@ export type { BaseDoc, Change, ChangeAction } from "@db-state/core"
 /** Minimum subset of a Mongo cursor used by the library. */
 export interface MongoCursorLike<T = unknown> {
   sort(spec: Record<string, 1 | -1>): MongoCursorLike<T>
+  skip(count: number): MongoCursorLike<T>
   limit(count: number): MongoCursorLike<T>
   toArray(): Promise<T[]>
 }
@@ -128,6 +129,7 @@ export interface ListRequest<T extends BaseDoc = BaseDoc> extends RequestContext
   table: string
   filter?: Partial<T> & Record<string, unknown>
   sort?: Record<string, 1 | -1>
+  skip?: number
   limit?: number
 }
 

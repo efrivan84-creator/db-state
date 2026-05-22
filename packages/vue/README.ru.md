@@ -228,7 +228,7 @@ Vue-клиент умеет читать закэшированные данны
 - `sessionStorage` хранит `sessionId`;
 - `localStorage` хранит `time1`;
 - `localStorage` хранит `userId/hash` для аут;
-- IndexedDB хранит закэшированные записи;
+- IndexedDB хранит закэшированные записи и закэшированные значения `idsRef`/`countRef`;
 - memory-кэш используется, когда IndexedDB недоступен.
 
 Адаптеры кэша:

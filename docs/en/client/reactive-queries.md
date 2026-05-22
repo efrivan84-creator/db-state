@@ -1,7 +1,5 @@
 # Reactive queries
 
-> **English** · [Русский](../../../ru/client/reactive-queries.md)
-
 The Vue client exposes four query primitives per table. All of them are **reactive**, **cached**, and **automatically updated** as the server pushes changes.
 
 ## Quick reference

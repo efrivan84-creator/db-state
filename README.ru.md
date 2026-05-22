@@ -169,7 +169,7 @@ state.socket.send("client:ready", { page: "profile" })
 - `sessionStorage` — для `sessionId`;
 - `localStorage` — для `time1`;
 - `localStorage` — для аут-данных `userId/hash`;
-- IndexedDB — для кэша сущностей, с fallback на in-memory вне браузера.
+- IndexedDB — для кэша сущностей и закэшированных значений `idsRef`/`countRef`, с fallback на in-memory вне браузера.
 
 Auto-auth включён по умолчанию. При реконнекте WebSocket или обновлении страницы клиент читает сохранённые `userId/hash`, вызывает `authByHash`, потом запускает sync. Сам по себе он `countRef`/`idsRef` не обновляет — только если sync вернёт изменения по таблице.
 
@@ -291,7 +291,7 @@ createdAt > time1 && createdAt <= time2 && sessionId != currentSessionId
 
 Ранний релиз (`0.0.x`). API маленький и стабильный по форме, но обращайтесь как с pre-1.0:
 
-- Realtime CRUD с правами, офлайн-кэшем, логином, sync — готово и протестировано (38 тестов).
+- Realtime CRUD с правами, офлайн-кэшем, логином, sync — готово и протестировано (40 тестов).
 - TypeScript-декларации — готовы, полная generic-типизация схемы.
 - Append-only лог даёт аудит и time-travel rollback из коробки.
 - DSL `if`-условий в правах сейчас понимает только равенство — операторы вроде `$in`, `$gte` в roadmap.

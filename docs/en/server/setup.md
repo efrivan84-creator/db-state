@@ -1,7 +1,5 @@
 # Server setup
 
-> **English** · [Русский](../../../ru/server/setup.md)
-
 A working db-state server is about 15 lines of code. This page walks through every option you might care about.
 
 ## Minimal example
@@ -141,9 +139,9 @@ createDbStateServer({ mongo, tables, now: () => frozen })
 
 ### `syncLimit`
 
-Maximum number of log entries returned in a single `sync` call. Default 1000. Lower it if your log entries are very large (e.g. big `obj` fields); raise it if you have a lot of small changes and want fewer round-trips.
+Maximum number of log entries returned in a single `sync` call. Default 1000. Lower it only if your log entries are very large and your write volume is low; raise it if you have a lot of small changes.
 
-Long-disconnected clients catch up via repeated `sync` calls automatically — the library doesn't need any special "catch-up" code.
+The current cursor is timestamp-based. A single sync response should fit all visible changes in its `(from, to]` window. For very busy systems, use a higher `syncLimit` or add cursor continuation by `{ createdAt, logId }` before relying on a small limit for long catch-up windows.
 
 ## WebSocket integration
 
@@ -159,31 +157,44 @@ Solutions:
 2. **Custom broadcast adapter** — pass `socket: { broadcast }` that re-broadcasts via Redis pubsub / NATS / etc.
 
 ```js
+import { randomUUID } from "crypto"
 import { createClient } from "redis"
 
 const sub = createClient({ url: "redis://..." })
 const pub = createClient({ url: "redis://..." })
 await Promise.all([sub.connect(), pub.connect()])
 
-await sub.subscribe("db-state-broadcast", (raw) => {
-  const msg = JSON.parse(raw)
-  // re-broadcast locally
-  dbState.socket.broadcast(msg, { _skipAdapter: true })
-})
+const nodeId = randomUUID()
 
 createDbStateServer({
   mongo,
   tables: [...],
   socket: {
     broadcast: (message, options) => {
-      if (options?._skipAdapter) return
-      pub.publish("db-state-broadcast", JSON.stringify(message))
+      pub.publish("db-state-broadcast", JSON.stringify({
+        nodeId,
+        message,
+        options
+      }))
     }
+  }
+})
+
+await sub.subscribe("db-state-broadcast", (raw) => {
+  const { nodeId: fromNode, message, options } = JSON.parse(raw)
+  if (fromNode === nodeId) return
+
+  // Fan out to local sockets through your own client registry.
+  // Do not call dbState.socket.broadcast() here, because that would publish
+  // back into Redis through the adapter and can create a loop.
+  for (const client of localClients) {
+    if (client.sessionId === options?.excludeSessionId) continue
+    client.ws.send(JSON.stringify(message))
   }
 })
 ```
 
-(You'll need to extend the library slightly to support `_skipAdapter`-style flags — this is intentionally a hook so you can add cluster support without modifying the core.)
+For production, keep a tiny local client registry next to your WebSocket setup or wrap the WebSocket adapter in a class. The important rule is simple: outgoing library broadcasts go to Redis; incoming Redis messages fan out to local sockets without re-entering the library broadcast adapter.
 
 ## Adding HTTP endpoints
 

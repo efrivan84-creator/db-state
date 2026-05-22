@@ -1,7 +1,5 @@
 # WebSocket integration
 
-> **English** · [Русский](../../../ru/server/websocket-integration.md)
-
 `@db-state/server-mongo` is transport-agnostic. It only needs:
 
 - An object with `send(string)` per client (for outgoing messages).

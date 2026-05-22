@@ -1,7 +1,5 @@
 # Code access rules
 
-> **English** · [Русский](../../../ru/server/code-access-rules.md)
-
 When `_permission` rows aren't expressive enough — for example, "user can read their own orders" — write rules in JavaScript. They run **before** any `_permission` lookup and can decide, deny, or pass.
 
 ## Two scopes
@@ -247,7 +245,7 @@ read: async (ctx) => {
 
 If you call `loadDoc()` unconditionally in a hot table, sync slows down.
 
-For `_permission` rows: if none of them have `if`, the library skips loading the doc entirely during sync. So a rule like `if: { status: "open" }` on a busy table is costly — every change in the sync window triggers a `findOne`.
+For `_permission` rows: if none of them have `if`, the library skips loading the doc entirely during sync. A rule like `if: { status: "open" }` on a busy table is more expensive: non-delete changes that reach permission filtering may need a document read so the condition can be evaluated. Delete changes use the `old` snapshot already stored in the log.
 
 ## Async rules
 
