@@ -1,0 +1,249 @@
+# @db-state/vue
+
+Tiny reactive Vue 3 client for [db-state](https://github.com/efrivan84-creator/db-state): typed tables, `listRef` / `idsRef` / `countRef`, login, sync, offline cache. Around **4 KB brotli**.
+
+It creates a global reactive state object backed by WebSocket RPC, local cache, and server sync.
+
+## Install
+
+```sh
+npm install @db-state/vue
+```
+
+`vue` (>=3.0.0) is a peer dependency.
+
+## Setup
+
+```js
+import { createDbState } from "@db-state/vue"
+
+export const state = createDbState(["user", "order", "product"])
+```
+
+Use this as a singleton. One app should normally have one `state` instance.
+
+### TypeScript
+
+Provide a schema generic — every table accessor is then typed against it, including filters, sort keys, update fields and load results:
+
+```ts
+import { createDbState } from "@db-state/vue"
+
+type Schema = {
+  user:  { _id: string; login: string; fio?: string }
+  order: { _id: string; status: "open" | "closed"; total: number; createdAt: string }
+}
+
+export const state = createDbState<Schema>({
+  tables: ["user", "order"],
+  wsUrl: "wss://example.com/db-state/ws"
+})
+
+const open = state.order.listRef({ filter: { status: "open" }, sort: { createdAt: -1 } })
+//    ^ ComputedRef<ReactiveDoc<Order>[]>
+
+await state.order.update({ id: "o1", set: { status: "closed" } })
+//                                          ^ "open" | "closed" — typed
+```
+
+Service tables (`_user`, `_group`, `_permission`) are typed automatically with sensible defaults and can be overridden in the schema.
+
+`_user`, `_group`, and `_permission` are added automatically:
+
+```js
+state._user.load(userId)
+state._group.getIds()
+state._permission.getIds()
+```
+
+The server still decides access through the normal permission rules.
+
+## Page Usage
+
+```js
+const progress = state.getKeyRef("profile")
+const user = state.user.load(userId, "profile")
+const orders = state.order.listRef({
+  filter: { status: "open" },
+  sort: { createdAt: -1 },
+  skip: 0,
+  limit: 50
+}, "orders")
+const openOrderCount = state.order.countRef({ status: "open" })
+
+await state.user.update({
+  id: userId,
+  objedit: {
+    fio: user.fio
+  }
+})
+```
+
+## Table API
+
+Each table gets the same methods:
+
+```js
+state.user.load(id, key)
+state.user.getAsync(id, key)
+state.user.getIds(query, key)
+state.user.getUnique(query, key)
+state.user.countRef(filter)
+state.user.idsRef(query)
+state.user.listRef(query, key)
+state.user.update({ id, objedit })
+state.user.add(obj)
+state.user.remove(id)
+state.user.isLoading(id)
+state.user.getError(id)
+```
+
+### Reactive Queries
+
+`countRef(filter)` returns a Vue `ref` with the server count for a filter:
+
+```js
+const openCount = state.order.countRef({ status: "open" })
+```
+
+When the ref is created, it first reads the last cached value from IndexedDB/cache and does not immediately call the server. The count is refreshed after manual login and after table changes, then saved back to cache. Hash auth/page refresh does not refresh it by itself. If the same `countRef` is requested again for the same table and filter, the existing ref is returned.
+
+`idsRef(query)` returns a Vue `ref` with ids matching a server query:
+
+```js
+const orderIds = state.order.idsRef({
+  filter: { status: "open" },
+  sort: { createdAt: -1 },
+  skip: 0,
+  limit: 50
+})
+```
+
+The query object is passed to the server as `{ table, ...query }`, so `filter`, `sort`, `skip`, and `limit` are supported by the same API. When the ref is created, it first reads the last cached ids from IndexedDB/cache and does not immediately call the server. The ids ref is refreshed after manual login and after table changes, then saved back to cache. Hash auth/page refresh does not refresh it by itself. If the same query is requested again for the same table, the existing ref is returned.
+
+`listRef(query, key)` is the page-level helper for lists:
+
+```js
+const orders = state.order.listRef({
+  filter: { status: "open" },
+  sort: { createdAt: -1 },
+  skip: 0,
+  limit: 50
+}, "orders")
+```
+
+Internally it is only `idsRef(query)` plus `load(id, key)`:
+
+```js
+computed(() => ids.value.map((id) => state.order.load(id, key)))
+```
+
+It does not keep a second object cache. The id list, document loading, sync updates, and IndexedDB cache stay separate.
+
+Creation is cache-first:
+
+```text
+countRef/idsRef created -> read cached value -> wait for manual login or table change -> refresh from server -> save cache
+```
+
+`countRef` and `idsRef` use a stable key built from the settings object. Object key order does not matter:
+
+```js
+state.order.idsRef({ filter: { status: "open" }, limit: 10 })
+state.order.idsRef({ limit: 10, filter: { status: "open" } })
+// same ref
+```
+
+## WebSocket
+
+The library uses WebSocket as the only transport.
+
+System events use `dbstate:*` and are reserved.
+
+Custom app events are allowed:
+
+```js
+state.socket.on("auth:expired", refreshToken)
+state.socket.send("client:ready", { page: "orders" })
+```
+
+## Auth
+
+Login:
+
+```js
+await state.login("ivan", "password")
+```
+
+The server returns `userId` and `hash`. The client stores them in `localStorage`.
+
+Reconnect with saved credentials:
+
+```js
+await state.authByHash()
+```
+
+Auto-auth is enabled by default:
+
+```js
+export const state = createDbState({
+  tables: ["user", "order", "product"],
+  autoAuth: true
+})
+```
+
+When the socket opens after a page refresh, the client reads saved `userId/hash`, calls `authByHash`, then runs sync. It does not refresh `countRef`/`idsRef` unless sync returns table changes. If the server rejects the saved hash, the client clears saved auth data and switches back to anonymous state.
+
+You can call the same flow manually:
+
+```js
+const ok = await state.autoAuth()
+```
+
+Logout on this device:
+
+```js
+await state.logout()
+```
+
+Logout only forgets the local `hash`. To logout every device, rotate `_user.hash` on the server.
+
+## Offline Read
+
+The Vue client can read cached data while offline:
+
+- documents are loaded from IndexedDB/cache through `load(id)`;
+- `countRef` and `idsRef` read their last cached values first;
+- saved `userId/hash` starts the client in `restored` status, so a refreshed page can keep showing cached data before the socket is available;
+- when the socket reconnects, `authByHash` verifies the saved hash and `sync` applies any log changes.
+
+The application shell itself must be cached by the host app, usually with a service worker. The demo2 app registers `db-state-offline-sw.js` for this.
+
+## Storage
+
+Defaults:
+
+- `sessionStorage` stores `sessionId`;
+- `localStorage` stores `time1`;
+- `localStorage` stores auth `userId/hash`;
+- IndexedDB stores cached records;
+- memory cache is used when IndexedDB is unavailable.
+
+Cache adapters:
+
+```js
+import {
+  createIndexedDbCache,
+  createMemoryCache,
+  createStorageCache
+} from "@db-state/vue"
+```
+
+## Internal Files
+
+- `index.js` - `createDbState`, global state and sync loop.
+- `table.js` - table methods.
+- `socket.js` - WebSocket RPC.
+- `cache.js` - cache adapters.
+- `keys.js` - progress key tracking.
+- `storage.js` - session and storage helpers.

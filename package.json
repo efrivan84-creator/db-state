@@ -1,0 +1,29 @@
+{
+  "name": "db-state-workspace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check packages/core/src/index.js && node --check packages/vue/src/cache.js && node --check packages/vue/src/keys.js && node --check packages/vue/src/socket.js && node --check packages/vue/src/storage.js && node --check packages/vue/src/table.js && node --check packages/vue/src/index.js && node --check packages/server-mongo/src/access.js && node --check packages/server-mongo/src/auth.js && node --check packages/server-mongo/src/rpc.js && node --check packages/server-mongo/src/socket.js && node --check packages/server-mongo/src/index.js && node --check demo/server/memoryMongo.js && node --check demo/server/index.js && node --check demo/smoke.js && node --check demo2/server/mongo.js && node --check demo2/server/index.js && node --check demo2/smoke.js",
+    "demo:server": "node demo/server/index.js",
+    "demo:client": "vite --host 127.0.0.1 --port 5173 demo/client",
+    "demo:build": "vite build demo/client",
+    "demo:smoke": "node demo/smoke.js",
+    "demo2:server": "node demo2/server/index.js",
+    "demo2:client": "vite --host 127.0.0.1 --port 5174 demo2/client",
+    "demo2:build": "vite build demo2/client",
+    "demo2:smoke": "node demo2/smoke.js"
+  },
+  "dependencies": {
+    "@tailwindcss/vite": "^4.3.0",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "mongodb": "^7.2.0",
+    "tailwindcss": "^4.3.0",
+    "vite": "^8.0.14",
+    "vue": "^3.5.34",
+    "ws": "^8.20.1"
+  },
+  "workspaces": [
+    "packages/*"
+  ]
+}

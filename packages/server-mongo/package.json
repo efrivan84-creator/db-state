@@ -1,0 +1,57 @@
+{
+  "name": "@db-state/server-mongo",
+  "version": "0.0.1",
+  "description": "MongoDB-backed server for db-state: CRUD, append-only log, sync, WebSocket RPC, declarative permissions with field-level rules.",
+  "keywords": [
+    "db-state",
+    "mongodb",
+    "realtime",
+    "websocket",
+    "rpc",
+    "permissions",
+    "rbac",
+    "sync",
+    "event-sourcing",
+    "audit-log"
+  ],
+  "type": "module",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "files": [
+    "src/*.js",
+    "src/*.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "author": "Ivan <encposter@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/efrivan84-creator/db-state/tree/main/packages/server-mongo#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/efrivan84-creator/db-state.git",
+    "directory": "packages/server-mongo"
+  },
+  "bugs": {
+    "url": "https://github.com/efrivan84-creator/db-state/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@db-state/core": "^0.0.1"
+  },
+  "peerDependencies": {
+    "mongodb": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "mongodb": {
+      "optional": true
+    }
+  }
+}

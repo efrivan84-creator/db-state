@@ -1,0 +1,310 @@
+import { reactive } from "vue"
+
+import { DB_STATE_EVENTS, applyPatch, normalizeTables } from "@db-state/core"
+import { createIndexedDbCache, createMemoryCache, createStorageCache } from "./cache.js"
+import { getKeyRef } from "./keys.js"
+import { createSocketFacade } from "./socket.js"
+import { getSessionId, safeStorage } from "./storage.js"
+import {
+  clearAllCountRefs,
+  clearAllIdsRefs,
+  createTableApi,
+  refreshAllCountRefs,
+  refreshAllIdsRefs,
+  scheduleCountRefresh,
+  scheduleIdsRefresh
+} from "./table.js"
+
+export { createIndexedDbCache, createMemoryCache, createStorageCache }
+
+export function createDbState(input) {
+  const options = normalizeOptions(input)
+  const tables = Object.fromEntries(options.tables.map((table) => [table, {}]))
+  const keyRefs = new Map()
+  const loadingByKey = new Map()
+  const countRefs = new Map()
+  const idsRefs = new Map()
+  const sessionId = getSessionId(options.sessionStorage, options.sessionKey, options.userId)
+  const savedUserId = options.authStorage.getItem(options.userIdKey)
+  const savedAuthHash = options.authStorage.getItem(options.authHashKey)
+  let syncPromise
+  let autoAuthPromise
+
+  const state = reactive({
+    sync: {
+      connected: false,
+      sessionId,
+      status: "idle",
+      time1: options.metaStorage.getItem(options.syncKey) ?? "1970-01-01T00:00:00.000Z"
+    },
+
+    socket: createSocketFacade(options),
+
+    auth: {
+      userId: savedUserId,
+      hash: savedAuthHash,
+      status: savedUserId && savedAuthHash ? "restored" : "anonymous"
+    },
+
+    getKeyRef(key) {
+      return getKeyRef(keyRefs, key)
+    },
+
+    resetKey(key) {
+      loadingByKey.delete(key)
+      getKeyRef(keyRefs, key).value = 0
+    },
+
+    async syncNow() {
+      if (syncPromise) return syncPromise
+      state.sync.status = "syncing"
+
+      syncPromise = (async () => {
+        const response = await state.socket.rpc("sync", {
+          from: state.sync.time1,
+          sessionId: state.sync.sessionId
+        })
+
+        for (const change of response.changes ?? []) {
+          await state.applyChange(change)
+        }
+
+        state.sync.time1 = response.to
+        options.metaStorage.setItem(options.syncKey, response.to)
+        state.sync.status = "idle"
+        syncPromise = undefined
+      })()
+
+      try {
+        return await syncPromise
+      } catch (error) {
+        state.sync.status = "error"
+        syncPromise = undefined
+        throw error
+      }
+    },
+
+    async applyChange(change) {
+      const wasLoaded = Boolean(tables[change.table]?.[change.id]?.__loaded)
+      applyReactiveChange(tables, change)
+      if (change.action === "insert" && tables[change.table]?.[change.id]) {
+        tables[change.table][change.id].__loaded = true
+      }
+      await writeCache(options.cache, change, tables[change.table]?.[change.id], wasLoaded)
+      scheduleCountRefresh(countRefs, change.table, options)
+      scheduleIdsRefresh(idsRefs, change.table, options)
+    },
+
+    async clearLocalDB() {
+      options.metaStorage.removeItem(options.syncKey)
+      options.sessionStorage.removeItem(options.sessionKey)
+      await options.cache.clear()
+      state.sync.time1 = "1970-01-01T00:00:00.000Z"
+
+      for (const table of options.tables) {
+        for (const id of Object.keys(tables[table])) {
+          delete tables[table][id]
+        }
+      }
+
+      clearAllCountRefs(countRefs)
+      clearAllIdsRefs(idsRefs)
+    },
+
+    async login(login, password) {
+      const result = await state.socket.system("dbstate:login", { login, password })
+      saveAuth(options, result)
+      state.auth.userId = result.userId
+      state.auth.hash = result.hash
+      state.auth.status = "authorized"
+      await refreshAllCountRefs(countRefs)
+      await refreshAllIdsRefs(idsRefs)
+      return result
+    },
+
+    async authByHash() {
+      if (!state.auth.userId || !state.auth.hash) return false
+      state.auth.status = "authorizing"
+
+      try {
+        const result = await state.socket.system("dbstate:auth", {
+          userId: state.auth.userId,
+          hash: state.auth.hash
+        })
+        state.auth.status = "authorized"
+        return result.ok
+      } catch (error) {
+        clearAuth(options)
+        state.auth.userId = null
+        state.auth.hash = null
+        state.auth.status = "anonymous"
+        options.onError(error)
+        return false
+      }
+    },
+
+    async autoAuth() {
+      if (!options.autoAuth) return false
+      if (state.auth.status === "authorized") return true
+      if (!state.auth.userId || !state.auth.hash) return false
+      if (autoAuthPromise) return autoAuthPromise
+
+      autoAuthPromise = state.authByHash().finally(() => {
+        autoAuthPromise = undefined
+      })
+      return autoAuthPromise
+    },
+
+    async logout() {
+      await state.socket.system("dbstate:logout").catch(options.onError)
+      clearAuth(options)
+      state.auth.userId = null
+      state.auth.hash = null
+      state.auth.status = "anonymous"
+    }
+  })
+
+  for (const table of options.tables) {
+    state[table] = createTableApi({ options, state, table, tables, loadingByKey, keyRefs, countRefs, idsRefs })
+  }
+
+  state.socket.on("dbstate:socket_open", async () => {
+    state.sync.connected = true
+    await syncWhenReady(state, options)
+  })
+  state.socket.on("dbstate:socket_close", () => {
+    state.sync.connected = false
+  })
+  state.socket.on(DB_STATE_EVENTS.hello, async () => {
+    state.sync.connected = true
+    await syncWhenReady(state, options)
+  })
+  state.socket.on(DB_STATE_EVENTS.changesAvailable, async () => {
+    await state.syncNow()
+  })
+  state.socket.on(DB_STATE_EVENTS.forceResync, async () => {
+    state.sync.time1 = "1970-01-01T00:00:00.000Z"
+    await state.syncNow()
+  })
+
+  if (options.autoConnect) {
+    state.socket.connect()
+  }
+
+  if (options.safetySyncInterval > 0) {
+    setInterval(() => {
+      if (state.sync.connected) state.syncNow().catch(options.onError)
+    }, options.safetySyncInterval)
+  }
+
+  return state
+}
+
+function normalizeOptions(input) {
+  const options = Array.isArray(input) ? { tables: input } : input
+  const origin = typeof location === "undefined" ? "http://localhost" : location.origin
+  const wsOrigin = origin.replace(/^http/, "ws")
+
+  const defaults = {
+    autoConnect: true,
+    autoAuth: true,
+    countRefreshDelay: 50,
+    idsRefreshDelay: 50,
+    metaStorage: safeStorage("localStorage"),
+    onError: (error) => console.error(error),
+    reconnectDelay: 1000,
+    rpcTimeout: 15000,
+    safetySyncInterval: 30000,
+    sessionKey: "db-state.sessionId",
+    sessionStorage: safeStorage("sessionStorage"),
+    authStorage: safeStorage("localStorage"),
+    authHashKey: "db-state.authHash",
+    userIdKey: "db-state.userId",
+    syncKey: "db-state.time1",
+    waitTimeout: 15000,
+    wsUrl: `${wsOrigin}/db-state/ws`,
+    ...options
+  }
+
+  return {
+    ...defaults,
+    tables: normalizeTables(defaults.tables),
+    cache: defaults.cache ?? createIndexedDbCache()
+  }
+}
+
+async function syncWhenReady(state, options) {
+  try {
+    if (options.autoAuth) await state.autoAuth()
+    if (state.auth.status === "authorized") await state.syncNow()
+  } catch (error) {
+    options.onError(error)
+  }
+}
+
+function saveAuth(options, result) {
+  options.authStorage.setItem(options.userIdKey, result.userId)
+  options.authStorage.setItem(options.authHashKey, result.hash)
+}
+
+function clearAuth(options) {
+  options.authStorage.removeItem(options.userIdKey)
+  options.authStorage.removeItem(options.authHashKey)
+}
+
+function applyReactiveChange(tables, change) {
+  if (!tables[change.table]) {
+    tables[change.table] = {}
+  }
+
+  const table = tables[change.table]
+
+  if (change.action === "delete") {
+    delete table[change.id]
+    return
+  }
+
+  if (change.action === "insert") {
+    const obj = change.obj ?? { id: change.id, _id: change.id }
+
+    if (table[change.id]) {
+      replaceRecord(table[change.id], obj)
+    } else {
+      table[change.id] = obj
+    }
+
+    return
+  }
+
+  if (change.action === "update") {
+    if (!table[change.id]) {
+      table[change.id] = { id: change.id, _id: change.id }
+    }
+
+    applyPatch(table[change.id], change)
+  }
+}
+
+function replaceRecord(target, source) {
+  for (const key of Object.keys(target)) {
+    if (!key.startsWith("__") && !(key in source)) {
+      delete target[key]
+    }
+  }
+
+  Object.assign(target, source)
+}
+
+async function writeCache(cache, change, obj, wasLoaded) {
+  if (change.action === "delete") {
+    await cache.delete(change.table, change.id)
+  } else if (change.action === "insert" && obj) {
+    await cache.set(change.table, change.id, cleanRecord(obj))
+  } else if (change.action === "update" && wasLoaded && obj) {
+    await cache.set(change.table, change.id, cleanRecord(obj))
+  }
+}
+
+function cleanRecord(obj) {
+  return Object.fromEntries(Object.entries(obj).filter(([key]) => !key.startsWith("__")))
+}

@@ -1,0 +1,52 @@
+{
+  "name": "@db-state/vue",
+  "version": "0.0.1",
+  "description": "Tiny reactive Vue 3 client for db-state: typed tables, listRef / idsRef / countRef, login, sync, offline cache. ~4 KB brotli.",
+  "keywords": [
+    "db-state",
+    "vue",
+    "vue3",
+    "reactive",
+    "realtime",
+    "websocket",
+    "sync",
+    "offline-first",
+    "indexeddb",
+    "state-management"
+  ],
+  "type": "module",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "files": [
+    "src/*.js",
+    "src/*.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "author": "Ivan <encposter@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/efrivan84-creator/db-state/tree/main/packages/vue#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/efrivan84-creator/db-state.git",
+    "directory": "packages/vue"
+  },
+  "bugs": {
+    "url": "https://github.com/efrivan84-creator/db-state/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@db-state/core": "^0.0.1"
+  },
+  "peerDependencies": {
+    "vue": ">=3.0.0"
+  }
+}

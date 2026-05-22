@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+demo/client/dist/
+demo2/client/dist/
+**/*.tsbuildinfo
+
+# Secrets and tokens
+.npmrc
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+.logs/
+demo-server.err.log
+demo-server.out.log
+
+# Scratch / temp
+tmp/
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Vite cache
+.vite/
