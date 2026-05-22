@@ -27,6 +27,7 @@
     "src/*.js",
     "src/*.d.ts",
     "README.md",
+    "README.ru.md",
     "LICENSE"
   ],
   "author": "Ivan <encposter@gmail.com>",

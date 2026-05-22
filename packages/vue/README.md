@@ -1,5 +1,7 @@
 # @db-state/vue
 
+> **English** · [Русский](README.ru.md)
+
 Tiny reactive Vue 3 client for [db-state](https://github.com/efrivan84-creator/db-state): typed tables, `listRef` / `idsRef` / `countRef`, login, sync, offline cache. Around **4 KB brotli**.
 
 It creates a global reactive state object backed by WebSocket RPC, local cache, and server sync.

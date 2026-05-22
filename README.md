@@ -1,5 +1,7 @@
 # db-state
 
+> **English** · [Русский](README.ru.md)
+
 [![npm @db-state/vue](https://img.shields.io/npm/v/@db-state/vue?label=%40db-state%2Fvue)](https://www.npmjs.com/package/@db-state/vue)
 [![npm @db-state/server-mongo](https://img.shields.io/npm/v/@db-state/server-mongo?label=%40db-state%2Fserver-mongo)](https://www.npmjs.com/package/@db-state/server-mongo)
 [![license](https://img.shields.io/npm/l/@db-state/vue)](LICENSE)

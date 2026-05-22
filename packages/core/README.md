@@ -1,5 +1,7 @@
 # @db-state/core
 
+> **English** · [Русский](README.ru.md)
+
 Shared protocol, change shape and dot-path helpers for [db-state](https://github.com/efrivan84-creator/db-state). Zero runtime dependencies.
 
 This package has no Vue or MongoDB dependency. It defines the common language used by the client and server.

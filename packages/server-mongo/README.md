@@ -1,5 +1,7 @@
 # @db-state/server-mongo
 
+> **English** · [Русский](README.ru.md)
+
 MongoDB-backed server for [db-state](https://github.com/efrivan84-creator/db-state): CRUD, append-only log, sync, WebSocket RPC, declarative permissions with field-level rules.
 
 It exposes CRUD/sync behavior through WebSocket RPC only. There are no HTTP handlers in this package.
