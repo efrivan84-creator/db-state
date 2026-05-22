@@ -1,6 +1,6 @@
 import { WebSocketServer } from "ws"
 
-import { createDbStateServer } from "../../packages/server-mongo/src/index.js"
+import { createDbStateServer } from "@db-state/server-mongo"
 import { createDemoMongo } from "./mongo.js"
 
 const port = Number(process.env.DB_STATE_DEMO2_PORT ?? 8788)

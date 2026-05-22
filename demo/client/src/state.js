@@ -1,4 +1,4 @@
-import { createDbState, createMemoryCache } from "../../../packages/vue/src/index.js"
+import { createDbState, createMemoryCache } from "@db-state/vue"
 
 export const state = createDbState({
   tables: ["order"],

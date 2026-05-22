@@ -52,18 +52,65 @@ new WebSocketServer({ port: 8788, path: "/db-state/ws" })
 
 ## Demos
 
-- [`demo/`](demo) — minimal single-page example, in-memory Mongo, no setup needed.
-- [`demo2/`](demo2) — full admin console with realtime CRUD across roles (admin / manager / viewer), live updates across tabs, JSON permission editor. Requires a running MongoDB.
+Two demos live in this repo. **Both consume the published `@db-state/*` packages** — same imports any external user would write. During local development this monorepo wires those names to `packages/*` via npm workspaces (symlinks), so editing source updates the demos instantly.
 
-Run a demo:
+### `demo/` — minimal example with in-memory Mongo
+
+The simplest possible setup: server runs in Node with an in-memory Mongo-like store ([demo/server/memoryMongo.js](demo/server/memoryMongo.js)), client is a single Vue page that loads one order and shows field-level permission denial. No external services required.
+
+Showcases:
+- `state.order.load(id)` with reactive `__loaded` flag and loading-key tracking
+- field-level permissions: `manager` can edit `status`/`comment` but not `margin`
+- end-to-end smoke test ([demo/smoke.js](demo/smoke.js)) spinning up the real server and driving it over WebSocket
 
 ```sh
 npm install
-npm run demo:server   # in one terminal
-npm run demo:client   # in another (or demo2:server / demo2:client)
+npm run demo:server     # terminal 1 — WebSocket server on :8787
+npm run demo:client     # terminal 2 — Vite dev server on http://127.0.0.1:5173
+npm run demo:smoke      # one-shot end-to-end test (no client needed)
 ```
 
-For `demo2`, set MongoDB connection via env vars — see [`.env.example`](.env.example).
+Default users: `admin / admin`, `manager / manager` (passwords are obviously demo-only).
+
+### `demo2/` — full admin console with real MongoDB
+
+A 4-tab admin panel ([demo2/client](demo2/client)) that lets you CRUD orders, users, groups and permissions live. Demonstrates the complete library on a real MongoDB:
+
+- typed reactive tables (`order`, `_user`, `_group`, `_permission`)
+- realtime cross-tab updates: open two browser tabs, edit in one, see the form fields update in the other instantly
+- diff-based saves: only changed fields go over the wire (no field-level conflicts between concurrent editors)
+- role switching: `admin` sees everything, `manager` sees orders without `margin` and can only edit `status`/`comment`, `viewer` is read-only with a narrow field projection
+- popover-style delete confirmation
+- raw JSON editor for `_permission` rules with auto-generated `_id`
+- offline PWA via service worker ([demo2/client/public/db-state-offline-sw.js](demo2/client/public/db-state-offline-sw.js))
+
+Requires a running MongoDB. Defaults to `mongodb://localhost:27017`; override with env vars — see [`.env.example`](.env.example) for the full list.
+
+```sh
+npm install
+# point at your mongo (optional — without it uses localhost:27017)
+export DB_STATE_MONGO_URI="mongodb://user:pass@host:27017/?authSource=admin"
+
+npm run demo2:server    # terminal 1 — WebSocket server on :8788
+npm run demo2:client    # terminal 2 — Vite dev server on http://127.0.0.1:5174
+npm run demo2:smoke     # one-shot end-to-end test
+```
+
+Default users: `admin / admin`, `manager / manager`, `viewer / viewer`.
+
+### How the demos resolve `@db-state/*` locally
+
+Each demo imports the library by its public package name:
+
+```js
+// demo2/client/src/state.js
+import { createDbState } from "@db-state/vue"
+
+// demo2/server/index.js
+import { createDbStateServer } from "@db-state/server-mongo"
+```
+
+The root [`package.json`](package.json) declares `@db-state/core`, `@db-state/vue` and `@db-state/server-mongo` as dependencies with `"*"` version, and lists `packages/*` under `workspaces`. On `npm install`, npm sees both — and creates symlinks `node_modules/@db-state/{core,vue,server-mongo}` → `packages/{core,vue,server-mongo}`. Vite and Node resolve the imports through those symlinks. Result: demo code looks exactly like consumer code, but every edit in `packages/*` is reflected immediately without `npm publish`.
 
 ## Client
 

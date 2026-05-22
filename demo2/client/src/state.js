@@ -1,4 +1,4 @@
-import { createDbState } from "../../../packages/vue/src/index.js"
+import { createDbState } from "@db-state/vue"
 
 export const state = createDbState({
   tables: ["order"],
