@@ -6,39 +6,249 @@
 [![npm @db-state/server-mongo](https://img.shields.io/npm/v/@db-state/server-mongo?label=%40db-state%2Fserver-mongo)](https://www.npmjs.com/package/@db-state/server-mongo)
 [![license](https://img.shields.io/npm/l/@db-state/vue)](LICENSE)
 
-Маленький realtime-слой реактивного состояния для Vue 3 + MongoDB. Синхронизация по WebSocket, декларативные права доступа, офлайн-кэш, полная поддержка TypeScript — всё это примерно в **4 KB brotli** на клиенте.
+Реактивное состояние базы данных для Vue 3 + MongoDB.
 
-## Пакеты
+db-state позволяет читать документы MongoDB на странице как обычный Vue state:
 
-| Пакет | Размер (min+gz) | Что делает |
-|---|---:|---|
-| [`@db-state/core`](packages/core) | ~1.5 KB | Общий протокол, `Change`, dot-path хелперы. Без зависимостей. |
-| [`@db-state/vue`](packages/vue) | ~5 KB | Vue 3 клиент: реактивные `listRef`/`idsRef`/`countRef`, CRUD, логин, IndexedDB-кэш, автосинхронизация по WebSocket. |
-| [`@db-state/server-mongo`](packages/server-mongo) | ~5 KB | Сервер на Mongo: CRUD, append-only лог, sync, WebSocket RPC, права на уровне полей. |
+```js
+const user = state.user.load(userId)
 
-## Быстрый старт
-
-```sh
-npm install @db-state/vue @db-state/server-mongo
+user.name
+user.email
+user.profile.city
 ```
 
-**Клиент** (Vue 3):
+Объект реактивный. Если другой клиент изменит эту же строку, сервер запишет изменение в log, отправит WebSocket-уведомление, клиент подтянет diff через sync, и этот же объект обновится на месте.
+
+Также есть реактивные запросы к базе:
+
+```js
+const orders = state.order.listRef({
+  filter: { status: "open" },
+  sort: { createdAt: -1 },
+  skip: 0,
+  limit: 50
+})
+
+const openOrderCount = state.order.countRef({ status: "open" })
+```
+
+`orders` и `openOrderCount` - это Vue refs/computed значения, за которыми стоят MongoDB, IndexedDB-кэш, права доступа и WebSocket sync. Добавления, удаления и удалённые обновления автоматически обновляют списки и счетчики.
+
+## Зачем это нужно
+
+Почти в каждой админке приходится снова собирать одну и ту же цепочку:
+
+```text
+MongoDB -> server API -> WebSocket -> client cache -> Vue state -> page
+```
+
+db-state превращает эту цепочку в маленькую библиотеку:
+
+- прямой реактивный доступ к документам базы;
+- реактивные списки и счетчики на основе MongoDB queries;
+- автоматический sync между вкладками и пользователями;
+- серверные read/write права, включая поля;
+- append-only audit log для каждого изменения;
+- офлайн-чтение из IndexedDB;
+- один WebSocket для data RPC и кастомных событий приложения.
+
+Цель не заменить MongoDB или Vue state. Цель - сделать состояние из MongoDB естественным на Vue-странице.
+
+## Главная идея
+
+Создаёшь один объект состояния:
 
 ```ts
 import { createDbState } from "@db-state/vue"
 
 type Schema = {
-  order: { _id: string; status: "open" | "closed"; total: number }
+  user: { _id: string; name: string; email: string }
+  order: { _id: string; status: string; total: number; createdAt: string }
 }
 
-export const state = createDbState<Schema>({ tables: ["order"] })
-
-// В компоненте:
-const open = state.order.listRef({ filter: { status: "open" }, sort: { total: -1 } })
-await state.order.update({ id: "o1", set: { status: "closed" } })
+export const state = createDbState<Schema>({
+  tables: ["user", "order", "product"],
+  wsUrl: "ws://127.0.0.1:8788/db-state/ws"
+})
 ```
 
-**Сервер** (Node + Mongo + `ws`):
+И используешь его прямо на страницах:
+
+```vue
+<script setup>
+import { state } from "./state"
+
+const loading = state.getKeyRef("orders")
+
+const orders = state.order.listRef({
+  filter: { status: "open" },
+  sort: { createdAt: -1 },
+  limit: 50
+}, "orders")
+
+const openCount = state.order.countRef({ status: "open" })
+
+async function closeOrder(order) {
+  await state.order.update({
+    id: order._id,
+    set: { status: "closed" }
+  })
+}
+</script>
+
+<template>
+  <div v-if="loading > 0">Загрузка...</div>
+  <div>Открытых заказов: {{ openCount }}</div>
+
+  <button
+    v-for="order in orders"
+    :key="order._id"
+    @click="closeOrder(order)"
+  >
+    {{ order._id }} - {{ order.status }} - {{ order.total }}
+  </button>
+</template>
+```
+
+Не нужен отдельный Pinia store, ручная invalidation-логика, WebSocket reducer или boilerplate загрузки на каждой странице. `listRef`, `countRef` и `load` используют одни реактивные объекты и общий кэш.
+
+## Как работает sync
+
+```text
+client update()
+  -> WebSocket RPC
+  -> MongoDB write
+  -> append log row
+  -> broadcast changes_available
+  -> other clients sync(time1)
+  -> local reactive objects, lists, counters and IndexedDB cache update
+```
+
+Каждая запись создаёт одну неизменяемую строку log:
+
+```js
+{
+  logId,
+  createdAt,
+  table: "order",
+  id: "o1",
+  action: "update",       // insert | update | delete
+  set: { status: "done" },
+  unset: [],
+  sessionId,
+  userId
+}
+```
+
+Клиенты хранят `time1` - время последнего полностью применённого sync. После reconnect или уведомления они запрашивают у сервера log-строки в `(time1, now]`. Сервер фильтрует изменения по правам доступа перед отправкой.
+
+## Реактивный API базы
+
+У каждой таблицы одинаковые методы:
+
+| Client API | Для чего |
+|---|---|
+| `load(id, key?)` | Возвращает один реактивный документ и грузит его из кэша/сервера. |
+| `getAsync(id, key?)` | Одноразовая async-загрузка. |
+| `getIds({ filter, sort, skip, limit })` | Одноразовый запрос id. |
+| `idsRef({ filter, sort, skip, limit })` | Реактивный закэшированный список id. |
+| `listRef({ filter, sort, skip, limit }, key?)` | Реактивный computed-список документов. |
+| `countRef(filter)` | Реактивный закэшированный счетчик по MongoDB-фильтру. |
+| `add(obj)` | Вставляет документ и применяет вернувшееся изменение локально. |
+| `update({ id, set, unset, objedit })` | Патчит документ и обновляет local state/cache. |
+| `remove(id)` | Удаляет документ и убирает его из local state/cache. |
+| `getKeyRef(key)` | Считает активные загрузки для страницы/блока. |
+
+Важное поведение:
+
+- `load(id)` всегда возвращает один и тот же реактивный объект для table/id.
+- `listRef(query)` - это `idsRef(query)` плюс `load(id)`, поэтому таблица и карточка записи связаны.
+- `idsRef` и `countRef` дедуплицируются. Один и тот же query возвращает тот же ref.
+- `idsRef` и `countRef` сохраняются в IndexedDB, поэтому списки и счетчики видны до reconnect сокета.
+- Query refs обновляются после логина, локальных записей и synced изменений таблицы.
+
+## Права доступа
+
+По умолчанию доступ запрещён. Сервер проверяет каждый RPC:
+
+```text
+code rule for table+doc
+  -> code rule for table
+  -> _permission rules
+  -> deny
+```
+
+Правила лежат в `_permission`:
+
+```js
+{
+  _id: "perm_order_manager",
+  table: "order",
+  priority: 10,
+  if: { status: "open" },
+
+  read: {
+    groups: ["manager"],
+    fields: ["_id", "status", "total"],
+    action: true
+  },
+
+  write: {
+    groups: ["admin"],
+    fields: ["status", "comment"],
+    action: true
+  }
+}
+```
+
+Поля проверяются на сервере:
+
+- `read.fields` проецирует `load()`, `getUnique()` и sync changes.
+- `write.fields` валидирует `add()` и `update()`.
+- `write` управляет insert, update и delete.
+- Delete log rows хранят `old`, поэтому audit и permission checks работают после удаления исходного документа.
+
+Если декларативных правил мало, используй code access hooks. Они могут решить доступ по user/table/log entry или лениво вызвать `ctx.loadDoc()` только когда нужен сам документ.
+
+## Авторизация и офлайн-чтение
+
+Пользователи хранятся в `_user`:
+
+```js
+{
+  _id: "u1",
+  login: "admin",
+  passwordHash: "...",
+  hash: "auth-secret",
+  groups: ["admin"],
+  disabled: false
+}
+```
+
+Клиент поддерживает:
+
+```js
+await state.login("admin", "password")
+await state.authByHash()
+await state.logout()
+```
+
+Auth hash хранится на клиенте и переиспользуется после обновления страницы. На сервере hash общий для пользователя, поэтому новая вкладка не сбрасывает старые сессии. Чтобы разлогинить все устройства, ротируй `_user.hash`.
+
+Где хранятся данные клиента:
+
+| Данные | Storage |
+|---|---|
+| Документы | IndexedDB |
+| Значения `idsRef` / `countRef` | IndexedDB |
+| Sync cursor `time1` | `localStorage` |
+| `userId` / auth hash | `localStorage` |
+| `sessionId` | `sessionStorage` |
+
+Офлайн-записи намеренно не ставятся в очередь. Если сокет офлайн, запись падает, чтобы потом не решать конфликты. Закэшированное чтение продолжает работать.
+
+## Настройка сервера
 
 ```ts
 import { WebSocketServer } from "ws"
@@ -46,256 +256,76 @@ import { MongoClient } from "mongodb"
 import { createDbStateServer } from "@db-state/server-mongo"
 
 const mongo = (await new MongoClient(process.env.MONGO_URI).connect()).db("app")
-const dbState = createDbStateServer({ mongo, tables: ["order"] })
-
-new WebSocketServer({ port: 8788, path: "/db-state/ws" })
-  .on("connection", (ws) => dbState.socket.addClient(ws))
-```
-
-## Демо
-
-В репозитории два демо-проекта. **Оба используют опубликованные пакеты `@db-state/*`** — те же самые импорты, что напишет любой внешний пользователь. На локальной разработке монорепо подключает эти имена к `packages/*` через npm workspaces (симлинки), так что правки в исходниках сразу видны в демо.
-
-### `demo/` — минимальный пример с in-memory Mongo
-
-Самая простая возможная сборка: сервер на Node с in-memory-аналогом Mongo ([demo/server/memoryMongo.js](demo/server/memoryMongo.js)), клиент — одна Vue-страница, которая грузит один заказ и показывает запрет на запись поля. Никаких внешних сервисов.
-
-Что показывает:
-- `state.order.load(id)` с реактивным флагом `__loaded` и трекингом загрузки через page-key
-- права на уровне полей: `manager` может править `status`/`comment`, но не `margin`
-- smoke-тест ([demo/smoke.js](demo/smoke.js)) поднимает реальный сервер и гоняет его через WebSocket
-
-```sh
-npm install
-npm run demo:server     # терминал 1 — WebSocket сервер на :8787
-npm run demo:client     # терминал 2 — Vite dev сервер на http://127.0.0.1:5173
-npm run demo:smoke      # одноразовый end-to-end тест (клиент не нужен)
-```
-
-Пользователи по умолчанию: `admin / admin`, `manager / manager` (пароли очевидно демонстрационные).
-
-### `demo2/` — полноценная админка с настоящим MongoDB
-
-Админ-панель из 4 вкладок ([demo2/client](demo2/client)) с живым CRUD над заказами, пользователями, группами и правами. Демонстрирует библиотеку целиком на настоящей MongoDB:
-
-- типизированные реактивные таблицы (`order`, `_user`, `_group`, `_permission`)
-- межвкладочные обновления в реальном времени: открой две вкладки браузера, поправь в одной — поля формы во второй обновятся мгновенно
-- diff-based сохранение: по сети уходят только изменённые поля (нет field-level конфликтов между конкурентными редакторами)
-- переключение ролей: `admin` видит всё, `manager` видит заказы без `margin` и может править только `status`/`comment`, `viewer` — только чтение с урезанной проекцией полей
-- popover-подтверждение удаления
-- редактор JSON-правил для `_permission` с автогенерацией `_id`
-- офлайн-PWA через service worker ([demo2/client/public/db-state-offline-sw.js](demo2/client/public/db-state-offline-sw.js))
-
-Нужен запущенный MongoDB. По умолчанию подключается к `mongodb://localhost:27017`; переопределить можно через env-переменные — полный список в [`.env.example`](.env.example).
-
-```sh
-npm install
-# свой mongo (опционально — без него используется localhost:27017)
-export DB_STATE_MONGO_URI="mongodb://user:pass@host:27017/?authSource=admin"
-
-npm run demo2:server    # терминал 1 — WebSocket сервер на :8788
-npm run demo2:client    # терминал 2 — Vite dev сервер на http://127.0.0.1:5174
-npm run demo2:smoke     # одноразовый end-to-end тест
-```
-
-Пользователи по умолчанию: `admin / admin`, `manager / manager`, `viewer / viewer`.
-
-### Как демо локально находят `@db-state/*`
-
-Каждое демо импортирует библиотеку по её публичному имени:
-
-```js
-// demo2/client/src/state.js
-import { createDbState } from "@db-state/vue"
-
-// demo2/server/index.js
-import { createDbStateServer } from "@db-state/server-mongo"
-```
-
-Корневой [`package.json`](package.json) объявляет `@db-state/core`, `@db-state/vue` и `@db-state/server-mongo` в зависимостях с версией `"*"`, и одновременно перечисляет `packages/*` в `workspaces`. При `npm install` npm видит и то, и другое — и создаёт симлинки `node_modules/@db-state/{core,vue,server-mongo}` → `packages/{core,vue,server-mongo}`. Vite и Node резолвят импорты через эти симлинки. Итог: код демо выглядит ровно как код потребителя, но каждая правка в `packages/*` отражается сразу, без `npm publish`.
-
-## Клиент
-
-```js
-import { createDbState } from "@db-state/vue"
-
-export const state = createDbState(["user", "order", "product"])
-```
-
-Служебные таблицы `_user`, `_group` и `_permission` добавляются автоматически и на клиенте, и на сервере, но к ним применяются обычные права чтения/записи.
-
-Код на странице:
-
-```js
-const progress = state.getKeyRef("profile")
-const user = state.user.load(userId, "profile")
-const orders = state.order.listRef({
-  filter: { status: "open" },
-  sort: { createdAt: -1 },
-  skip: 0,
-  limit: 50
-}, "orders")
-const openOrderIds = state.order.idsRef({ filter: { status: "open" } })
-const openOrderCount = state.order.countRef({ status: "open" })
-
-await state.user.update({
-  id: userId,
-  objedit: {
-    fio: user.fio
-  }
-})
-```
-
-Реактивные хелперы для запросов:
-
-- `load(id, key)` возвращает один реактивный документ, грузит его из кэша/сервера по мере необходимости.
-- `idsRef({ filter, sort, skip, limit })` возвращает Vue `ref` со списком подходящих id.
-- `listRef({ filter, sort, skip, limit }, key)` возвращает Vue `computed`-список документов, объединяя `idsRef` с `load(id, key)`.
-- `countRef(filter)` возвращает Vue `ref` со значением count'а от сервера для этого фильтра.
-
-`idsRef` и `countRef` дедуплицируются на таблицу. Повторный вызов с теми же настройками вернёт существующий ref, а не создаст новую refresh-петлю. Порядок ключей в объекте не важен.
-
-`countRef` и `idsRef` сохраняются в клиентский кэш. При создании ref сначала читает последнее закэшированное значение из IndexedDB/кэша и сразу не дёргает сервер. Серверный refresh происходит после ручного логина и после прихода изменений таблицы через sync или локальную запись. Hash-аут и обновление страницы сами по себе не вызывают refresh query-ref'ов. Свежие серверные значения пишутся обратно в кэш.
-
-Кастомные события через сокет тоже доступны. События `dbstate:*` зарезервированы за библиотекой.
-
-```js
-state.socket.on("auth:expired", refreshToken)
-state.socket.send("client:ready", { page: "profile" })
-```
-
-Где хранится клиентское состояние по умолчанию:
-
-- `sessionStorage` — для `sessionId`;
-- `localStorage` — для `time1`;
-- `localStorage` — для аут-данных `userId/hash`;
-- IndexedDB — для кэша сущностей и закэшированных значений `idsRef`/`countRef`, с fallback на in-memory вне браузера.
-
-Auto-auth включён по умолчанию. При реконнекте WebSocket или обновлении страницы клиент читает сохранённые `userId/hash`, вызывает `authByHash`, потом запускает sync. Сам по себе он `countRef`/`idsRef` не обновляет — только если sync вернёт изменения по таблице.
-
-```js
-export const state = createDbState({
-  tables: ["user", "order", "product"],
-  autoAuth: true
-})
-```
-
-Если сохранённый hash отклонён сервером, клиент стирает сохранённые auth-данные и переходит в анонимное состояние.
-
-## Сервер
-
-```js
-import { createDbStateServer } from "@db-state/server-mongo"
 
 const dbState = createDbStateServer({
   mongo,
   tables: ["user", "order", "product"]
 })
+
+new WebSocketServer({ port: 8788, path: "/db-state/ws" })
+  .on("connection", (ws) => dbState.socket.addClient(ws))
 ```
 
-Пользователи живут в `_user` и аутентифицируются через WebSocket:
+Рекомендуемые индексы MongoDB:
 
 ```js
-{
-  _id: "u1",
-  login: "ivan",
-  passwordHash: "...",
-  hash: "auth-secret",
-  groups: ["manager"],
-  disabled: false
-}
+await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
+await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 ```
 
-Поле `hash` для аут общее у пользователя и переиспользуется между логинами. Открытие новой вкладки его не ротирует и не сбрасывает существующие вкладки. Чтобы разлогинить все устройства, ротируй `_user.hash` на сервере.
+## Пакеты
 
-API клиента:
+| Пакет | Размер | Для чего |
+|---|---:|---|
+| [`@db-state/core`](packages/core) | ~1.5 KB min+gz | Общий протокол, `Change`, dot-path helpers, sync-window helpers. Без runtime-зависимостей. |
+| [`@db-state/vue`](packages/vue) | ~5 KB min+gz | Vue 3 reactive client: документы, списки, счетчики, auth, cache, WebSocket sync. |
+| [`@db-state/server-mongo`](packages/server-mongo) | ~5 KB min+gz | MongoDB WebSocket server: CRUD, auth, log, sync, permissions, audit. |
 
-```js
-await state.login("ivan", "password")
-await state.authByHash()
-await state.logout()
+## Установка
+
+```sh
+npm install @db-state/vue @db-state/server-mongo
 ```
 
-Единственный транспорт — WebSocket. Подключи клиентов из своего `ws`/framework-адаптера:
+`@db-state/core` установится автоматически как зависимость.
 
-```js
-dbState.socket.addClient(ws, {
-  user: {
-    _id: userId,
-    groups: ["manager"]
-  },
-  sessionId
-})
+## Демо
+
+```sh
+npm install
+
+npm run demo:server
+npm run demo:client
+npm run demo:smoke
+
+npm run demo2:server
+npm run demo2:client
+npm run demo2:smoke
 ```
 
-По умолчанию доступ запрещён. Сервер проверяет:
+- `demo/` - минимальная Vue-страница с in-memory Mongo-like сервером.
+- `demo2/` - полноценная админка заказов, пользователей, групп, прав, real MongoDB и offline PWA shell.
+
+Демо-пользователи:
 
 ```text
-code rule для table+doc -> code rule для table -> _permission rules -> deny
+admin / admin
+manager / manager
+viewer / viewer    // demo2
 ```
 
-Документы с правами лежат в `_permission`:
+## Документация
 
-```js
-{
-  table: "order",
-  priority: 10,
-  if: { status: "open" },
-  read: { groups: ["manager"], action: true, fields: ["_id", "status", "total"] },
-  write: { groups: ["admin"], action: true, fields: ["status", "comment"] }
-}
-```
+- [Полная документация](docs/en/README.md)
+- [Реактивные запросы](docs/en/client/reactive-queries.md)
+- [Права доступа](docs/en/server/permissions.md)
+- [Sync protocol](docs/en/architecture/sync-protocol.md)
+- [Cookbook админки](docs/en/cookbook/admin-panel.md)
+- [Changelog](CHANGELOG.ru.md)
 
-`fields` опционален. Если задан, чтения и приходящие в sync изменения проецируются на эти поля, а `add/update` отклоняют запрещённые поля для записи. У `remove` по-прежнему действует document-level `write`.
+## Статус проекта
 
-Входящие библиотечные сообщения — RPC через тот же сокет:
+Ранний релиз, `0.0.x`. API намеренно маленький, но это ещё pre-1.0. Изменения и текущие ограничения вынесены в [CHANGELOG.ru.md](CHANGELOG.ru.md).
 
-```js
-{
-  type: "dbstate:rpc",
-  id: "rpc1",
-  method: "update",
-  payload: { table: "user", id: "u1", set: { fio: "Ivan" } }
-}
-```
-
-Ответ сервера:
-
-```js
-{
-  type: "dbstate:rpc_result",
-  id: "rpc1",
-  result: { ok: true, change }
-}
-```
-
-Основной поток:
-
-```text
-клиент WS RPC update -> MongoDB -> log -> WebSocket changes_available -> клиенты WS RPC sync(time1)
-```
-
-Каждая запись лога хранит `userId`. Записи на удаление дополнительно хранят `old` — удалённый документ, так что sync-permissions и аудит продолжают работать даже после исчезновения исходной записи.
-
-`sync` выбирает:
-
-```js
-createdAt > time1 && createdAt <= time2 && sessionId != currentSessionId
-```
-
-Клиент двигает `time1` только после того, как все полученные изменения применены и закэшированы.
-
-Для проверки прав в sync документы из Mongo подгружаются только при необходимости. Правила без `_permission.if` проверяются по самой записи лога + `table/user/groups`; правила с `if` загружают текущий документ. Code-правила доступа могут лениво подтянуть документ через `ctx.loadDoc()`.
-
-## Статус
-
-Ранний релиз (`0.0.x`). API маленький и стабильный по форме, но обращайтесь как с pre-1.0:
-
-- Realtime CRUD с правами, офлайн-кэшем, логином, sync — готово и протестировано (40 тестов).
-- TypeScript-декларации — готовы, полная generic-типизация схемы.
-- Append-only лог даёт аудит и time-travel rollback из коробки.
-- DSL `if`-условий в правах сейчас понимает только равенство — операторы вроде `$in`, `$gte` в roadmap.
-- `broadcast` рассылает ping `changes_available` всем клиентам при каждой записи; для >1000 одновременных клиентов нужна per-client фильтрация (пока не реализована).
-- Только Vue + Mongo + WebSocket — никаких React/Postgres/etc адаптеров.
-
-PR'ы приветствуются. Лицензия: MIT.
+Лицензия: MIT.

@@ -6,39 +6,249 @@
 [![npm @db-state/server-mongo](https://img.shields.io/npm/v/@db-state/server-mongo?label=%40db-state%2Fserver-mongo)](https://www.npmjs.com/package/@db-state/server-mongo)
 [![license](https://img.shields.io/npm/l/@db-state/vue)](LICENSE)
 
-Tiny realtime reactive state layer for Vue 3 + MongoDB. WebSocket sync, declarative permissions, offline cache, full TypeScript support — all in roughly **4 KB brotli** on the client.
+Reactive database state for Vue 3 + MongoDB.
 
-## Packages
+db-state lets page code read MongoDB documents like normal Vue state:
 
-| Package | Size (min+gz) | What it does |
-|---|---:|---|
-| [`@db-state/core`](packages/core) | ~1.5 KB | Shared protocol, `Change`, dot-path helpers. Zero deps. |
-| [`@db-state/vue`](packages/vue) | ~5 KB | Vue 3 client: reactive `listRef`/`idsRef`/`countRef`, CRUD, login, IndexedDB cache, auto-sync over WebSocket. |
-| [`@db-state/server-mongo`](packages/server-mongo) | ~5 KB | Mongo-backed server: CRUD, append-only log, sync, WebSocket RPC, field-level permissions. |
+```js
+const user = state.user.load(userId)
 
-## Quickstart
-
-```sh
-npm install @db-state/vue @db-state/server-mongo
+user.name
+user.email
+user.profile.city
 ```
 
-**Client** (Vue 3):
+The object is reactive. If another client changes the same row, the server writes the change to the log, sends a WebSocket notification, the client syncs the log diff, and this same object updates in place.
+
+It also gives you reactive database queries:
+
+```js
+const orders = state.order.listRef({
+  filter: { status: "open" },
+  sort: { createdAt: -1 },
+  skip: 0,
+  limit: 50
+})
+
+const openOrderCount = state.order.countRef({ status: "open" })
+```
+
+`orders` and `openOrderCount` are Vue refs/computed values backed by MongoDB, IndexedDB cache, permissions, and WebSocket sync. Inserts, deletes, and remote updates refresh them automatically.
+
+## Why this exists
+
+Most admin panels need the same chain again and again:
+
+```text
+MongoDB -> server API -> WebSocket -> client cache -> Vue state -> page
+```
+
+db-state turns that chain into one small library:
+
+- direct reactive access to database documents;
+- reactive lists and counters backed by real MongoDB queries;
+- automatic sync between browser tabs and users;
+- server-side read/write permissions, including field-level rules;
+- append-only audit log for every change;
+- offline read from IndexedDB cache;
+- one WebSocket connection for data RPC and custom app events.
+
+The goal is not to replace MongoDB or Vue state. The goal is to make MongoDB-backed state feel native on a Vue page.
+
+## The core idea
+
+Create one state object:
 
 ```ts
 import { createDbState } from "@db-state/vue"
 
 type Schema = {
-  order: { _id: string; status: "open" | "closed"; total: number }
+  user: { _id: string; name: string; email: string }
+  order: { _id: string; status: string; total: number; createdAt: string }
 }
 
-export const state = createDbState<Schema>({ tables: ["order"] })
-
-// In a component:
-const open = state.order.listRef({ filter: { status: "open" }, sort: { total: -1 } })
-await state.order.update({ id: "o1", set: { status: "closed" } })
+export const state = createDbState<Schema>({
+  tables: ["user", "order", "product"],
+  wsUrl: "ws://127.0.0.1:8788/db-state/ws"
+})
 ```
 
-**Server** (Node + Mongo + `ws`):
+Use it directly in pages:
+
+```vue
+<script setup>
+import { state } from "./state"
+
+const loading = state.getKeyRef("orders")
+
+const orders = state.order.listRef({
+  filter: { status: "open" },
+  sort: { createdAt: -1 },
+  limit: 50
+}, "orders")
+
+const openCount = state.order.countRef({ status: "open" })
+
+async function closeOrder(order) {
+  await state.order.update({
+    id: order._id,
+    set: { status: "closed" }
+  })
+}
+</script>
+
+<template>
+  <div v-if="loading > 0">Loading...</div>
+  <div>Open orders: {{ openCount }}</div>
+
+  <button
+    v-for="order in orders"
+    :key="order._id"
+    @click="closeOrder(order)"
+  >
+    {{ order._id }} - {{ order.status }} - {{ order.total }}
+  </button>
+</template>
+```
+
+There is no separate Pinia store, query invalidation layer, manual WebSocket reducer, or per-page loading boilerplate. `listRef`, `countRef`, and `load` share the same reactive objects and cache.
+
+## How sync works
+
+```text
+client update()
+  -> WebSocket RPC
+  -> MongoDB write
+  -> append log row
+  -> broadcast changes_available
+  -> other clients sync(time1)
+  -> local reactive objects, lists, counters and IndexedDB cache update
+```
+
+Every write creates one immutable log row:
+
+```js
+{
+  logId,
+  createdAt,
+  table: "order",
+  id: "o1",
+  action: "update",       // insert | update | delete
+  set: { status: "done" },
+  unset: [],
+  sessionId,
+  userId
+}
+```
+
+Clients store `time1`, the timestamp of the last fully applied sync. On reconnect or after a notification they ask the server for log rows in `(time1, now]`. The server filters by permissions before returning changes.
+
+## Reactive database API
+
+Each table gets the same methods:
+
+| Client API | Purpose |
+|---|---|
+| `load(id, key?)` | Returns one reactive document and loads it from cache/server. |
+| `getAsync(id, key?)` | One-off async load. |
+| `getIds({ filter, sort, skip, limit })` | One-off id query. |
+| `idsRef({ filter, sort, skip, limit })` | Reactive cached id list. |
+| `listRef({ filter, sort, skip, limit }, key?)` | Reactive computed document list. |
+| `countRef(filter)` | Reactive cached counter for a MongoDB filter. |
+| `add(obj)` | Inserts a document and applies the returned change locally. |
+| `update({ id, set, unset, objedit })` | Patches a document and updates local state/cache. |
+| `remove(id)` | Deletes a document and removes it from local state/cache. |
+| `getKeyRef(key)` | Tracks loading count for a page/block. |
+
+Important behavior:
+
+- `load(id)` always returns the same reactive object for that table/id.
+- `listRef(query)` is `idsRef(query)` plus `load(id)`, so tables and detail panels stay connected.
+- `idsRef` and `countRef` are deduplicated. The same query returns the same ref.
+- `idsRef` and `countRef` are persisted in IndexedDB, so lists and counters render before the socket reconnects.
+- Query refs refresh after login, local writes, and synced table changes.
+
+## Permissions
+
+Access is denied by default. The server checks every RPC:
+
+```text
+code rule for table+doc
+  -> code rule for table
+  -> _permission rules
+  -> deny
+```
+
+Permission rows live in `_permission`:
+
+```js
+{
+  _id: "perm_order_manager",
+  table: "order",
+  priority: 10,
+  if: { status: "open" },
+
+  read: {
+    groups: ["manager"],
+    fields: ["_id", "status", "total"],
+    action: true
+  },
+
+  write: {
+    groups: ["admin"],
+    fields: ["status", "comment"],
+    action: true
+  }
+}
+```
+
+Field rules are enforced on the server:
+
+- `read.fields` projects `load()`, `getUnique()`, and sync changes.
+- `write.fields` validates `add()` and `update()`.
+- `write` controls insert, update, and delete.
+- Delete log rows store `old`, so audit and permission checks still work after the source document is gone.
+
+For rules that cannot be expressed declaratively, use code access hooks. They can decide from the user/table/log entry or lazily call `ctx.loadDoc()` only when the document is needed.
+
+## Auth and offline read
+
+Users are stored in `_user`:
+
+```js
+{
+  _id: "u1",
+  login: "admin",
+  passwordHash: "...",
+  hash: "auth-secret",
+  groups: ["admin"],
+  disabled: false
+}
+```
+
+The client supports:
+
+```js
+await state.login("admin", "password")
+await state.authByHash()
+await state.logout()
+```
+
+Auth hash is stored on the client and reused after page refresh. It is shared per user on the server, so opening another tab does not invalidate existing sessions. Rotate `_user.hash` if you need to force logout everywhere.
+
+Default client storage:
+
+| Data | Storage |
+|---|---|
+| Documents | IndexedDB |
+| `idsRef` / `countRef` values | IndexedDB |
+| `time1` sync cursor | `localStorage` |
+| `userId` / auth hash | `localStorage` |
+| `sessionId` | `sessionStorage` |
+
+Offline writes are intentionally not queued. If the socket is offline, writes fail instead of creating conflict resolution work later. Cached reads keep working.
+
+## Server setup
 
 ```ts
 import { WebSocketServer } from "ws"
@@ -46,256 +256,76 @@ import { MongoClient } from "mongodb"
 import { createDbStateServer } from "@db-state/server-mongo"
 
 const mongo = (await new MongoClient(process.env.MONGO_URI).connect()).db("app")
-const dbState = createDbStateServer({ mongo, tables: ["order"] })
-
-new WebSocketServer({ port: 8788, path: "/db-state/ws" })
-  .on("connection", (ws) => dbState.socket.addClient(ws))
-```
-
-## Demos
-
-Two demos live in this repo. **Both consume the published `@db-state/*` packages** — same imports any external user would write. During local development this monorepo wires those names to `packages/*` via npm workspaces (symlinks), so editing source updates the demos instantly.
-
-### `demo/` — minimal example with in-memory Mongo
-
-The simplest possible setup: server runs in Node with an in-memory Mongo-like store ([demo/server/memoryMongo.js](demo/server/memoryMongo.js)), client is a single Vue page that loads one order and shows field-level permission denial. No external services required.
-
-Showcases:
-- `state.order.load(id)` with reactive `__loaded` flag and loading-key tracking
-- field-level permissions: `manager` can edit `status`/`comment` but not `margin`
-- end-to-end smoke test ([demo/smoke.js](demo/smoke.js)) spinning up the real server and driving it over WebSocket
-
-```sh
-npm install
-npm run demo:server     # terminal 1 — WebSocket server on :8787
-npm run demo:client     # terminal 2 — Vite dev server on http://127.0.0.1:5173
-npm run demo:smoke      # one-shot end-to-end test (no client needed)
-```
-
-Default users: `admin / admin`, `manager / manager` (passwords are obviously demo-only).
-
-### `demo2/` — full admin console with real MongoDB
-
-A 4-tab admin panel ([demo2/client](demo2/client)) that lets you CRUD orders, users, groups and permissions live. Demonstrates the complete library on a real MongoDB:
-
-- typed reactive tables (`order`, `_user`, `_group`, `_permission`)
-- realtime cross-tab updates: open two browser tabs, edit in one, see the form fields update in the other instantly
-- diff-based saves: only changed fields go over the wire (no field-level conflicts between concurrent editors)
-- role switching: `admin` sees everything, `manager` sees orders without `margin` and can only edit `status`/`comment`, `viewer` is read-only with a narrow field projection
-- popover-style delete confirmation
-- raw JSON editor for `_permission` rules with auto-generated `_id`
-- offline PWA via service worker ([demo2/client/public/db-state-offline-sw.js](demo2/client/public/db-state-offline-sw.js))
-
-Requires a running MongoDB. Defaults to `mongodb://localhost:27017`; override with env vars — see [`.env.example`](.env.example) for the full list.
-
-```sh
-npm install
-# point at your mongo (optional — without it uses localhost:27017)
-export DB_STATE_MONGO_URI="mongodb://user:pass@host:27017/?authSource=admin"
-
-npm run demo2:server    # terminal 1 — WebSocket server on :8788
-npm run demo2:client    # terminal 2 — Vite dev server on http://127.0.0.1:5174
-npm run demo2:smoke     # one-shot end-to-end test
-```
-
-Default users: `admin / admin`, `manager / manager`, `viewer / viewer`.
-
-### How the demos resolve `@db-state/*` locally
-
-Each demo imports the library by its public package name:
-
-```js
-// demo2/client/src/state.js
-import { createDbState } from "@db-state/vue"
-
-// demo2/server/index.js
-import { createDbStateServer } from "@db-state/server-mongo"
-```
-
-The root [`package.json`](package.json) declares `@db-state/core`, `@db-state/vue` and `@db-state/server-mongo` as dependencies with `"*"` version, and lists `packages/*` under `workspaces`. On `npm install`, npm sees both — and creates symlinks `node_modules/@db-state/{core,vue,server-mongo}` → `packages/{core,vue,server-mongo}`. Vite and Node resolve the imports through those symlinks. Result: demo code looks exactly like consumer code, but every edit in `packages/*` is reflected immediately without `npm publish`.
-
-## Client
-
-```js
-import { createDbState } from "@db-state/vue"
-
-export const state = createDbState(["user", "order", "product"])
-```
-
-The service tables `_user`, `_group`, and `_permission` are added automatically on both client and server, but they still require normal read/write permissions.
-
-Page code:
-
-```js
-const progress = state.getKeyRef("profile")
-const user = state.user.load(userId, "profile")
-const orders = state.order.listRef({
-  filter: { status: "open" },
-  sort: { createdAt: -1 },
-  skip: 0,
-  limit: 50
-}, "orders")
-const openOrderIds = state.order.idsRef({ filter: { status: "open" } })
-const openOrderCount = state.order.countRef({ status: "open" })
-
-await state.user.update({
-  id: userId,
-  objedit: {
-    fio: user.fio
-  }
-})
-```
-
-Reactive query helpers:
-
-- `load(id, key)` returns one reactive document and loads it from cache/server when needed.
-- `idsRef({ filter, sort, skip, limit })` returns a Vue `ref` with matching ids.
-- `listRef({ filter, sort, skip, limit }, key)` returns a Vue `computed` list of documents by combining `idsRef` with `load(id, key)`.
-- `countRef(filter)` returns a Vue `ref` with the server count for that filter.
-
-`idsRef` and `countRef` are deduplicated per table. Calling them again with the same settings returns the existing ref instead of creating another server refresh loop. Object key order does not matter.
-
-`countRef` and `idsRef` are persisted in the client cache. When a ref is created it first reads the last cached value from IndexedDB/cache and does not immediately call the server. Server refresh happens after manual login and after table changes received through sync or local writes. Hash auth/page refresh does not refresh query refs by itself. Fresh server values are written back to the cache.
-
-Custom socket events are available. `dbstate:*` events are reserved for the library.
-
-```js
-state.socket.on("auth:expired", refreshToken)
-state.socket.send("client:ready", { page: "profile" })
-```
-
-Default client storage:
-
-- `sessionStorage` for `sessionId`;
-- `localStorage` for `time1`;
-- `localStorage` for auth `userId/hash`;
-- IndexedDB for entity cache and cached `idsRef`/`countRef` values, with memory fallback outside the browser.
-
-Auto-auth is enabled by default. On WebSocket reconnect or page refresh the client reads saved `userId/hash`, calls `authByHash`, then runs sync. It does not refresh `countRef`/`idsRef` unless sync returns table changes.
-
-```js
-export const state = createDbState({
-  tables: ["user", "order", "product"],
-  autoAuth: true
-})
-```
-
-If the saved hash is rejected, the client clears the saved auth data and returns to anonymous state.
-
-## Server
-
-```js
-import { createDbStateServer } from "@db-state/server-mongo"
 
 const dbState = createDbStateServer({
   mongo,
   tables: ["user", "order", "product"]
 })
+
+new WebSocketServer({ port: 8788, path: "/db-state/ws" })
+  .on("connection", (ws) => dbState.socket.addClient(ws))
 ```
 
-Users live in `_user` and authenticate over WebSocket:
+Recommended MongoDB indexes:
 
 ```js
-{
-  _id: "u1",
-  login: "ivan",
-  passwordHash: "...",
-  hash: "auth-secret",
-  groups: ["manager"],
-  disabled: false
-}
+await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
+await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 ```
 
-The auth `hash` is shared for the user and reused across logins. Opening another tab does not rotate it and does not invalidate existing tabs. To logout every device, rotate `_user.hash` on the server.
+## Packages
 
-Client API:
+| Package | Size | Purpose |
+|---|---:|---|
+| [`@db-state/core`](packages/core) | ~1.5 KB min+gz | Shared protocol, `Change`, dot-path helpers, sync-window helpers. Zero runtime deps. |
+| [`@db-state/vue`](packages/vue) | ~5 KB min+gz | Vue 3 reactive client: documents, lists, counters, auth, cache, WebSocket sync. |
+| [`@db-state/server-mongo`](packages/server-mongo) | ~5 KB min+gz | MongoDB WebSocket server: CRUD, auth, log, sync, permissions, audit. |
 
-```js
-await state.login("ivan", "password")
-await state.authByHash()
-await state.logout()
+## Install
+
+```sh
+npm install @db-state/vue @db-state/server-mongo
 ```
 
-WebSocket is the only transport. Attach clients from your `ws`/framework adapter:
+`@db-state/core` is installed automatically as a dependency.
 
-```js
-dbState.socket.addClient(ws, {
-  user: {
-    _id: userId,
-    groups: ["manager"]
-  },
-  sessionId
-})
+## Demos
+
+```sh
+npm install
+
+npm run demo:server
+npm run demo:client
+npm run demo:smoke
+
+npm run demo2:server
+npm run demo2:client
+npm run demo2:smoke
 ```
 
-Access is denied by default. The server checks:
+- `demo/` - minimal Vue page with an in-memory Mongo-like server.
+- `demo2/` - full admin console for orders, users, groups, permissions, real MongoDB, and offline PWA shell.
+
+Default demo users:
 
 ```text
-code rule for table+doc -> code rule for table -> _permission rules -> deny
+admin / admin
+manager / manager
+viewer / viewer    // demo2
 ```
 
-Permission documents live in `_permission`:
+## Documentation
 
-```js
-{
-  table: "order",
-  priority: 10,
-  if: { status: "open" },
-  read: { groups: ["manager"], action: true, fields: ["_id", "status", "total"] },
-  write: { groups: ["admin"], action: true, fields: ["status", "comment"] }
-}
-```
+- [Full documentation](docs/en/README.md)
+- [Reactive queries](docs/en/client/reactive-queries.md)
+- [Permissions](docs/en/server/permissions.md)
+- [Sync protocol](docs/en/architecture/sync-protocol.md)
+- [Admin panel cookbook](docs/en/cookbook/admin-panel.md)
+- [Changelog](CHANGELOG.md)
 
-`fields` is optional. When present, reads and returned sync changes are projected to those fields, and `add/update` reject forbidden write fields. `remove` still uses document-level `write`.
+## Project status
 
-Incoming library messages use RPC over the same socket:
+Early release, `0.0.x`. The API is intentionally small, but still pre-1.0. See [CHANGELOG.md](CHANGELOG.md) for release notes and current limitations.
 
-```js
-{
-  type: "dbstate:rpc",
-  id: "rpc1",
-  method: "update",
-  payload: { table: "user", id: "u1", set: { fio: "Ivan" } }
-}
-```
-
-The server replies:
-
-```js
-{
-  type: "dbstate:rpc_result",
-  id: "rpc1",
-  result: { ok: true, change }
-}
-```
-
-Main flow:
-
-```text
-client WS RPC update -> MongoDB -> log -> WebSocket changes_available -> clients WS RPC sync(time1)
-```
-
-Each log entry stores `userId`. Delete entries also store `old`, the deleted document, so sync permissions and audit still work after the source document is gone.
-
-`sync` selects:
-
-```js
-createdAt > time1 && createdAt <= time2 && sessionId != currentSessionId
-```
-
-The client moves `time1` only after all returned changes are applied and cached.
-
-For sync permissions, Mongo documents are loaded only when needed. Rules without `_permission.if` are checked from the log entry plus `table/user/groups`; rules with `if` load the current document. Code access rules can call `ctx.loadDoc()` to load the document lazily.
-
-## Status
-
-Early release (`0.0.x`). API is small and stable in shape, but treat as pre-1.0:
-
-- Realtime CRUD with permissions, offline cache, login, sync — done and tested (40 tests).
-- TypeScript declarations — done, full generic schema typing.
-- Append-only log gives you audit trail and time-travel rollback for free.
-- Permission `if`-condition DSL currently supports equality only — operators like `$in`, `$gte` are on the roadmap.
-- `broadcast` fans out a `changes_available` ping to all clients on every write; for >1000 concurrent clients this will need per-client filtering (not yet implemented).
-- Vue + Mongo + WebSocket only — no React/Postgres/etc adapters.
-
-PRs welcome. License: MIT.
+License: MIT.

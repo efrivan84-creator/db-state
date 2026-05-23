@@ -6,6 +6,18 @@ MongoDB-backed server for [db-state](https://github.com/efrivan84-creator/db-sta
 
 It exposes CRUD/sync behavior through WebSocket RPC only. There are no HTTP handlers in this package.
 
+## What you get
+
+- WebSocket RPC server for `load`, `getIds`, `getUnique`, `count`, `sync`, `add`, `update`, and `remove`.
+- Mongo-backed app tables plus service tables `_user`, `_group`, and `_permission`.
+- Password login and hash-based reconnect over the same WebSocket.
+- Append-only `log` collection for realtime sync, audit trail, delete recovery, and time-travel reconstruction.
+- Sync by `(time1, to]` log windows with session echo suppression.
+- Read/write permission checks for every RPC, including service tables.
+- Field-level permissions for reads, sync changes, inserts, and updates.
+- Code access rules that can override or extend `_permission` rows and lazily load documents only when needed.
+- Built-in socket hub plus an adapter hook for Redis/NATS-style multi-process broadcasts.
+
 ## Install
 
 ```sh
@@ -38,6 +50,21 @@ dbState.socket.addClient(ws, {
   userId: "u1",
   sessionId: "u1_abcd"
 })
+```
+
+## Required indexes
+
+Create these indexes in production:
+
+```js
+await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
+```
+
+Add normal Mongo indexes for app queries used by `getIds`, `count`, and `getUnique`:
+
+```js
+await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 ```
 
 ## WebSocket RPC
@@ -82,6 +109,19 @@ remove
 ```
 
 RPC is denied until the socket is authorized.
+
+### Method summary
+
+| Method | Purpose |
+|---|---|
+| `load` | Reads one permitted document, projected by `read.fields`. |
+| `getIds` | Returns permitted ids after `filter`, `sort`, `skip`, and `limit`. |
+| `getUnique` | Returns unique permitted values for one field. |
+| `count` | Counts permitted documents for a filter. |
+| `sync` | Returns visible log changes newer than the client's cursor. |
+| `add` | Inserts a document after `write` and `write.fields` checks. |
+| `update` | Applies `set` / `unset` after `write` and `write.fields` checks. |
+| `remove` | Deletes after document-level `write`; stores deleted object in `change.old`. |
 
 ## Auth
 
@@ -286,6 +326,37 @@ Every log entry stores the actor id:
   userId: "u1"
 }
 ```
+
+## Sync and audit log
+
+Every successful write appends one compact log row:
+
+```js
+{
+  logId,
+  createdAt,
+  table,
+  id,
+  action,      // insert | update | delete
+  set,
+  unset,
+  obj,         // full inserted document
+  old,         // full deleted document
+  sessionId,
+  userId
+}
+```
+
+Clients call `sync({ from, sessionId })`. The server reads `createdAt > from && createdAt <= to`, excludes the caller session, applies read permissions, filters forbidden fields, and returns `{ to, changes }`.
+
+For high-write systems, keep `syncLimit` high enough for one sync window or add cursor continuation by `{ createdAt, logId }`.
+
+## Useful links
+
+- Full docs: [docs/en](../../docs/en/README.md)
+- Server setup: [docs/en/server/setup.md](../../docs/en/server/setup.md)
+- Permissions: [docs/en/server/permissions.md](../../docs/en/server/permissions.md)
+- Sync protocol: [docs/en/architecture/sync-protocol.md](../../docs/en/architecture/sync-protocol.md)
 
 ## Internal Files
 

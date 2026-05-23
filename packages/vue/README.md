@@ -6,6 +6,18 @@ Tiny reactive Vue 3 client for [db-state](https://github.com/efrivan84-creator/d
 
 It creates a global reactive state object backed by WebSocket RPC, local cache, and server sync.
 
+## What you get
+
+- A tiny global Vue store that mirrors MongoDB tables through db-state RPC.
+- Direct page API: `state.order.load(id).status`, `state.order.update(...)`, `state.order.listRef(...)`.
+- Reactive query refs: `idsRef`, `listRef`, and `countRef` with `filter`, `sort`, `skip`, and `limit`.
+- Query deduplication: the same query returns the same ref instead of creating another refresh loop.
+- Cache-first query refs: cached ids/counts render immediately from IndexedDB, then refresh after login or table changes.
+- Offline-read behavior for documents, ids, counts, auth hash, and `time1`.
+- Loading groups via `getKeyRef(key)` for page-level skeletons/progress.
+- WebSocket RPC, reconnect, `login`, `authByHash`, `logout`, and custom app events on the same socket.
+- TypeScript generics for table names, filters, sort keys, document fields, and update payloads.
+
 ## Install
 
 ```sh
@@ -99,6 +111,22 @@ state.user.remove(id)
 state.user.isLoading(id)
 state.user.getError(id)
 ```
+
+### Method summary
+
+| Method | What it returns / does |
+|---|---|
+| `load(id, key?)` | Returns one reactive document and loads it from cache/server if needed. |
+| `getAsync(id, key?)` | One-off async document load. |
+| `getIds(query, key?)` | One-off id query with `filter`, `sort`, `skip`, `limit`. |
+| `getUnique(query, key?)` | One-off unique-field query. |
+| `add(obj)` | Creates a document and applies the returned change locally. |
+| `update({ id, set, unset, objedit })` | Patches a document and updates local state/cache on success. |
+| `remove(id)` | Deletes a document and removes it from local state/cache. |
+| `countRef(filter)` | Reactive cached count for a filter. |
+| `idsRef(query)` | Reactive cached id list for a query. |
+| `listRef(query, key?)` | Computed list: `idsRef(query)` + `load(id, key)`. |
+| `isLoading(id)` / `getError(id)` | Per-document request state. |
 
 ### Reactive Queries
 
@@ -240,6 +268,13 @@ import {
   createStorageCache
 } from "@db-state/vue"
 ```
+
+## Useful links
+
+- Full docs: [docs/en](../../docs/en/README.md)
+- Reactive queries: [docs/en/client/reactive-queries.md](../../docs/en/client/reactive-queries.md)
+- Cache/offline: [docs/en/client/cache-and-offline.md](../../docs/en/client/cache-and-offline.md)
+- Admin panel cookbook: [docs/en/cookbook/admin-panel.md](../../docs/en/cookbook/admin-panel.md)
 
 ## Internal Files
 

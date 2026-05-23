@@ -6,6 +6,18 @@
 
 Создаёт глобальный реактивный объект состояния, под капотом — WebSocket RPC, локальный кэш и серверный sync.
 
+## Что входит
+
+- Маленький глобальный Vue store, который зеркалит MongoDB-таблицы через db-state RPC.
+- Прямой API для страниц: `state.order.load(id).status`, `state.order.update(...)`, `state.order.listRef(...)`.
+- Реактивные query-ref'ы: `idsRef`, `listRef`, `countRef` с `filter`, `sort`, `skip`, `limit`.
+- Дедупликация запросов: одинаковый query возвращает тот же ref, а не создаёт новую refresh-петлю.
+- Cache-first query-ref'ы: закэшированные ids/counts сразу рисуются из IndexedDB, потом обновляются после логина или изменений таблицы.
+- Офлайн-чтение документов, id, count, auth hash и `time1`.
+- Loading-группы через `getKeyRef(key)` для skeleton/progress целой страницы или блока.
+- WebSocket RPC, reconnect, `login`, `authByHash`, `logout` и кастомные события приложения по тому же сокету.
+- TypeScript generics для имён таблиц, фильтров, sort-ключей, полей документов и update payload.
+
 ## Установка
 
 ```sh
@@ -99,6 +111,22 @@ state.user.remove(id)
 state.user.isLoading(id)
 state.user.getError(id)
 ```
+
+### Кратко по методам
+
+| Метод | Что возвращает / делает |
+|---|---|
+| `load(id, key?)` | Возвращает один реактивный документ и грузит его из кэша/сервера при необходимости. |
+| `getAsync(id, key?)` | Одноразовая async-загрузка документа. |
+| `getIds(query, key?)` | Одноразовый запрос id с `filter`, `sort`, `skip`, `limit`. |
+| `getUnique(query, key?)` | Одноразовый запрос уникальных значений поля. |
+| `add(obj)` | Создаёт документ и применяет вернувшееся изменение локально. |
+| `update({ id, set, unset, objedit })` | Патчит документ и обновляет локальный state/cache после успеха. |
+| `remove(id)` | Удаляет документ и убирает его из локального state/cache. |
+| `countRef(filter)` | Реактивный закэшированный count для фильтра. |
+| `idsRef(query)` | Реактивный закэшированный список id для query. |
+| `listRef(query, key?)` | Computed-список: `idsRef(query)` + `load(id, key)`. |
+| `isLoading(id)` / `getError(id)` | Состояние запроса конкретного документа. |
 
 ### Реактивные запросы
 
@@ -240,6 +268,13 @@ import {
   createStorageCache
 } from "@db-state/vue"
 ```
+
+## Полезные ссылки
+
+- Полная документация: [docs/en](../../docs/en/README.md)
+- Реактивные запросы: [docs/en/client/reactive-queries.md](../../docs/en/client/reactive-queries.md)
+- Кэш и офлайн: [docs/en/client/cache-and-offline.md](../../docs/en/client/cache-and-offline.md)
+- Cookbook админки: [docs/en/cookbook/admin-panel.md](../../docs/en/cookbook/admin-panel.md)
 
 ## Внутренние файлы
 

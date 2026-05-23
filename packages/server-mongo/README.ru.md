@@ -6,6 +6,18 @@
 
 CRUD и sync доступны только через WebSocket RPC. HTTP-обработчиков в пакете нет.
 
+## Что входит
+
+- WebSocket RPC сервер для `load`, `getIds`, `getUnique`, `count`, `sync`, `add`, `update`, `remove`.
+- Mongo-backed таблицы приложения плюс служебные `_user`, `_group`, `_permission`.
+- Логин по паролю и reconnect по hash через тот же WebSocket.
+- Append-only коллекция `log` для realtime sync, аудита, восстановления удалений и time-travel reconstruction.
+- Sync по log-окнам `(time1, to]` с подавлением собственного session-эха.
+- Проверка read/write прав для каждого RPC, включая служебные таблицы.
+- Field-level права для чтения, sync-изменений, insert и update.
+- Code access rules, которые могут переопределять или дополнять `_permission` и лениво грузить документы только когда это нужно.
+- Встроенный socket hub и adapter hook для Redis/NATS-style broadcast в нескольких процессах.
+
 ## Установка
 
 ```sh
@@ -38,6 +50,21 @@ dbState.socket.addClient(ws, {
   userId: "u1",
   sessionId: "u1_abcd"
 })
+```
+
+## Обязательные индексы
+
+В production создай:
+
+```js
+await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
+```
+
+Для запросов приложения добавляй обычные Mongo-индексы под `getIds`, `count`, `getUnique`:
+
+```js
+await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 ```
 
 ## WebSocket RPC
@@ -82,6 +109,19 @@ remove
 ```
 
 RPC отклоняется, пока сокет не авторизован.
+
+### Кратко по методам
+
+| Метод | Для чего |
+|---|---|
+| `load` | Читает один разрешённый документ с проекцией по `read.fields`. |
+| `getIds` | Возвращает разрешённые id после `filter`, `sort`, `skip`, `limit`. |
+| `getUnique` | Возвращает уникальные разрешённые значения одного поля. |
+| `count` | Считает разрешённые документы по фильтру. |
+| `sync` | Возвращает видимые log-изменения новее клиентского cursor. |
+| `add` | Вставляет документ после проверки `write` и `write.fields`. |
+| `update` | Применяет `set` / `unset` после проверки `write` и `write.fields`. |
+| `remove` | Удаляет после document-level `write`; сохраняет удалённый объект в `change.old`. |
 
 ## Аутентификация
 
@@ -286,6 +326,37 @@ const dbState = createDbStateServer({
   userId: "u1"
 }
 ```
+
+## Sync и audit log
+
+Каждая успешная запись добавляет компактную строку в log:
+
+```js
+{
+  logId,
+  createdAt,
+  table,
+  id,
+  action,      // insert | update | delete
+  set,
+  unset,
+  obj,         // полный вставленный документ
+  old,         // полный удалённый документ
+  sessionId,
+  userId
+}
+```
+
+Клиенты вызывают `sync({ from, sessionId })`. Сервер читает `createdAt > from && createdAt <= to`, исключает session отправителя, применяет права на чтение, фильтрует запрещённые поля и возвращает `{ to, changes }`.
+
+Для систем с большим числом записей держи `syncLimit` достаточно высоким для одного sync-окна или добавляй cursor continuation по `{ createdAt, logId }`.
+
+## Полезные ссылки
+
+- Полная документация: [docs/en](../../docs/en/README.md)
+- Настройка сервера: [docs/en/server/setup.md](../../docs/en/server/setup.md)
+- Права доступа: [docs/en/server/permissions.md](../../docs/en/server/permissions.md)
+- Sync protocol: [docs/en/architecture/sync-protocol.md](../../docs/en/architecture/sync-protocol.md)
 
 ## Внутренние файлы
 

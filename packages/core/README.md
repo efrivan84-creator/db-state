@@ -6,6 +6,16 @@ Shared protocol, change shape and dot-path helpers for [db-state](https://github
 
 This package has no Vue or MongoDB dependency. It defines the common language used by the client and server.
 
+## What you get
+
+- Protocol constants for `dbstate:*` messages.
+- The normalized `Change` shape used by CRUD, sync, cache updates, and audit.
+- Dot-path helpers for nested update fields like `"profile.city"`.
+- Patch helpers that apply `set` / `unset` updates without replacing the whole object.
+- Service-table normalization: `_user`, `_group`, and `_permission` are always included.
+- Session id creation and sync-window filtering for echo suppression.
+- No runtime dependencies and no browser/server assumptions.
+
 ## Install
 
 ```sh
@@ -49,6 +59,19 @@ import {
   unsetByPath
 } from "@db-state/core"
 ```
+
+### Export groups
+
+| Export | Purpose |
+|---|---|
+| `DB_STATE_EVENTS` | Reserved event names for RPC, login, auth, sync notification, and force-resync. |
+| `SERVICE_TABLES` | Built-in service tables: `_user`, `_group`, `_permission`. |
+| `createChange` | Builds a compact normalized change record. |
+| `applyChange`, `applyPatch` | Applies insert/update/delete changes to local objects. |
+| `getByPath`, `setByPath`, `unsetByPath` | Reads and writes nested fields by dot path. |
+| `normalizeTables` | Adds service tables to an app table list. |
+| `createSessionId` | Creates a per-tab/session id for echo suppression. |
+| `filterSyncChanges` | Filters log entries by `(from, to]` and skips the caller session. |
 
 ## Rules
 
