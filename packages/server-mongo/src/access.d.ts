@@ -1,4 +1,6 @@
-import type { BaseDoc, Change } from "@db-state/core"
+import type { BaseDoc, Change, PermissionPart, ServicePermission } from "@db-state/core"
+
+export type { PermissionPart } from "@db-state/core"
 
 /** User identity passed into every access decision. */
 export interface AccessUser {
@@ -37,24 +39,8 @@ export interface AccessContext<T extends BaseDoc = BaseDoc> {
   permissionRules?: ServerPermissionRule<T>[]
 }
 
-/** A `read` or `write` block of a permission rule. */
-export interface PermissionPart {
-  groups?: string[]
-  users?: string[]
-  /** If `false`, denies even when the user/group matches. */
-  action?: boolean
-  /** Whitelist of field paths the user may read or write. */
-  fields?: string[]
-}
-
 /** Document shape stored in the `_permission` table. */
-export interface ServerPermissionRule<T extends BaseDoc = BaseDoc> extends BaseDoc {
-  table: string
-  priority?: number
-  if?: Partial<T> & Record<string, unknown>
-  read?: PermissionPart
-  write?: PermissionPart
-}
+export type ServerPermissionRule<T extends BaseDoc = BaseDoc> = ServicePermission<T>
 
 /** What a single access rule can return. */
 export type AccessDecisionValue =

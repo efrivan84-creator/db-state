@@ -47,6 +47,7 @@ npm install @db-state/core
 ```js
 import {
   DB_STATE_EVENTS,
+  DB_STATE_MESSAGES,
   SERVICE_TABLES,
   applyChange,
   applyPatch,
@@ -64,8 +65,11 @@ import {
 
 | Экспорт | Для чего нужен |
 |---|---|
-| `DB_STATE_EVENTS` | Зарезервированные события RPC, login, auth, sync notification и force-resync. |
+| `DB_STATE_EVENTS` | Совместимый subset серверных событий: hello, changes available, force-resync, error. |
+| `DB_STATE_MESSAGES` | Полная карта зарезервированных protocol/local сообщений для RPC, login, auth, logout, socket open/close, sync notification и force-resync. |
 | `SERVICE_TABLES` | Встроенные служебные таблицы: `_user`, `_group`, `_permission`. |
+| `BaseDoc`, `Change`, `Filter`, `SortSpec`, `ListQuery`, `UpdatePatch`, `UpdateArgs` | Общие TypeScript-типы документов, изменений, query и update. |
+| `ServiceUser`, `ServiceGroup`, `ServicePermission`, `PermissionPart` | Общие TypeScript-типы служебных таблиц и прав. |
 | `createChange` | Создаёт компактную нормализованную запись изменения. |
 | `applyChange`, `applyPatch` | Применяют insert/update/delete изменения к локальным объектам. |
 | `getByPath`, `setByPath`, `unsetByPath` | Читают и изменяют вложенные поля по dot-path. |

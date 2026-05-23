@@ -1,4 +1,4 @@
-import type { Change, BaseDoc } from "@db-state/core"
+import type { BaseDoc, Change, PermissionPart, ServiceGroup, ServicePermission, ServiceUser } from "@db-state/core"
 import type { DbStateCache } from "./cache"
 import type { LoadingKeyRef } from "./keys"
 import type { DbStateSocketFacade } from "./socket"
@@ -19,7 +19,15 @@ export type {
   TableApi,
   UpdateArgs
 } from "./table"
-export type { BaseDoc, Change, ChangeAction } from "@db-state/core"
+export type {
+  BaseDoc,
+  Change,
+  ChangeAction,
+  PermissionPart,
+  ServiceGroup,
+  ServicePermission,
+  ServiceUser
+} from "@db-state/core"
 
 export { createIndexedDbCache, createMemoryCache, createStorageCache } from "./cache"
 
@@ -42,41 +50,6 @@ export { createIndexedDbCache, createMemoryCache, createStorageCache } from "./c
  * const state = createDbState<Schema>(["order", "product"])
  */
 export type DbStateSchema = Record<string, BaseDoc>
-
-/** Built-in shape of the `_user` service table. */
-export interface ServiceUser extends BaseDoc {
-  login: string
-  passwordHash: string
-  hash?: string
-  groups?: string[]
-  disabled?: boolean
-}
-
-/** Built-in shape of the `_group` service table. */
-export interface ServiceGroup extends BaseDoc {
-  name?: string
-}
-
-/** Built-in shape of the `_permission` service table. */
-export interface ServicePermission<T extends BaseDoc = BaseDoc> extends BaseDoc {
-  table: string
-  priority?: number
-  if?: Partial<T>
-  read?: PermissionPart
-  write?: PermissionPart
-}
-
-/** A `read` or `write` block inside a permission rule. */
-export interface PermissionPart {
-  /** Allowed group ids. */
-  groups?: string[]
-  /** Allowed user ids. */
-  users?: string[]
-  /** If explicitly `false`, denies even when the user/group matches. */
-  action?: boolean
-  /** Whitelist of field paths the user may read or write. */
-  fields?: string[]
-}
 
 /** Service tables merged into every schema. */
 export interface DefaultServiceTables {
@@ -134,8 +107,10 @@ export interface DbStateOptions<TSchema extends DbStateSchema = DbStateSchema> {
   reconnectDelay?: number
   /** RPC timeout, ms. Default `15000`. */
   rpcTimeout?: number
-  /** Background safety-sync interval, ms. Default `30000`. Set to `0` to disable. */
+  /** Background safety-sync interval, ms. Default `0` (disabled). */
   safetySyncInterval?: number
+  /** Run `syncNow()` after successful login/hash auth. Default `true`. */
+  syncOnAuth?: boolean
   /** Default wait timeout for `getAsync`, ms. Default `15000`. */
   waitTimeout?: number
   /** How long writes wait for restored auth before failing, ms. Default `3000`. */

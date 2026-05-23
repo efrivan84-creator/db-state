@@ -5,6 +5,7 @@ import {
   applyChange,
   createChange,
   createSessionId,
+  DB_STATE_MESSAGES,
   filterSyncChanges,
   getByPath,
   normalizeTables,
@@ -103,4 +104,26 @@ test("createChange keeps compact audit fields", () => {
 test("normalizeTables always includes service tables", () => {
   assert.deepEqual(normalizeTables(["order"]), ["order", "_user", "_group", "_permission"])
   assert.deepEqual(normalizeTables(["_user", "order"]), ["_user", "order", "_group", "_permission"])
+})
+
+test("DB_STATE_MESSAGES contains every reserved protocol message name", () => {
+  assert.deepEqual(DB_STATE_MESSAGES, {
+    hello: "dbstate:hello",
+    changesAvailable: "dbstate:changes_available",
+    forceResync: "dbstate:force_resync",
+    error: "dbstate:error",
+    rpc: "dbstate:rpc",
+    rpcResult: "dbstate:rpc_result",
+    rpcError: "dbstate:rpc_error",
+    login: "dbstate:login",
+    loginResult: "dbstate:login_result",
+    loginError: "dbstate:login_error",
+    auth: "dbstate:auth",
+    authResult: "dbstate:auth_result",
+    authError: "dbstate:auth_error",
+    logout: "dbstate:logout",
+    logoutResult: "dbstate:logout_result",
+    socketOpen: "dbstate:socket_open",
+    socketClose: "dbstate:socket_close"
+  })
 })

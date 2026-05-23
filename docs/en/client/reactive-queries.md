@@ -245,7 +245,7 @@ A `countRef` / `idsRef` server refresh happens in exactly these cases:
 | Server pushes `changes_available` for this table | ✅ (debounced) |
 | `authByHash` with a cached ref | ❌ unless sync brings changes |
 | Page refresh / `restored` auth | ❌ |
-| Background safety-sync interval | ✅ if sync brings changes |
+| Optional background safety-sync interval | ✅ if enabled and sync brings changes |
 
 The debounce window is `countRefreshDelay` / `idsRefreshDelay` (default 50 ms). This lets bulk imports coalesce into a single server call instead of N.
 

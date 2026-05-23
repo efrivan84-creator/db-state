@@ -7,6 +7,23 @@ export const DB_STATE_EVENTS = Object.freeze({
   error: "dbstate:error"
 })
 
+export const DB_STATE_MESSAGES = Object.freeze({
+  ...DB_STATE_EVENTS,
+  rpc: "dbstate:rpc",
+  rpcResult: "dbstate:rpc_result",
+  rpcError: "dbstate:rpc_error",
+  login: "dbstate:login",
+  loginResult: "dbstate:login_result",
+  loginError: "dbstate:login_error",
+  auth: "dbstate:auth",
+  authResult: "dbstate:auth_result",
+  authError: "dbstate:auth_error",
+  logout: "dbstate:logout",
+  logoutResult: "dbstate:logout_result",
+  socketOpen: "dbstate:socket_open",
+  socketClose: "dbstate:socket_close"
+})
+
 export const SERVICE_TABLES = Object.freeze(["_user", "_group", "_permission"])
 
 export function normalizeTables(tables) {

@@ -1,4 +1,4 @@
-import { isDbStateEvent } from "@db-state/core"
+import { DB_STATE_MESSAGES, isDbStateEvent } from "@db-state/core"
 
 export function createSocketFacade(options) {
   const listeners = new Map()
@@ -20,13 +20,13 @@ export function createSocketFacade(options) {
       ws.addEventListener("open", () => {
         for (const resolve of openWaiters) resolve()
         openWaiters.clear()
-        emit(listeners, "dbstate:socket_open", { type: "dbstate:socket_open" })
+        emit(listeners, DB_STATE_MESSAGES.socketOpen, { type: DB_STATE_MESSAGES.socketOpen })
       })
 
       ws.addEventListener("message", (event) => {
         const message = safeJson(event.data)
         if (!message) return
-        if (message.type === "dbstate:rpc_result" || message.type === "dbstate:rpc_error") {
+        if (message.type === DB_STATE_MESSAGES.rpcResult || message.type === DB_STATE_MESSAGES.rpcError) {
           settleRpc(pending, message)
           return
         }
@@ -34,7 +34,7 @@ export function createSocketFacade(options) {
       })
 
       ws.addEventListener("close", () => {
-        emit(listeners, "dbstate:socket_close", { type: "dbstate:socket_close" })
+        emit(listeners, DB_STATE_MESSAGES.socketClose, { type: DB_STATE_MESSAGES.socketClose })
         setTimeout(() => this.connect(), options.reconnectDelay)
       })
     },
@@ -62,7 +62,7 @@ export function createSocketFacade(options) {
         }, options.rpcTimeout)
 
         pending.set(id, { resolve, reject, timer })
-        ws.send(JSON.stringify({ type: "dbstate:rpc", id, method, payload }))
+        ws.send(JSON.stringify({ type: DB_STATE_MESSAGES.rpc, id, method, payload }))
       })
     },
 
@@ -107,7 +107,7 @@ function settleRpc(pending, message) {
   clearTimeout(item.timer)
   pending.delete(message.id)
 
-  if (message.type === "dbstate:rpc_error") {
+  if (message.type === DB_STATE_MESSAGES.rpcError) {
     item.reject(new Error(message.error || "db-state RPC error"))
   } else {
     item.resolve(message.result)

@@ -1,6 +1,6 @@
 import { reactive } from "vue"
 
-import { DB_STATE_EVENTS, applyPatch, normalizeTables } from "@db-state/core"
+import { DB_STATE_MESSAGES, applyPatch, normalizeTables } from "@db-state/core"
 import { createIndexedDbCache, createMemoryCache, createStorageCache } from "./cache.js"
 import { getKeyRef } from "./keys.js"
 import { createSocketFacade } from "./socket.js"
@@ -113,11 +113,12 @@ export function createDbState(input) {
     },
 
     async login(login, password) {
-      const result = await state.socket.system("dbstate:login", { login, password })
+      const result = await state.socket.system(DB_STATE_MESSAGES.login, { login, password })
       saveAuth(options, result)
       state.auth.userId = result.userId
       state.auth.hash = result.hash
       state.auth.status = "authorized"
+      await syncAfterAuth(state, options)
       await refreshAllCountRefs(countRefs)
       await refreshAllIdsRefs(idsRefs)
       await retryUnloadedTables(state, options)
@@ -129,11 +130,12 @@ export function createDbState(input) {
       state.auth.status = "authorizing"
 
       try {
-        const result = await state.socket.system("dbstate:auth", {
+        const result = await state.socket.system(DB_STATE_MESSAGES.auth, {
           userId: state.auth.userId,
           hash: state.auth.hash
         })
         state.auth.status = "authorized"
+        await syncAfterAuth(state, options)
         await retryUnloadedTables(state, options)
         return result.ok
       } catch (error) {
@@ -159,7 +161,7 @@ export function createDbState(input) {
     },
 
     async logout() {
-      await state.socket.system("dbstate:logout").catch(options.onError)
+      await state.socket.system(DB_STATE_MESSAGES.logout).catch(options.onError)
       clearAuth(options)
       state.auth.userId = null
       state.auth.hash = null
@@ -175,24 +177,24 @@ export function createDbState(input) {
     state[table] = createTableApi({ options, state, table, tables, loadingByKey, keyRefs, countRefs, idsRefs })
   }
 
-  state.socket.on("dbstate:socket_open", async () => {
+  state.socket.on(DB_STATE_MESSAGES.socketOpen, async () => {
     state.sync.connected = true
     await syncWhenReady(state, options)
   })
-  state.socket.on("dbstate:socket_close", () => {
+  state.socket.on(DB_STATE_MESSAGES.socketClose, () => {
     state.sync.connected = false
     if (state.auth.status === "authorized" || state.auth.status === "authorizing") {
       state.auth.status = state.auth.userId && state.auth.hash ? "restored" : "anonymous"
     }
   })
-  state.socket.on(DB_STATE_EVENTS.hello, async () => {
+  state.socket.on(DB_STATE_MESSAGES.hello, async () => {
     state.sync.connected = true
     await syncWhenReady(state, options)
   })
-  state.socket.on(DB_STATE_EVENTS.changesAvailable, async () => {
+  state.socket.on(DB_STATE_MESSAGES.changesAvailable, async () => {
     await state.syncNow()
   })
-  state.socket.on(DB_STATE_EVENTS.forceResync, async () => {
+  state.socket.on(DB_STATE_MESSAGES.forceResync, async () => {
     state.sync.time1 = "1970-01-01T00:00:00.000Z"
     await state.syncNow()
   })
@@ -224,13 +226,14 @@ function normalizeOptions(input) {
     onError: (error) => console.error(error),
     reconnectDelay: 1000,
     rpcTimeout: 15000,
-    safetySyncInterval: 30000,
+    safetySyncInterval: 0,
     sessionKey: "db-state.sessionId",
     sessionStorage: safeStorage("sessionStorage"),
     authStorage: safeStorage("localStorage"),
     authHashKey: "db-state.authHash",
     userIdKey: "db-state.userId",
     syncKey: "db-state.time1",
+    syncOnAuth: true,
     waitTimeout: 15000,
     writeAuthTimeout: 3000,
     wsUrl: `${wsOrigin}/db-state/ws`,
@@ -246,11 +249,18 @@ function normalizeOptions(input) {
 
 async function syncWhenReady(state, options) {
   try {
+    const wasAuthorized = state.auth.status === "authorized"
     if (options.autoAuth) await state.autoAuth()
-    if (state.auth.status === "authorized") await state.syncNow()
+    if ((!options.autoAuth || wasAuthorized) && state.auth.status === "authorized") {
+      await syncAfterAuth(state, options)
+    }
   } catch (error) {
     options.onError(error)
   }
+}
+
+async function syncAfterAuth(state, options) {
+  if (options.syncOnAuth) await state.syncNow()
 }
 
 function saveAuth(options, result) {

@@ -47,6 +47,7 @@ You normally don't install this directly — `@db-state/vue` and `@db-state/serv
 ```js
 import {
   DB_STATE_EVENTS,
+  DB_STATE_MESSAGES,
   SERVICE_TABLES,
   applyChange,
   applyPatch,
@@ -64,8 +65,11 @@ import {
 
 | Export | Purpose |
 |---|---|
-| `DB_STATE_EVENTS` | Reserved event names for RPC, login, auth, sync notification, and force-resync. |
+| `DB_STATE_EVENTS` | Backward-compatible subset of server push events: hello, changes available, force-resync, error. |
+| `DB_STATE_MESSAGES` | Full reserved protocol/local message map for RPC, login, auth, logout, socket open/close, sync notification, and force-resync. |
 | `SERVICE_TABLES` | Built-in service tables: `_user`, `_group`, `_permission`. |
+| `BaseDoc`, `Change`, `Filter`, `SortSpec`, `ListQuery`, `UpdatePatch`, `UpdateArgs` | Shared document, change, query, and update TypeScript types. |
+| `ServiceUser`, `ServiceGroup`, `ServicePermission`, `PermissionPart` | Shared service-table and permission TypeScript types. |
 | `createChange` | Builds a compact normalized change record. |
 | `applyChange`, `applyPatch` | Applies insert/update/delete changes to local objects. |
 | `getByPath`, `setByPath`, `unsetByPath` | Reads and writes nested fields by dot path. |

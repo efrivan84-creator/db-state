@@ -10,7 +10,7 @@ db-state is the boilerplate, extracted into a library that fits in ~4 KB brotli 
 
 ### Is it production-ready?
 
-`0.0.x`. The shape of the API is stable and 45 tests cover the core behavior, but you should expect minor breaking changes until `1.0`. Audit trail and time-travel work by design; the lack of optimistic concurrency control is intentional (see [next question](#what-about-conflicts-between-concurrent-edits)).
+`0.0.x`. The shape of the API is stable and 50 tests cover the core behavior, but you should expect minor breaking changes until `1.0`. Audit trail and time-travel work by design; the lack of optimistic concurrency control is intentional (see [next question](#what-about-conflicts-between-concurrent-edits)).
 
 ### What about conflicts between concurrent edits?
 
@@ -99,7 +99,7 @@ Yes. The user's `hash` (server-side auth token) is reused across devices — sec
 
 ### What happens if I have 1000 connected clients?
 
-Every write currently broadcasts a `changes_available` ping to all clients, and each one pulls the diff via `sync`. This works fine for typical admin panels (10-100 clients) but does not scale to 1000+ concurrent connections — you'll see broadcast amplification. Roadmap item: per-client subscription filtering before broadcast.
+Writes append to the log immediately, then `changes_available` is broadcast after a debounce delay and at a configured client rate. Each client pulls the diff via `sync`. This degrades predictably: more online clients means slower wake-up waves, not unbounded instant fan-out.
 
 If you're hitting this today, look at [advanced patterns](cookbook/advanced-patterns.md#scaling-broadcasts).
 

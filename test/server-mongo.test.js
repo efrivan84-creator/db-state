@@ -3,21 +3,21 @@ import test from "node:test"
 
 import { createDbStateServer } from "../packages/server-mongo/src/index.js"
 
-test("server update writes data, appends log, broadcasts, and sync excludes current session", async () => {
+test("server update writes data, appends log, broadcasts to everyone, and sync excludes current session", async () => {
   const mongo = createMemoryMongo()
-  const broadcasts = []
   const server = createDbStateServer({
     mongo,
     tables: ["user"],
     now: () => "2026-05-21T10:00:01.000Z",
     createLogId: () => "log1",
-    socket: {
-      broadcast(message, options) {
-        broadcasts.push({ message, options })
-      }
-    }
+    changesBroadcastDelay: 0,
+    changesBroadcastRate: 1000
   })
   await allowTable(mongo, "user", "admins")
+  const writerSent = []
+  const readerSent = []
+  server.socket.addClient({ send: (message) => writerSent.push(JSON.parse(message)) }, { sessionId: "s1" })
+  server.socket.addClient({ send: (message) => readerSent.push(JSON.parse(message)) }, { sessionId: "s2" })
 
   const update = await server.update({
     table: "user",
@@ -35,8 +35,10 @@ test("server update writes data, appends log, broadcasts, and sync excludes curr
   const [log] = await mongo.collection("log").find({}).toArray()
   assert.equal(log.userId, "u-admin")
   assert.equal("user" in log, false)
-  assert.equal(broadcasts[0].message.type, "dbstate:changes_available")
-  assert.equal(broadcasts[0].options.excludeSessionId, "s1")
+  await waitFor(() =>
+    writerSent.some((message) => message.type === "dbstate:changes_available") &&
+    readerSent.some((message) => message.type === "dbstate:changes_available")
+  )
 
   const ownSync = await server.sync({
     from: "2026-05-21T10:00:00.000Z",
@@ -51,6 +53,56 @@ test("server update writes data, appends log, broadcasts, and sync excludes curr
 
   assert.deepEqual(ownSync.changes, [])
   assert.deepEqual(remoteSync.changes.map((change) => change.id), ["u1"])
+})
+
+test("server debounces change broadcasts", async () => {
+  const mongo = createMemoryMongo()
+  const sent = []
+  const server = createDbStateServer({
+    mongo,
+    tables: ["user"],
+    changesBroadcastDelay: 30,
+    changesBroadcastRate: 1000,
+    now: clock(["2026-05-21T10:00:01.000Z", "2026-05-21T10:00:02.000Z"]),
+    createLogId: idSeq()
+  })
+  await allowTable(mongo, "user", "admins")
+  server.socket.addClient({ send: (message) => sent.push(JSON.parse(message)) }, { sessionId: "s1" })
+
+  await server.update({ table: "user", id: "u1", set: { name: "Ivan" }, sessionId: "s1", req: adminReq() })
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  await server.update({ table: "user", id: "u2", set: { name: "Anna" }, sessionId: "s2", req: adminReq() })
+  await new Promise((resolve) => setTimeout(resolve, 25))
+
+  assert.equal(sent.filter((message) => message.type === "dbstate:changes_available").length, 0)
+
+  await waitFor(() => sent.filter((message) => message.type === "dbstate:changes_available").length === 1)
+})
+
+test("server cancels an active rate-limited broadcast when a new change arrives", async () => {
+  const mongo = createMemoryMongo()
+  const sent = [[], [], []]
+  const server = createDbStateServer({
+    mongo,
+    tables: ["user"],
+    changesBroadcastDelay: 0,
+    changesBroadcastRate: 5,
+    now: clock(["2026-05-21T10:00:01.000Z", "2026-05-21T10:00:02.000Z"]),
+    createLogId: idSeq()
+  })
+  await allowTable(mongo, "user", "admins")
+  for (const bucket of sent) {
+    server.socket.addClient({ send: (message) => bucket.push(JSON.parse(message)) }, { sessionId: `s${sent.indexOf(bucket)}` })
+  }
+
+  await server.update({ table: "user", id: "u1", set: { name: "Ivan" }, sessionId: "s1", req: adminReq() })
+  await waitFor(() => sent[0].some((message) => message.type === "dbstate:changes_available"))
+
+  await server.update({ table: "user", id: "u2", set: { name: "Anna" }, sessionId: "s2", req: adminReq() })
+  await new Promise((resolve) => setTimeout(resolve, 120))
+
+  assert.equal(sent[1].some((message) => message.type === "dbstate:changes_available"), false)
+  assert.equal(sent[2].some((message) => message.type === "dbstate:changes_available"), false)
 })
 
 test("delete log stores old document and compact actor id", async () => {
@@ -749,4 +801,12 @@ function clock(values) {
 function idSeq() {
   let index = 0
   return () => `log${++index}`
+}
+
+async function waitFor(check) {
+  for (let i = 0; i < 50; i += 1) {
+    if (check()) return
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  assert.equal(check(), true)
 }

@@ -1,4 +1,4 @@
-import { DB_STATE_EVENTS } from "@db-state/core"
+import { DB_STATE_MESSAGES } from "@db-state/core"
 
 export function createSocketHub(adapter, onMessage) {
   const clients = new Set()
@@ -8,16 +8,24 @@ export function createSocketHub(adapter, onMessage) {
       Object.assign(client, meta)
       clients.add(client)
       client.on?.("message", (message) => this.handleMessage(client, message))
-      client.send?.(JSON.stringify({ type: DB_STATE_EVENTS.hello }))
+      client.send?.(JSON.stringify({ type: DB_STATE_MESSAGES.hello }))
       return () => clients.delete(client)
     },
 
-    broadcast(message, options = {}) {
+    async broadcast(message, options = {}) {
       adapter?.broadcast?.(message, options)
 
-      for (const client of clients) {
+      const targets = [...clients]
+      const delay = options.rate > 0 ? Math.ceil(1000 / options.rate) : 0
+
+      for (let i = 0; i < targets.length; i += 1) {
+        if (options.signal?.cancelled) return
+        const client = targets[i]
         if (options.excludeSessionId && client.sessionId === options.excludeSessionId) continue
         client.send?.(JSON.stringify(message))
+        if (delay > 0 && i < targets.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, delay))
+        }
       }
     },
 

@@ -1,5 +1,7 @@
 import { createHash, pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto"
 
+import { DB_STATE_MESSAGES } from "@db-state/core"
+
 export function createAuth(config) {
   return {
     async login(client, message) {
@@ -9,7 +11,7 @@ export function createAuth(config) {
       })
 
       if (!user || !(await config.password.verify(message.password, user.passwordHash))) {
-        send(client, "dbstate:login_error", message.id, { error: "Invalid login or password" })
+        send(client, DB_STATE_MESSAGES.loginError, message.id, { error: "Invalid login or password" })
         return
       }
 
@@ -23,7 +25,7 @@ export function createAuth(config) {
       }
 
       attachUser(client, { ...user, hash })
-      send(client, "dbstate:login_result", message.id, {
+      send(client, DB_STATE_MESSAGES.loginResult, message.id, {
         ok: true,
         userId: user._id,
         hash,
@@ -39,12 +41,12 @@ export function createAuth(config) {
       })
 
       if (!user) {
-        send(client, "dbstate:auth_error", message.id, { error: "Unauthorized" })
+        send(client, DB_STATE_MESSAGES.authError, message.id, { error: "Unauthorized" })
         return
       }
 
       attachUser(client, user)
-      send(client, "dbstate:auth_result", message.id, {
+      send(client, DB_STATE_MESSAGES.authResult, message.id, {
         ok: true,
         userId: user._id,
         groups: user.groups ?? []
@@ -54,7 +56,7 @@ export function createAuth(config) {
     logout(client, message) {
       delete client.user
       delete client.userId
-      send(client, "dbstate:logout_result", message.id, { ok: true })
+      send(client, DB_STATE_MESSAGES.logoutResult, message.id, { ok: true })
     }
   }
 }

@@ -1,6 +1,6 @@
 # Mutations
 
-Three methods write to the server: `add`, `update`, `remove`. Each one runs the change through the server's permission layer, appends it to the log, and broadcasts a `changes_available` notification to other connected clients.
+Three methods write to the server: `add`, `update`, `remove`. Each one runs the change through the server's permission layer, appends it to the log, and schedules a debounced/rate-limited `changes_available` notification to connected clients.
 
 ## `add`
 
@@ -191,4 +191,4 @@ If you genuinely need bulk inserts/updates from the client, consider exposing a 
    refresh countRef/idsRef
 ```
 
-The originating client gets the change in the RPC response. Other clients get the `changes_available` ping and pull the diff via `sync`.
+The originating client gets the change in the RPC response. All clients, including the originator, may get the `changes_available` ping and pull the diff via `sync`; the server filters the originator's own changes by `sessionId`.

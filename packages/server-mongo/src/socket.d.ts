@@ -18,8 +18,12 @@ export interface SocketAdapter {
 
 /** Options accepted by {@link SocketHub.broadcast}. */
 export interface BroadcastOptions {
-  /** Skip clients whose `sessionId` matches (used to suppress echo). */
+  /** Optional helper for app-level custom broadcasts. db-state change wake-ups do not use it. */
   excludeSessionId?: string
+  /** Maximum clients to wake per second. `0`/undefined sends without throttling. */
+  rate?: number
+  /** Internal cancellation token used when a newer database change supersedes an active wave. */
+  signal?: { cancelled?: boolean }
 }
 
 /** Connection metadata supplied when registering a client. */
@@ -40,8 +44,8 @@ export interface SocketHub {
   /** Registers a connected client and starts forwarding its messages. */
   addClient(client: SocketClient, meta?: ClientMeta): DetachClient
 
-  /** Sends a message to every connected client (optionally excluding one). */
-  broadcast(message: unknown, options?: BroadcastOptions): void
+  /** Sends a message to every connected client, optionally rate-limited. */
+  broadcast(message: unknown, options?: BroadcastOptions): Promise<void>
 
   /** Registers a custom `onConnection` listener — for adapters that handle connect events manually. */
   onConnection(handler: (client: SocketClient, meta: ClientMeta) => void): void

@@ -2,6 +2,13 @@
 
 Release notes and project status for db-state.
 
+## 0.0.4
+
+- Server change wake-ups are now debounced/rate-limited via `changesBroadcastDelay` and `changesBroadcastRate`, and signals are sent to every client including the writer.
+- Client polling is disabled by default (`safetySyncInterval: 0`); sync now runs after authorization and on server signals.
+- Server socket broadcasts can be rate-limited and cancelled when a newer database change supersedes an active wake-up wave.
+- Documentation now describes signal-only sync and the scalable wake-up model.
+
 ## 0.0.3
 
 - Protected server RPCs now wait for `state.auth.status === "authorized"`; cache-first reactive reads retry only missed loads after authorization.
@@ -9,6 +16,7 @@ Release notes and project status for db-state.
 - Writes now wait up to `writeAuthTimeout` before failing when auth cannot be restored.
 - `load()` now exposes `__cacheChecked` and keeps `__loaded = false` until cache/server data really arrives.
 - One-off reads (`getAsync`, `getIds`, `getUnique`) now wait for authorization instead of failing before reconnect/auth restore.
+- `@db-state/core` now owns the full `dbstate:*` message map plus shared service-table, permission, query, and update TypeScript types.
 - Updated client README, API docs, auth docs, and reactive query docs for the new loading/auth flow.
 
 ## 0.0.2
@@ -36,7 +44,7 @@ Initial public release:
 
 ## Current status
 
-- Realtime CRUD with permissions, offline cache, login, and sync is implemented and covered by 45 tests.
+- Realtime CRUD with permissions, offline cache, login, and sync is implemented and covered by 50 tests.
 - TypeScript declarations are included for all packages.
 - Append-only log supports audit trail, delete recovery, and time-travel reconstruction patterns.
 - Vue + MongoDB + WebSocket are the supported stack.
@@ -44,7 +52,7 @@ Initial public release:
 ## Current limitations
 
 - `_permission.if` currently supports equality-style matching. More operators such as `$in`, `$ne`, `$gte`, and dot-path user comparisons are planned.
-- Broadcast currently wakes all connected clients for every write. Large deployments should add per-table/per-client filtering or a custom broadcast layer.
+- Change wake-ups are debounced and rate-limited globally, but large deployments may still want per-table/per-client filtering or a custom broadcast layer.
 - `syncLimit` should be high enough to fit one sync window. For very high write volume, add cursor continuation by `{ createdAt, logId }`.
 - Offline writes are intentionally not queued. The client supports offline read, while writes require an online socket.
 - React, Postgres, SQLite, and other adapters are not included.

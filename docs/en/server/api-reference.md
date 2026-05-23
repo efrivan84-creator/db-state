@@ -57,6 +57,8 @@ createDbStateServer(config: DbStateServerConfig): DbStateServer
 | `userTable` | `string` | `"_user"` | Users collection. |
 | `now` | `() => string` | `new Date().toISOString()` | Server clock. |
 | `syncLimit` | `number` | `1000` | Max changes per sync call. |
+| `changesBroadcastDelay` | `number` | `3000` | Debounce delay before waking clients after writes, ms. |
+| `changesBroadcastRate` | `number` | `100` | Maximum clients to wake per second. |
 | `socket` | `SocketAdapter` | undefined | Out-of-process broadcast hook. |
 
 ## `DbStateServer`
@@ -201,7 +203,7 @@ Returns `{ to: string, changes: Change[] }`. The `to` is what the caller writes 
 ```ts
 interface SocketHub {
   addClient(client: SocketClient, meta?: ClientMeta): DetachClient
-  broadcast(message: unknown, options?: BroadcastOptions): void
+  broadcast(message: unknown, options?: BroadcastOptions): Promise<void>
   onConnection(handler: (client: SocketClient, meta: ClientMeta) => void): void
   handleConnection(client: SocketClient, meta?: ClientMeta): DetachClient
   handleMessage(client: SocketClient, raw: unknown): Promise<void>
@@ -212,7 +214,7 @@ interface SocketHub {
 | Method | Use |
 |---|---|
 | `addClient(ws, meta?)` | Register a connected WebSocket. Returns disposer. |
-| `broadcast(msg, {excludeSessionId})` | Send to all clients (optionally skip one). |
+| `broadcast(msg, {rate, excludeSessionId})` | Send to clients, optionally rate-limited or excluding one session for app-level events. |
 | `sendToUser(userId, type, payload)` | Send only to sockets matching `userId`. |
 | `handleConnection` | Alternative entry point for adapters that route connection events themselves. |
 | `handleMessage` | Manually inject a parsed message — used by tests and custom dispatchers. |
@@ -227,7 +229,7 @@ interface ClientMeta {
 }
 ```
 
-Whatever you pass becomes attributes on the `client` object. The library uses `userId` and `sessionId` for `sendToUser` and broadcast filtering. `user` is read by the default `getUser`.
+Whatever you pass becomes attributes on the `client` object. The library uses `userId` for `sendToUser` and `sessionId` for sync echo filtering. `user` is read by the default `getUser`.
 
 ## `PasswordHasher`
 
@@ -383,6 +385,6 @@ Approximate ceilings on commodity hardware (single Node, 4 vCPU, Mongo nearby):
 | RPC throughput (load/update) | 2-5k ops/sec |
 | Sync calls/sec | 500-1000 |
 | Concurrent WebSocket clients | 5-10k per Node process |
-| Broadcast amplification | 1 write × N clients sync calls |
+| Broadcast amplification | Debounced and capped by `changesBroadcastRate` |
 
 For higher throughput: shard by tenant, run multiple Node processes with sticky sessions, optimize Mongo indices.

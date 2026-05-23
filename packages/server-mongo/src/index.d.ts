@@ -1,4 +1,4 @@
-import type { BaseDoc, Change } from "@db-state/core"
+import type { BaseDoc, Change, Filter, ListQuery, UpdatePatch } from "@db-state/core"
 import type { AccessConfig, AccessUser } from "./access"
 import type { PasswordHasher } from "./auth"
 import type { SocketHub } from "./socket"
@@ -7,7 +7,7 @@ export type { AccessConfig, AccessContext, AccessDecision, AccessRule, AccessUse
 export type { PasswordHasher, AuthHandlers, LoginMessage, AuthMessage, LogoutMessage } from "./auth"
 export type { BroadcastOptions, ClientMeta, DetachClient, SocketAdapter, SocketClient, SocketHub } from "./socket"
 export type { RpcHandler, RpcRequest, RpcRouter } from "./rpc"
-export type { BaseDoc, Change, ChangeAction } from "@db-state/core"
+export type { BaseDoc, Change, ChangeAction, Filter, ListQuery, SortSpec, UpdatePatch } from "@db-state/core"
 
 // ---------------------------------------------------------------------------
 // Mongo abstraction (duck-typed to avoid a hard dependency on the driver)
@@ -91,6 +91,12 @@ export interface DbStateServerConfig {
 
   /** Optional out-of-process broadcast adapter (e.g. Redis pubsub). */
   socket?: import("./socket").SocketAdapter
+
+  /** Debounce delay before waking clients after writes, ms. Default `3000`. */
+  changesBroadcastDelay?: number
+
+  /** Maximum clients to wake per second during a changes broadcast wave. Default `100`. */
+  changesBroadcastRate?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -103,11 +109,9 @@ export interface RequestContext {
   sessionId?: string
 }
 
-export interface UpdateRequest<T extends BaseDoc = BaseDoc> extends RequestContext {
+export interface UpdateRequest<T extends BaseDoc = BaseDoc> extends RequestContext, UpdatePatch<T> {
   table: string
   id: string
-  set?: Partial<T> & Record<string, unknown>
-  unset?: string[]
 }
 
 export interface AddRequest<T extends BaseDoc = BaseDoc> extends RequestContext {
@@ -125,23 +129,19 @@ export interface LoadRequest extends RequestContext {
   id: string
 }
 
-export interface ListRequest<T extends BaseDoc = BaseDoc> extends RequestContext {
+export interface ListRequest<T extends BaseDoc = BaseDoc> extends RequestContext, ListQuery<T> {
   table: string
-  filter?: Partial<T> & Record<string, unknown>
-  sort?: Record<string, 1 | -1>
-  skip?: number
-  limit?: number
 }
 
 export interface UniqueRequest<T extends BaseDoc = BaseDoc> extends RequestContext {
   table: string
   field: string
-  filter?: Partial<T> & Record<string, unknown>
+  filter?: Filter<T>
 }
 
 export interface CountRequest<T extends BaseDoc = BaseDoc> extends RequestContext {
   table: string
-  filter?: Partial<T> & Record<string, unknown>
+  filter?: Filter<T>
 }
 
 export interface SyncRequest extends RequestContext {

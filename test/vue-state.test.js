@@ -135,6 +135,7 @@ test("countRef refreshes after login but not after hash auth restore", async () 
   const counts = [4]
   state.socket.rpc = async (method, payload) => {
     calls.push({ method, payload })
+    if (method === "sync") return { to: "2026-05-21T10:00:00.000Z", changes: [] }
     return counts.shift()
   }
   state.socket.system = async (type) => {
@@ -153,7 +154,52 @@ test("countRef refreshes after login but not after hash auth restore", async () 
   assert.equal(count.value, 4)
 
   assert.deepEqual(calls, [
-    { method: "count", payload: { table: "order", filter: {} } }
+    { method: "sync", payload: { from: "1970-01-01T00:00:00.000Z", sessionId: state.sync.sessionId } },
+    { method: "count", payload: { table: "order", filter: {} } },
+    { method: "sync", payload: { from: "2026-05-21T10:00:00.000Z", sessionId: state.sync.sessionId } }
+  ])
+})
+
+test("client does not start safety sync interval by default", () => {
+  const originalSetInterval = globalThis.setInterval
+  let intervals = 0
+  globalThis.setInterval = () => {
+    intervals += 1
+    return 1
+  }
+
+  try {
+    createDbState({
+      autoConnect: false,
+      cache: createMemoryCache(),
+      ...testStorage(),
+      tables: ["order"]
+    })
+
+    assert.equal(intervals, 0)
+  } finally {
+    globalThis.setInterval = originalSetInterval
+  }
+})
+
+test("login runs sync after authorization", async () => {
+  const state = createDbState({
+    autoConnect: false,
+    cache: createMemoryCache(),
+    ...testStorage(),
+    tables: ["order"]
+  })
+  const calls = []
+  state.socket.system = async () => ({ userId: "u1", hash: "h1", ok: true })
+  state.socket.rpc = async (method, payload) => {
+    calls.push({ method, payload })
+    return { to: "2026-05-21T10:00:00.000Z", changes: [] }
+  }
+
+  await state.login("ivan", "secret")
+
+  assert.deepEqual(calls, [
+    { method: "sync", payload: { from: "1970-01-01T00:00:00.000Z", sessionId: state.sync.sessionId } }
   ])
 })
 
@@ -174,6 +220,7 @@ test("autoAuth refreshes uncached reactive refs after authorization", async () =
   const calls = []
   state.socket.rpc = async (method, payload) => {
     calls.push({ method, payload })
+    if (method === "sync") return { to: "2026-05-21T10:00:00.000Z", changes: [] }
     if (method === "count") return 4
     if (method === "getIds") return ["o1"]
     return undefined
@@ -193,6 +240,7 @@ test("autoAuth refreshes uncached reactive refs after authorization", async () =
   assert.equal(state.auth.status, "authorized")
   assert.deepEqual(calls, [
     { method: "dbstate:auth", payload: { userId: "u1", hash: "h1" } },
+    { method: "sync", payload: { from: "1970-01-01T00:00:00.000Z", sessionId: state.sync.sessionId } },
     { method: "count", payload: { table: "order", filter: {} } },
     { method: "getIds", payload: { table: "order", sort: { _id: 1 } } }
   ])
@@ -208,6 +256,7 @@ test("autoAuth does not refresh cached reactive refs", async () => {
     tables: ["order"]
   })
   firstState.socket.rpc = async (method) => {
+    if (method === "sync") return { to: "2026-05-21T10:00:00.000Z", changes: [] }
     if (method === "count") return 8
     if (method === "getIds") return ["o7", "o8"]
     return undefined
@@ -232,6 +281,7 @@ test("autoAuth does not refresh cached reactive refs", async () => {
   const calls = []
   secondState.socket.rpc = async (method, payload) => {
     calls.push({ method, payload })
+    if (method === "sync") return { to: "2026-05-21T10:00:00.000Z", changes: [] }
     throw new Error("cached refs should not refresh")
   }
   secondState.socket.system = async (type, payload) => {
@@ -248,7 +298,8 @@ test("autoAuth does not refresh cached reactive refs", async () => {
   assert.equal(cachedCount.value, 8)
   assert.deepEqual(cachedIds.value, ["o7", "o8"])
   assert.deepEqual(calls, [
-    { method: "dbstate:auth", payload: { userId: "u1", hash: "h1" } }
+    { method: "dbstate:auth", payload: { userId: "u1", hash: "h1" } },
+    { method: "sync", payload: { from: "1970-01-01T00:00:00.000Z", sessionId: secondState.sync.sessionId } }
   ])
 })
 
@@ -338,6 +389,7 @@ test("load before authorization uses cache only and retries unloaded documents a
   const calls = []
   state.socket.rpc = async (method, payload) => {
     calls.push({ method, payload })
+    if (method === "sync") return { to: "2026-05-21T10:00:00.000Z", changes: [] }
     return { _id: payload.id, status: "open" }
   }
   state.socket.system = async () => ({ userId: "u1", hash: "h1", ok: true })
@@ -353,6 +405,7 @@ test("load before authorization uses cache only and retries unloaded documents a
 
   assert.equal(doc.status, "open")
   assert.deepEqual(calls, [
+    { method: "sync", payload: { from: "1970-01-01T00:00:00.000Z", sessionId: state.sync.sessionId } },
     { method: "load", payload: { table: "order", id: "o1" } }
   ])
 })
@@ -368,6 +421,7 @@ test("one-off read methods wait for authorization before RPC", async () => {
   const calls = []
   state.socket.rpc = async (method, payload) => {
     calls.push({ method, payload })
+    if (method === "sync") return { to: "2026-05-21T10:00:00.000Z", changes: [] }
     if (method === "getIds") return ["o1"]
     if (method === "getUnique") return ["open"]
     return undefined
@@ -385,6 +439,7 @@ test("one-off read methods wait for authorization before RPC", async () => {
   assert.deepEqual(await idsPromise, ["o1"])
   assert.deepEqual(await uniquePromise, ["open"])
   assert.deepEqual(calls, [
+    { method: "sync", payload: { from: "1970-01-01T00:00:00.000Z", sessionId: state.sync.sessionId } },
     { method: "getIds", payload: { table: "order", sort: { _id: 1 } } },
     { method: "getUnique", payload: { table: "order", field: "status" } }
   ])
@@ -549,6 +604,7 @@ test("countRef and idsRef load cached query values without server refresh", asyn
     tables: ["order"]
   })
   firstState.socket.rpc = async (method) => {
+    if (method === "sync") return { to: "2026-05-21T10:00:00.000Z", changes: [] }
     if (method === "count") return 8
     if (method === "getIds") return ["o7", "o8"]
     return undefined
@@ -591,6 +647,7 @@ test("listRef maps an idsRef to loaded reactive records", async () => {
     tables: ["order"]
   })
   state.socket.rpc = async (method, payload) => {
+    if (method === "sync") return { to: "2026-05-21T10:00:00.000Z", changes: [] }
     if (method === "getIds") return ["o1", "o2"]
     if (method === "load") return { _id: payload.id, status: payload.id === "o1" ? "open" : "done" }
     return undefined
@@ -614,6 +671,7 @@ test("clearLocalDB clears reactive query refs", async () => {
     tables: ["order"]
   })
   state.socket.rpc = async (method) => {
+    if (method === "sync") return { to: "2026-05-21T10:00:00.000Z", changes: [] }
     if (method === "count") return 3
     if (method === "getIds") return ["o1", "o2"]
     return undefined

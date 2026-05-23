@@ -58,7 +58,8 @@ createDbState<Schema>(["order", "product"])
 | `userId` | `string` | — | Pre-seed user id (overrides `authStorage`). |
 | `reconnectDelay` | `number` | `1000` | ms before WebSocket reconnect. |
 | `rpcTimeout` | `number` | `15000` | ms for RPC waits. |
-| `safetySyncInterval` | `number` | `30000` | Background sync interval. `0` = disabled. |
+| `safetySyncInterval` | `number` | `0` | Optional background sync interval. Disabled by default. |
+| `syncOnAuth` | `boolean` | `true` | Run `syncNow()` after successful login/hash auth. |
 | `waitTimeout` | `number` | `15000` | `getAsync` timeout. |
 | `writeAuthTimeout` | `number` | `3000` | How long writes wait for restored auth before failing. |
 | `countRefreshDelay` | `number` | `50` | Debounce for `countRef` refresh. |

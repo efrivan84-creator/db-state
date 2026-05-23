@@ -71,16 +71,11 @@ The server pushes notifications to all sockets when changes happen:
 
 ```json
 {
-  "type": "dbstate:changes_available",
-  "table": "order",
-  "id": "o1",
-  "to": "2026-05-22T17:30:42.456Z"
+  "type": "dbstate:changes_available"
 }
 ```
 
-`table` and `id` are advisory — they tell the client which table was affected so it can decide whether to bother syncing. Currently the client always syncs on receipt (no per-table filtering); this is a planned optimization.
-
-The originator socket is **excluded** by the broadcast's `excludeSessionId` option.
+The ping is only a wake-up signal. The server sends it to all clients, including the writer; `sync(sessionId)` filters the writer's own changes.
 
 ## System events
 
@@ -209,7 +204,7 @@ For very busy systems, raise the limit (`createDbStateServer({ syncLimit: 5000 }
 When you do `state.order.update({ id, set })` from your tab:
 
 1. Server stores the change with `sessionId: "yourTab"`.
-2. Server broadcasts `changes_available` to all sockets except `yourTab`.
+2. Server schedules a debounced/rate-limited `changes_available` broadcast to all sockets, including `yourTab`.
 3. RPC returns `{ ok, change }` to yourTab; your tab does `applyChange(change)` locally.
 4. Other tabs of you (different `sessionId`) receive the ping → sync → server returns the change (it's not filtered, since their `sessionId` differs).
 5. They apply it.
@@ -245,7 +240,7 @@ if (options.safetySyncInterval > 0) {
 }
 ```
 
-Default 30 seconds. Catches:
+Default: disabled (`0`). Enable it only when you want an extra safety net. Catches:
 - Missed `changes_available` notifications (rare but possible if a broadcast was inflight when the client reconnected).
 - Server-side broadcast bugs.
 - Cross-process scenarios where broadcast fan-out isn't fully wired.

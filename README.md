@@ -120,8 +120,8 @@ client update()
   -> WebSocket RPC
   -> MongoDB write
   -> append log row
-  -> broadcast changes_available
-  -> other clients sync(time1)
+  -> debounced/rate-limited broadcast changes_available
+  -> all clients sync(time1)
   -> local reactive objects, lists, counters and IndexedDB cache update
 ```
 

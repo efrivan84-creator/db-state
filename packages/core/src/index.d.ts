@@ -24,6 +24,27 @@ export const DB_STATE_EVENTS: Readonly<{
   error: "dbstate:error"
 }>
 
+/** Every reserved protocol/local event name used by db-state packages. */
+export const DB_STATE_MESSAGES: Readonly<{
+  hello: "dbstate:hello"
+  changesAvailable: "dbstate:changes_available"
+  forceResync: "dbstate:force_resync"
+  error: "dbstate:error"
+  rpc: "dbstate:rpc"
+  rpcResult: "dbstate:rpc_result"
+  rpcError: "dbstate:rpc_error"
+  login: "dbstate:login"
+  loginResult: "dbstate:login_result"
+  loginError: "dbstate:login_error"
+  auth: "dbstate:auth"
+  authResult: "dbstate:auth_result"
+  authError: "dbstate:auth_error"
+  logout: "dbstate:logout"
+  logoutResult: "dbstate:logout_result"
+  socketOpen: "dbstate:socket_open"
+  socketClose: "dbstate:socket_close"
+}>
+
 /** Names of the service tables added automatically by both the client and the server. */
 export const SERVICE_TABLES: ReadonlyArray<"_user" | "_group" | "_permission">
 
@@ -36,6 +57,72 @@ export interface BaseDoc {
   _id: string
   /** Optional mirror of `_id` for legacy paths. The library writes both. */
   id?: string
+}
+
+/** Mongo-style filter accepted by db-state query APIs. */
+export type Filter<T extends BaseDoc = BaseDoc> = Partial<T> & Record<string, unknown>
+
+/** Mongo-style sort spec: `1` for ascending, `-1` for descending. */
+export type SortSpec<T extends BaseDoc = BaseDoc> = {
+  [K in keyof T]?: 1 | -1
+} & Record<string, 1 | -1>
+
+/** Query argument for list/id APIs. */
+export interface ListQuery<T extends BaseDoc = BaseDoc> {
+  filter?: Filter<T>
+  sort?: SortSpec<T>
+  skip?: number
+  limit?: number
+}
+
+/** Shared set/unset update patch shape. */
+export interface UpdatePatch<T extends BaseDoc = BaseDoc> {
+  /** Dot-path → value map of fields to set. */
+  set?: Partial<T> & Record<string, unknown>
+  /** Field paths to remove. */
+  unset?: string[]
+}
+
+/** Client update args; `objedit` is the historical alias for `set`. */
+export interface UpdateArgs<T extends BaseDoc = BaseDoc> extends UpdatePatch<T> {
+  id: string
+  /** Dot-path → value map of fields to set (alias for `set`). */
+  objedit?: Partial<T> & Record<string, unknown>
+}
+
+/** Built-in shape of the `_user` service table. */
+export interface ServiceUser extends BaseDoc {
+  login: string
+  passwordHash: string
+  hash?: string
+  groups?: string[]
+  disabled?: boolean
+}
+
+/** Built-in shape of the `_group` service table. */
+export interface ServiceGroup extends BaseDoc {
+  name?: string
+}
+
+/** A `read` or `write` block inside a permission rule. */
+export interface PermissionPart {
+  /** Allowed group ids. */
+  groups?: string[]
+  /** Allowed user ids. */
+  users?: string[]
+  /** If explicitly `false`, denies even when the user/group matches. */
+  action?: boolean
+  /** Whitelist of field paths the user may read or write. */
+  fields?: string[]
+}
+
+/** Built-in shape of the `_permission` service table. */
+export interface ServicePermission<T extends BaseDoc = BaseDoc> extends BaseDoc {
+  table: string
+  priority?: number
+  if?: Filter<T>
+  read?: PermissionPart
+  write?: PermissionPart
 }
 
 /** The three actions stored in the log. */

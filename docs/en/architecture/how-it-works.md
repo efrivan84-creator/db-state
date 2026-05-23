@@ -76,7 +76,7 @@ The Node server.
       - Validates every dot-path in `set`/`unset` against `write.fields`.
    4. `mongo.collection("order").updateOne({ _id: "o1" }, { $set: ... })`.
    5. Appends to `log` collection: `{ logId, createdAt, table: "order", id: "o1", action: "update", set, unset, userId, sessionId }`.
-   6. Broadcasts `{ type: "dbstate:changes_available", table: "order", id: "o1", to: createdAt }` to all sockets, **except** the one matching `sessionId`.
+   6. Schedules a debounced/rate-limited `{ type: "dbstate:changes_available" }` broadcast to all sockets, including the writer.
    7. Sends `{ type: "dbstate:rpc_result", id: "rpc1", result: { ok: true, change } }` back to the originator.
 4. **Client (originator)**: receives `rpc_result`, runs `applyChange(change)` locally → reactive store and IndexedDB updated → `countRef`/`idsRef` for the table are debounce-scheduled for refresh.
 5. **Other clients**: receive `dbstate:changes_available` → trigger `state.syncNow()` → server runs `sync(from=time1, sessionId=mine)` → returns the new change (permission-filtered) → applies → reactive store and IndexedDB updated → query refs refresh.
@@ -108,7 +108,7 @@ Each tab gets a random `sessionId` (stored in `sessionStorage`, so per-tab).
 
 When the client sends an RPC, it includes its `sessionId`. The server:
 1. Writes the change to the log with that `sessionId`.
-2. Broadcasts `changes_available` to all sockets **except** the one matching that `sessionId`.
+2. Broadcasts `changes_available` to all sockets. The writer may sync too; its own changes are filtered by `sessionId`.
 3. During `sync`, filters out changes from the same `sessionId`.
 
 Why? Because the originator already applied the change locally from the `rpc_result`. Receiving it again via sync would be redundant and could double-apply.

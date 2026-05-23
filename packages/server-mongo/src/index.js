@@ -1,4 +1,4 @@
-import { DB_STATE_EVENTS, applyPatch, createChange, getByPath, normalizeTables } from "@db-state/core"
+import { DB_STATE_MESSAGES, applyPatch, createChange, getByPath, normalizeTables } from "@db-state/core"
 import {
   assertAccess,
   assertFieldsAccess,
@@ -18,11 +18,12 @@ export function createDbStateServer(options) {
   const auth = createAuth(config)
   let router
   const socket = createSocketHub(config.socket, async (client, message) => {
-    if (message.type === "dbstate:login") return auth.login(client, message)
-    if (message.type === "dbstate:auth") return auth.auth(client, message)
-    if (message.type === "dbstate:logout") return auth.logout(client, message)
-    if (message.type === "dbstate:rpc") return handleRpc(router, client, message)
+    if (message.type === DB_STATE_MESSAGES.login) return auth.login(client, message)
+    if (message.type === DB_STATE_MESSAGES.auth) return auth.auth(client, message)
+    if (message.type === DB_STATE_MESSAGES.logout) return auth.logout(client, message)
+    if (message.type === DB_STATE_MESSAGES.rpc) return handleRpc(router, client, message)
   })
+  const changesBroadcaster = createChangesBroadcaster(socket, config)
 
   async function update({ table, id, set, unset, sessionId, req }) {
     assertTable(config, table)
@@ -51,7 +52,7 @@ export function createDbStateServer(options) {
       userId: user?._id
     })
 
-    broadcastChange(socket, change, sessionId)
+    changesBroadcaster.schedule()
     return { ok: true, change }
   }
 
@@ -73,7 +74,7 @@ export function createDbStateServer(options) {
       userId: user?._id
     })
 
-    broadcastChange(socket, change, sessionId)
+    changesBroadcaster.schedule()
     return { ok: true, id, change }
   }
 
@@ -93,7 +94,7 @@ export function createDbStateServer(options) {
       userId: user?._id
     })
 
-    broadcastChange(socket, change, sessionId)
+    changesBroadcaster.schedule()
     return { ok: true, change }
   }
 
@@ -181,18 +182,6 @@ export function createDbStateServer(options) {
   return { add, count, getIds, getUnique, load, remove, socket, sync, update }
 }
 
-function broadcastChange(socket, change, sessionId) {
-  socket.broadcast(
-    {
-      type: DB_STATE_EVENTS.changesAvailable,
-      table: change.table,
-      id: change.id,
-      to: change.createdAt
-    },
-    { excludeSessionId: sessionId }
-  )
-}
-
 async function appendLog(config, change) {
   const item = createChange({
     ...change,
@@ -225,6 +214,8 @@ function normalizeOptions(options) {
     access: {},
     createAuthHash: defaultAuthHash,
     createLogId: defaultId,
+    changesBroadcastDelay: 3000,
+    changesBroadcastRate: 100,
     getUser: async ({ req, client }) => req?.user ?? req?.client?.user ?? client?.user ?? makeUser(req?.client ?? req ?? client),
     logCollection: "log",
     now: () => new Date().toISOString(),
@@ -251,4 +242,27 @@ function makeUser(source = {}) {
 function defaultId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
   return `${Date.now()}_${Math.random().toString(36).slice(2)}`
+}
+
+function createChangesBroadcaster(socket, config) {
+  let timer
+  let signal
+
+  return {
+    schedule() {
+      if (signal) signal.cancelled = true
+      clearTimeout(timer)
+
+      signal = { cancelled: false }
+      timer = setTimeout(() => {
+        const current = signal
+        Promise.resolve(socket.broadcast(
+          { type: DB_STATE_MESSAGES.changesAvailable },
+          { rate: config.changesBroadcastRate, signal: current }
+        )).catch(() => {}).finally(() => {
+          if (signal === current) signal = undefined
+        })
+      }, Math.max(0, config.changesBroadcastDelay))
+    }
+  }
 }

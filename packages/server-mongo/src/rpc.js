@@ -1,3 +1,5 @@
+import { DB_STATE_MESSAGES } from "@db-state/core"
+
 export function createHandlers(api) {
   return {
     add: async (req) => api.add({ ...(await readBody(req)), req }),
@@ -26,13 +28,13 @@ export async function handleRpc(router, client, message) {
     })
 
     client.send?.(JSON.stringify({
-      type: "dbstate:rpc_result",
+      type: DB_STATE_MESSAGES.rpcResult,
       id: message.id,
       result
     }))
   } catch (error) {
     client.send?.(JSON.stringify({
-      type: "dbstate:rpc_error",
+      type: DB_STATE_MESSAGES.rpcError,
       id: message.id,
       error: error.message
     }))

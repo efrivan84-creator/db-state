@@ -1,25 +1,11 @@
 import type { ComputedRef, Ref } from "vue"
 
-import type { BaseDoc, Change } from "@db-state/core"
+import type { BaseDoc, Change, Filter, ListQuery, UpdateArgs } from "@db-state/core"
+
+export type { Filter, ListQuery, SortSpec, UpdateArgs } from "@db-state/core"
 
 /** Optional page-level key used to track loading state across multiple `load`/`listRef` calls. */
 export type PageKey = string | undefined
-
-/** Mongo-style filter accepted by `idsRef`, `listRef`, `countRef` and `getIds`. */
-export type Filter<T extends BaseDoc = BaseDoc> = Partial<T> & Record<string, unknown>
-
-/** Mongo-style sort spec: `1` for ascending, `-1` for descending. */
-export type SortSpec<T extends BaseDoc = BaseDoc> = {
-  [K in keyof T]?: 1 | -1
-} & Record<string, 1 | -1>
-
-/** Query argument for `idsRef`, `listRef` and `getIds`. */
-export interface ListQuery<T extends BaseDoc = BaseDoc> {
-  filter?: Filter<T>
-  sort?: SortSpec<T>
-  skip?: number
-  limit?: number
-}
 
 /** Reactive document returned by `load` / `listRef`. */
 export type ReactiveDoc<T extends BaseDoc> = T & {
@@ -27,17 +13,6 @@ export type ReactiveDoc<T extends BaseDoc> = T & {
   __loaded?: boolean
   /** `true` once the local cache lookup has completed. */
   __cacheChecked?: boolean
-}
-
-/** Arguments accepted by `state[table].update`. */
-export interface UpdateArgs<T extends BaseDoc> {
-  id: string
-  /** Dot-path → value map of fields to set (alias for `set`). */
-  objedit?: Partial<T> & Record<string, unknown>
-  /** Dot-path → value map of fields to set. Overrides `objedit` when both are present. */
-  set?: Partial<T> & Record<string, unknown>
-  /** Dot-paths of fields to remove. */
-  unset?: string[]
 }
 
 /** Result of any CRUD RPC. */
