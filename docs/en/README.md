@@ -5,6 +5,7 @@ Full documentation for the [db-state](https://github.com/efrivan84-creator/db-st
 ## Start here
 
 - [Getting started](getting-started.md) — install, run the demo, and see the library work in 5 minutes.
+- [Scope and use cases](scope-and-use-cases.md) — what kinds of projects db-state covers, how it layers under custom ultra-low-latency code, where the line is.
 - [FAQ](faq.md) — quick answers to the most common questions.
 
 ## Client (Vue 3)
