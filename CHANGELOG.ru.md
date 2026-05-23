@@ -2,6 +2,15 @@
 
 Описание изменений и статус проекта db-state.
 
+## 0.0.3
+
+- Защищенные серверные RPC теперь ждут `state.auth.status === "authorized"`; cache-first реактивные чтения перезапрашивают только то, что не загрузилось.
+- `sync update` больше не создает частичные локальные документы; `insert` по-прежнему создает документ из полного объекта в log.
+- Записи ждут авторизацию до `writeAuthTimeout`, затем возвращают ошибку, если авторизация не восстановилась.
+- `load()` теперь показывает `__cacheChecked` и держит `__loaded = false`, пока данные реально не пришли из кэша или сервера.
+- Одноразовые чтения (`getAsync`, `getIds`, `getUnique`) теперь ждут авторизацию вместо ошибки до reconnect/auth restore.
+- Обновлены README клиента, API-документация, auth-документация и reactive query docs под новый порядок загрузки/auth.
+
 ## 0.0.2
 
 - Добавлена полная поддержка `skip` для `getIds`, `idsRef` и `listRef`.
@@ -27,7 +36,7 @@
 
 ## Текущий статус
 
-- Realtime CRUD с правами, offline cache, login и sync реализован и покрыт 40 тестами.
+- Realtime CRUD с правами, offline cache, login и sync реализован и покрыт 45 тестами.
 - TypeScript declarations есть во всех пакетах.
 - Append-only log поддерживает audit trail, восстановление удалений и time-travel reconstruction patterns.
 - Поддерживаемый стек: Vue + MongoDB + WebSocket.

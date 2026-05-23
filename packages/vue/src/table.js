@@ -12,7 +12,12 @@ export function createTableApi(ctx) {
     const normalizedId = String(id)
 
     if (!tables[table][normalizedId]) {
-      tables[table][normalizedId] = reactive({ id: normalizedId, _id: normalizedId })
+      tables[table][normalizedId] = reactive({
+        id: normalizedId,
+        _id: normalizedId,
+        __cacheChecked: false,
+        __loaded: false
+      })
     }
 
     if (!loading.has(normalizedId) && !tables[table][normalizedId].__loaded) {
@@ -33,6 +38,11 @@ export function createTableApi(ctx) {
       const item = this.load(id, key)
       if (item?.__loaded) return item
 
+      await waitUntil(() => item.__loaded || item.__cacheChecked || errors[id], options.waitTimeout)
+      if (item?.__loaded || errors[id]) return errors[id] ? undefined : item
+
+      await state.waitForAuthorized()
+      this.load(id, key)
       await waitUntil(() => item.__loaded || errors[id], options.waitTimeout)
       return errors[id] ? undefined : item
     },
@@ -42,6 +52,7 @@ export function createTableApi(ctx) {
       trackPendingKey({ key, loadingByKey, keyRefs, token })
 
       try {
+        await state.waitForAuthorized()
         return await state.socket.rpc("getIds", { table, ...query })
       } finally {
         trackLoadedKey({ key, loadingByKey, keyRefs, token })
@@ -53,6 +64,7 @@ export function createTableApi(ctx) {
       trackPendingKey({ key, loadingByKey, keyRefs, token })
 
       try {
+        await state.waitForAuthorized()
         return await state.socket.rpc("getUnique", { table, ...query })
       } finally {
         trackLoadedKey({ key, loadingByKey, keyRefs, token })
@@ -69,13 +81,21 @@ export function createTableApi(ctx) {
         cacheId: queryCacheId("count", table, filterKey),
         value,
         filter,
+        loaded: false,
         timer: undefined,
         refresh: async () => {
+          if (state.auth.status !== "authorized") {
+            entry.loaded = false
+            return
+          }
+
           try {
             const count = await state.socket.rpc("count", { table, filter })
             value.value = count
+            entry.loaded = true
             await options.cache.set(QUERY_CACHE_TABLE, entry.cacheId, count)
           } catch (error) {
+            entry.loaded = false
             options.onError(error)
           }
         }
@@ -97,13 +117,21 @@ export function createTableApi(ctx) {
         cacheId: queryCacheId("ids", table, queryKey),
         value,
         query,
+        loaded: false,
         timer: undefined,
         refresh: async () => {
+          if (state.auth.status !== "authorized") {
+            entry.loaded = false
+            return
+          }
+
           try {
             const ids = await state.socket.rpc("getIds", { table, ...query })
             value.value = ids
+            entry.loaded = true
             await options.cache.set(QUERY_CACHE_TABLE, entry.cacheId, ids)
           } catch (error) {
+            entry.loaded = false
             options.onError(error)
           }
         }
@@ -121,6 +149,7 @@ export function createTableApi(ctx) {
     },
 
     async update({ id, objedit, set = objedit, unset }) {
+      await requireAuthorizedForWrite(state, options)
       const response = await state.socket.rpc("update", {
         table,
         id,
@@ -134,6 +163,7 @@ export function createTableApi(ctx) {
     },
 
     async add(obj) {
+      await requireAuthorizedForWrite(state, options)
       const response = await state.socket.rpc("add", {
         table,
         obj,
@@ -145,6 +175,7 @@ export function createTableApi(ctx) {
     },
 
     async remove(id) {
+      await requireAuthorizedForWrite(state, options)
       const response = await state.socket.rpc("remove", {
         table,
         id,
@@ -161,6 +192,26 @@ export function createTableApi(ctx) {
 
     isLoading(id) {
       return loading.has(String(id))
+    },
+
+    async __retryUnloaded() {
+      const refreshes = []
+
+      for (const [id, item] of Object.entries(tables[table])) {
+        if (!item.__loaded && !loading.has(id)) {
+          refreshes.push(queueLoad({ options, state, table, id, target: item, loading, errors, loadingByKey, keyRefs }))
+        }
+      }
+
+      for (const entry of countRefs.get(table)?.values() ?? []) {
+        if (!entry.loaded) refreshes.push(entry.refresh())
+      }
+
+      for (const entry of idsRefs.get(table)?.values() ?? []) {
+        if (!entry.loaded) refreshes.push(entry.refresh())
+      }
+
+      await Promise.all(refreshes)
     }
   })
 
@@ -170,6 +221,7 @@ export function createTableApi(ctx) {
 export function scheduleCountRefresh(countRefs, table, options) {
   for (const entry of countRefs.get(table)?.values() ?? []) {
     clearTimeout(entry.timer)
+    entry.loaded = false
     entry.timer = setTimeout(entry.refresh, options.countRefreshDelay)
   }
 }
@@ -190,6 +242,7 @@ export function clearAllCountRefs(countRefs) {
     for (const entry of entries.values()) {
       clearTimeout(entry.timer)
       entry.value.value = 0
+      entry.loaded = false
     }
   }
 }
@@ -197,6 +250,7 @@ export function clearAllCountRefs(countRefs) {
 export function scheduleIdsRefresh(idsRefs, table, options) {
   for (const entry of idsRefs.get(table)?.values() ?? []) {
     clearTimeout(entry.timer)
+    entry.loaded = false
     entry.timer = setTimeout(entry.refresh, options.idsRefreshDelay)
   }
 }
@@ -217,6 +271,7 @@ export function clearAllIdsRefs(idsRefs) {
     for (const entry of entries.values()) {
       clearTimeout(entry.timer)
       entry.value.value = []
+      entry.loaded = false
     }
   }
 }
@@ -225,18 +280,22 @@ async function queueLoad(input) {
   const { options, state, table, id, target, loading, errors, key, loadingByKey, keyRefs } = input
   const token = `${table}:${id}`
   loading.add(id)
+  delete errors[id]
   trackPendingKey({ key, loadingByKey, keyRefs, token })
 
   try {
     const cached = await options.cache.get(table, id)
+    target.__cacheChecked = true
     if (cached) {
-      Object.assign(target, cached, { __loaded: true })
+      Object.assign(target, cached, { __cacheChecked: true, __loaded: true })
       return
     }
 
+    if (state.auth.status !== "authorized") return
+
     const obj = await state.socket.rpc("load", { table, id })
     if (obj) {
-      Object.assign(target, obj, { __loaded: true })
+      Object.assign(target, obj, { __cacheChecked: true, __loaded: true })
       await options.cache.set(table, id, obj)
     }
   } catch (error) {
@@ -277,8 +336,16 @@ function queryCacheId(kind, table, key) {
 async function readCachedQuery(cache, entry) {
   try {
     const cached = await cache.get(QUERY_CACHE_TABLE, entry.cacheId)
-    if (cached !== undefined) entry.value.value = cached
+    if (cached !== undefined) {
+      entry.value.value = cached
+      entry.loaded = true
+    }
   } catch {
     // Cache reads are an offline optimization; server refresh remains authoritative.
   }
+}
+
+async function requireAuthorizedForWrite(state, options) {
+  const authorized = await state.waitForAuthorized(options.writeAuthTimeout)
+  if (!authorized) throw new Error("db-state write requires authorized socket")
 }

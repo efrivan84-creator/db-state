@@ -2,6 +2,15 @@
 
 Release notes and project status for db-state.
 
+## 0.0.3
+
+- Protected server RPCs now wait for `state.auth.status === "authorized"`; cache-first reactive reads retry only missed loads after authorization.
+- `sync` updates no longer create partial local documents; inserts still create documents from full log objects.
+- Writes now wait up to `writeAuthTimeout` before failing when auth cannot be restored.
+- `load()` now exposes `__cacheChecked` and keeps `__loaded = false` until cache/server data really arrives.
+- One-off reads (`getAsync`, `getIds`, `getUnique`) now wait for authorization instead of failing before reconnect/auth restore.
+- Updated client README, API docs, auth docs, and reactive query docs for the new loading/auth flow.
+
 ## 0.0.2
 
 - Added full `skip` support to `getIds`, `idsRef`, and `listRef` queries.
@@ -27,7 +36,7 @@ Initial public release:
 
 ## Current status
 
-- Realtime CRUD with permissions, offline cache, login, and sync is implemented and covered by 40 tests.
+- Realtime CRUD with permissions, offline cache, login, and sync is implemented and covered by 45 tests.
 - TypeScript declarations are included for all packages.
 - Append-only log supports audit trail, delete recovery, and time-travel reconstruction patterns.
 - Vue + MongoDB + WebSocket are the supported stack.

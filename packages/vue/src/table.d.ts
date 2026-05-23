@@ -25,6 +25,8 @@ export interface ListQuery<T extends BaseDoc = BaseDoc> {
 export type ReactiveDoc<T extends BaseDoc> = T & {
   /** `true` once the document has been loaded from cache or server. */
   __loaded?: boolean
+  /** `true` once the local cache lookup has completed. */
+  __cacheChecked?: boolean
 }
 
 /** Arguments accepted by `state[table].update`. */
@@ -73,17 +75,20 @@ export interface TableApi<T extends BaseDoc = BaseDoc> {
 
   /**
    * Promise-based variant of `load` that resolves once the document is
-   * loaded or the load fails. Resolves with `undefined` on error.
+   * loaded or the load fails. If auth is not ready after a cache miss, it
+   * waits until auth is restored because the result is not reactive.
+   * Resolves with `undefined` on error.
    */
   getAsync(id: string, key?: PageKey): Promise<ReactiveDoc<T> | undefined>
 
   /**
    * Fetches a list of ids matching the query directly from the server
-   * (no caching, no reactivity). Use `idsRef` for reactive needs.
+   * (no caching, no reactivity). Waits for authorization before RPC.
+   * Use `idsRef` for reactive needs.
    */
   getIds(query?: ListQuery<T>, key?: PageKey): Promise<string[]>
 
-  /** Fetches distinct values for a single field on the server. */
+  /** Fetches distinct values for a single field on the server. Waits for authorization before RPC. */
   getUnique<V = unknown>(
     query: { field: keyof T & string; filter?: Filter<T> },
     key?: PageKey

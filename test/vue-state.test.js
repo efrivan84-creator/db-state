@@ -21,6 +21,7 @@ test("sync update does not cache partial unloaded records", async () => {
   })
 
   assert.equal(await cache.get("order", "o1"), undefined)
+  assert.equal(state.order.items.o1, undefined)
 })
 
 test("sync update caches records that were already fully loaded", async () => {
@@ -102,6 +103,7 @@ test("countRef refreshes from server after table changes", async () => {
     calls.push({ method, payload })
     return counts.shift()
   }
+  state.auth.status = "authorized"
 
   const count = state.order.countRef({ status: "open" })
   await waitFor(() => calls.length === 0)
@@ -155,7 +157,7 @@ test("countRef refreshes after login but not after hash auth restore", async () 
   ])
 })
 
-test("autoAuth restores saved credentials without refreshing reactive refs", async () => {
+test("autoAuth refreshes uncached reactive refs after authorization", async () => {
   const cache = createMemoryCache()
   const storage = testStorage()
   storage.authStorage.setItem("db-state.userId", "u1")
@@ -172,6 +174,8 @@ test("autoAuth restores saved credentials without refreshing reactive refs", asy
   const calls = []
   state.socket.rpc = async (method, payload) => {
     calls.push({ method, payload })
+    if (method === "count") return 4
+    if (method === "getIds") return ["o1"]
     return undefined
   }
   state.socket.system = async (type, payload) => {
@@ -184,10 +188,65 @@ test("autoAuth restores saved credentials without refreshing reactive refs", asy
   await waitFor(() => calls.length === 0)
 
   assert.equal(await state.autoAuth(), true)
+  await waitFor(() => count.value === 4 && list.value.length === 1)
 
   assert.equal(state.auth.status, "authorized")
-  assert.equal(count.value, 0)
-  assert.deepEqual(list.value, [])
+  assert.deepEqual(calls, [
+    { method: "dbstate:auth", payload: { userId: "u1", hash: "h1" } },
+    { method: "count", payload: { table: "order", filter: {} } },
+    { method: "getIds", payload: { table: "order", sort: { _id: 1 } } }
+  ])
+})
+
+test("autoAuth does not refresh cached reactive refs", async () => {
+  const cache = createMemoryCache()
+  const firstState = createDbState({
+    autoConnect: false,
+    cache,
+    safetySyncInterval: 0,
+    ...testStorage(),
+    tables: ["order"]
+  })
+  firstState.socket.rpc = async (method) => {
+    if (method === "count") return 8
+    if (method === "getIds") return ["o7", "o8"]
+    return undefined
+  }
+  firstState.socket.system = async () => ({ userId: "u1", hash: "h1", ok: true })
+
+  const firstCount = firstState.order.countRef({ status: "open" })
+  const firstIds = firstState.order.idsRef({ filter: { status: "open" }, sort: { _id: 1 } })
+  await firstState.login("ivan", "secret")
+  await waitFor(() => firstCount.value === 8 && firstIds.value.length === 2)
+
+  const storage = testStorage()
+  storage.authStorage.setItem("db-state.userId", "u1")
+  storage.authStorage.setItem("db-state.authHash", "h1")
+  const secondState = createDbState({
+    autoConnect: false,
+    cache,
+    safetySyncInterval: 0,
+    ...storage,
+    tables: ["order"]
+  })
+  const calls = []
+  secondState.socket.rpc = async (method, payload) => {
+    calls.push({ method, payload })
+    throw new Error("cached refs should not refresh")
+  }
+  secondState.socket.system = async (type, payload) => {
+    calls.push({ method: type, payload })
+    return { ok: true, userId: "u1", groups: ["admin"] }
+  }
+
+  const cachedCount = secondState.order.countRef({ status: "open" })
+  const cachedIds = secondState.order.idsRef({ sort: { _id: 1 }, filter: { status: "open" } })
+  await waitFor(() => cachedCount.value === 8 && cachedIds.value.length === 2)
+
+  assert.equal(await secondState.autoAuth(), true)
+
+  assert.equal(cachedCount.value, 8)
+  assert.deepEqual(cachedIds.value, ["o7", "o8"])
   assert.deepEqual(calls, [
     { method: "dbstate:auth", payload: { userId: "u1", hash: "h1" } }
   ])
@@ -238,6 +297,121 @@ test("saved credentials start in restored status for offline cached reads", () =
   assert.equal(state.auth.hash, "h1")
 })
 
+test("socket close downgrades current authorization to restored when credentials are saved", async () => {
+  const OriginalWebSocket = globalThis.WebSocket
+  globalThis.WebSocket = FakeWebSocket
+
+  try {
+    const storage = testStorage()
+    storage.authStorage.setItem("db-state.userId", "u1")
+    storage.authStorage.setItem("db-state.authHash", "h1")
+    const state = createDbState({
+      autoAuth: false,
+      cache: createMemoryCache(),
+      reconnectDelay: 0,
+      safetySyncInterval: 0,
+      ...storage,
+      tables: ["order"],
+      wsUrl: "ws://example.test/db-state/ws"
+    })
+
+    state.auth.status = "authorized"
+    state.socket.raw.close()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.equal(state.sync.connected, false)
+    assert.equal(state.auth.status, "restored")
+  } finally {
+    globalThis.WebSocket = OriginalWebSocket
+  }
+})
+
+test("load before authorization uses cache only and retries unloaded documents after authorization", async () => {
+  const cache = createMemoryCache()
+  const state = createDbState({
+    autoConnect: false,
+    cache,
+    safetySyncInterval: 0,
+    ...testStorage(),
+    tables: ["order"]
+  })
+  const calls = []
+  state.socket.rpc = async (method, payload) => {
+    calls.push({ method, payload })
+    return { _id: payload.id, status: "open" }
+  }
+  state.socket.system = async () => ({ userId: "u1", hash: "h1", ok: true })
+
+  const doc = state.order.load("o1")
+  await waitFor(() => doc.__cacheChecked)
+
+  assert.equal(doc.__loaded, false)
+  assert.deepEqual(calls, [])
+
+  await state.login("ivan", "secret")
+  await waitFor(() => doc.__loaded)
+
+  assert.equal(doc.status, "open")
+  assert.deepEqual(calls, [
+    { method: "load", payload: { table: "order", id: "o1" } }
+  ])
+})
+
+test("one-off read methods wait for authorization before RPC", async () => {
+  const state = createDbState({
+    autoConnect: false,
+    cache: createMemoryCache(),
+    safetySyncInterval: 0,
+    ...testStorage(),
+    tables: ["order"]
+  })
+  const calls = []
+  state.socket.rpc = async (method, payload) => {
+    calls.push({ method, payload })
+    if (method === "getIds") return ["o1"]
+    if (method === "getUnique") return ["open"]
+    return undefined
+  }
+  state.socket.system = async () => ({ userId: "u1", hash: "h1", ok: true })
+
+  const idsPromise = state.order.getIds({ sort: { _id: 1 } })
+  const uniquePromise = state.order.getUnique({ field: "status" })
+  await new Promise((resolve) => setTimeout(resolve, 10))
+
+  assert.deepEqual(calls, [])
+
+  await state.login("ivan", "secret")
+
+  assert.deepEqual(await idsPromise, ["o1"])
+  assert.deepEqual(await uniquePromise, ["open"])
+  assert.deepEqual(calls, [
+    { method: "getIds", payload: { table: "order", sort: { _id: 1 } } },
+    { method: "getUnique", payload: { table: "order", field: "status" } }
+  ])
+})
+
+test("writes wait briefly for authorization and fail when it is not restored", async () => {
+  const state = createDbState({
+    autoConnect: false,
+    cache: createMemoryCache(),
+    safetySyncInterval: 0,
+    writeAuthTimeout: 10,
+    ...testStorage(),
+    tables: ["order"]
+  })
+  const calls = []
+  state.socket.rpc = async (method, payload) => {
+    calls.push({ method, payload })
+    return { ok: true }
+  }
+
+  await assert.rejects(
+    () => state.order.update({ id: "o1", set: { status: "done" } }),
+    /authorized/
+  )
+  assert.deepEqual(calls, [])
+})
+
 test("countRef reuses an existing ref for equal filter settings", async () => {
   const cache = createMemoryCache()
   const state = createDbState({
@@ -277,7 +451,7 @@ test("idsRef refreshes from server after table changes and auth", async () => {
     calls.push({ method, payload })
     return ids.shift()
   }
-  state.socket.system = async () => ({ userId: "u1", hash: "h1", ok: true })
+  state.auth.status = "authorized"
 
   const list = state.order.idsRef({ sort: { _id: 1 } })
   await waitFor(() => calls.length === 0)
@@ -290,7 +464,12 @@ test("idsRef refreshes from server after table changes and auth", async () => {
   })
   await waitFor(() => list.value.length === 2)
 
-  await state.login("ivan", "secret")
+  await state.applyChange({
+    table: "order",
+    id: "o3",
+    action: "insert",
+    obj: { _id: "o3", status: "open" }
+  })
   await waitFor(() => list.value.length === 3)
 
   assert.deepEqual(calls, [
@@ -337,6 +516,7 @@ test("idsRef includes skip in query deduplication", async () => {
     calls.push({ method, payload })
     return payload.skip === 10 ? ["o11"] : ["o1"]
   }
+  state.auth.status = "authorized"
 
   const first = state.order.idsRef({ sort: { _id: 1 }, skip: 0, limit: 10 })
   const same = state.order.idsRef({ limit: 10, sort: { _id: 1 }, skip: 0 })
@@ -466,6 +646,28 @@ function memoryStorage() {
     removeItem: (key) => data.delete(key),
     setItem: (key, value) => data.set(key, String(value))
   }
+}
+
+class FakeWebSocket {
+  static OPEN = 1
+  static CONNECTING = 0
+
+  readyState = FakeWebSocket.OPEN
+  listeners = new Map()
+
+  addEventListener(type, handler) {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set())
+    this.listeners.get(type).add(handler)
+  }
+
+  close() {
+    this.readyState = 3
+    for (const handler of this.listeners.get("close") ?? []) {
+      handler({ type: "close" })
+    }
+  }
+
+  send() {}
 }
 
 async function waitFor(check) {

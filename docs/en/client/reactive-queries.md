@@ -34,6 +34,7 @@ Key properties:
 
 - **Idempotent**: calling `load("o1")` twice returns the **same reactive object** — no second fetch.
 - **Cache-first**: if the document is in IndexedDB, it's returned synchronously and shown immediately.
+- **Auth-safe**: if cache misses before the socket is authorized, no protected RPC is sent; `__loaded` stays false and the document is retried after authorization.
 - **Auto-updated**: when the server pushes an update for `o1` via sync, the same reactive object is patched in place.
 - Returns `undefined` only when `id` is `null` / `undefined`.
 
@@ -85,10 +86,11 @@ const ids = state.order.idsRef({
 Refreshed automatically when:
 
 - The client logs in for the first time.
+- Hash auth succeeds and this ref had no cached value yet.
 - A `sync` brings changes for this table.
 - A local mutation (`update`/`add`/`remove`) on this table succeeds.
 
-**Not** refreshed by `authByHash` reconnects or page refresh by themselves — only if sync returns changes.
+Cached refs are **not** refreshed by `authByHash` reconnects or page refresh by themselves — only if sync returns changes. This keeps page refresh offline-fast and avoids extra query RPCs for data already restored from IndexedDB.
 
 ### Deduplication
 
@@ -104,7 +106,7 @@ Same filter + sort + skip + limit → same ref instance, no extra server roundtr
 
 ### Persistence
 
-Last value is written to IndexedDB under a special `__dbstate_query` table. On page load, the ref initializes to the cached value (so the UI shows previous results immediately), then refreshes from the server after authentication.
+Last value is written to IndexedDB under a special `__dbstate_query` table. On page load, the ref initializes to the cached value so the UI shows previous results immediately. If no cached value exists, the ref stays empty/not loaded until authorization, then refreshes from the server.
 
 ## `listRef`
 
@@ -199,7 +201,7 @@ router.beforeEach(async (to) => {
 })
 ```
 
-The default timeout is 15s and is controlled by `waitTimeout` in `createDbState` options.
+If the document is not in cache and the socket is not authorized yet, `getAsync` waits for authorization before sending the RPC. The default post-RPC wait timeout is 15s and is controlled by `waitTimeout` in `createDbState` options. For UI, prefer `load()` because it returns a reactive object immediately and can update later.
 
 ## `getIds`
 
@@ -210,6 +212,8 @@ const ids = await state.order.getIds({ filter: { status: "open" } }, "report")
 ```
 
 Use when you need just the result once (e.g. for a CSV export or an ad-hoc report). Use `idsRef` for anything live.
+
+`getIds` waits until `state.auth.status === "authorized"` before sending the RPC. It is not reactive and does not read/write the query cache.
 
 ## `getUnique`
 
@@ -227,6 +231,8 @@ const ownerIds = await state.order.getUnique({
 
 Useful for building filter dropdowns. Field-level read permissions still apply — if a caller can't read `ownerId`, those values are filtered out.
 
+`getUnique` also waits for `authorized` before sending the RPC. For live UI state, prefer a reactive list/count pattern where possible.
+
 ## Refresh triggers
 
 A `countRef` / `idsRef` server refresh happens in exactly these cases:
@@ -234,9 +240,10 @@ A `countRef` / `idsRef` server refresh happens in exactly these cases:
 | Trigger | Refreshed? |
 |---|:---:|
 | First explicit `login()` | ✅ |
+| `authByHash` with a ref that missed cache | ✅ |
 | Local `update`/`add`/`remove` succeeds | ✅ (debounced) |
 | Server pushes `changes_available` for this table | ✅ (debounced) |
-| `authByHash` reconnect | ❌ unless sync brings changes |
+| `authByHash` with a cached ref | ❌ unless sync brings changes |
 | Page refresh / `restored` auth | ❌ |
 | Background safety-sync interval | ✅ if sync brings changes |
 

@@ -128,6 +128,10 @@ state.user.getError(id)
 | `listRef(query, key?)` | Computed list: `idsRef(query)` + `load(id, key)`. |
 | `isLoading(id)` / `getError(id)` | Per-document request state. |
 
+Reactive reads (`load`, `idsRef`, `listRef`, `countRef`) are cache-first. They do not call protected server RPCs until `state.auth.status === "authorized"`. If they miss the cache while auth/socket is not ready, they keep their loaded marker false and are retried after authorization.
+
+One-off reads (`getAsync`, `getIds`, `getUnique`) wait for authorization because their result cannot update later. Prefer the reactive APIs for UI. Writes (`add`, `update`, `remove`) wait up to `writeAuthTimeout` (default 3000 ms) for authorization, then throw if the socket is still not authorized.
+
 ### Reactive Queries
 
 `countRef(filter)` returns a Vue `ref` with the server count for a filter:
@@ -136,7 +140,7 @@ state.user.getError(id)
 const openCount = state.order.countRef({ status: "open" })
 ```
 
-When the ref is created, it first reads the last cached value from IndexedDB/cache and does not immediately call the server. The count is refreshed after manual login and after table changes, then saved back to cache. Hash auth/page refresh does not refresh it by itself. If the same `countRef` is requested again for the same table and filter, the existing ref is returned.
+When the ref is created, it first reads the last cached value from IndexedDB/cache and does not immediately call the server. The count is refreshed after manual login, after table changes, and after hash auth only when this ref did not have a cached value yet. The refreshed value is saved back to cache. If the same `countRef` is requested again for the same table and filter, the existing ref is returned.
 
 `idsRef(query)` returns a Vue `ref` with ids matching a server query:
 
@@ -149,7 +153,7 @@ const orderIds = state.order.idsRef({
 })
 ```
 
-The query object is passed to the server as `{ table, ...query }`, so `filter`, `sort`, `skip`, and `limit` are supported by the same API. When the ref is created, it first reads the last cached ids from IndexedDB/cache and does not immediately call the server. The ids ref is refreshed after manual login and after table changes, then saved back to cache. Hash auth/page refresh does not refresh it by itself. If the same query is requested again for the same table, the existing ref is returned.
+The query object is passed to the server as `{ table, ...query }`, so `filter`, `sort`, `skip`, and `limit` are supported by the same API. When the ref is created, it first reads the last cached ids from IndexedDB/cache and does not immediately call the server. The ids ref is refreshed after manual login, after table changes, and after hash auth only when this ref did not have a cached value yet. The refreshed value is saved back to cache. If the same query is requested again for the same table, the existing ref is returned.
 
 `listRef(query, key)` is the page-level helper for lists:
 
@@ -173,7 +177,7 @@ It does not keep a second object cache. The id list, document loading, sync upda
 Creation is cache-first:
 
 ```text
-countRef/idsRef created -> read cached value -> wait for manual login or table change -> refresh from server -> save cache
+countRef/idsRef created -> read cached value -> wait for authorized + missing cache or table change -> refresh from server -> save cache
 ```
 
 `countRef` and `idsRef` use a stable key built from the settings object. Object key order does not matter:
@@ -222,7 +226,7 @@ export const state = createDbState({
 })
 ```
 
-When the socket opens after a page refresh, the client reads saved `userId/hash`, calls `authByHash`, then runs sync. It does not refresh `countRef`/`idsRef` unless sync returns table changes. If the server rejects the saved hash, the client clears saved auth data and switches back to anonymous state.
+When the socket opens after a page refresh, the client reads saved `userId/hash`, calls `authByHash`, retries reactive reads that missed cache/auth, then runs sync. Cached `countRef`/`idsRef` values are not refreshed just because the page restored auth; they refresh when sync returns table changes. If the server rejects the saved hash, the client clears saved auth data and switches back to anonymous state.
 
 You can call the same flow manually:
 

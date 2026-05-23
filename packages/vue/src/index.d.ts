@@ -138,6 +138,8 @@ export interface DbStateOptions<TSchema extends DbStateSchema = DbStateSchema> {
   safetySyncInterval?: number
   /** Default wait timeout for `getAsync`, ms. Default `15000`. */
   waitTimeout?: number
+  /** How long writes wait for restored auth before failing, ms. Default `3000`. */
+  writeAuthTimeout?: number
 
   /** Debounce window before refreshing matching `countRef`s after a change. ms. Default `50`. */
   countRefreshDelay?: number
@@ -219,6 +221,9 @@ export type DbState<TSchema extends DbStateSchema = DbStateSchema> =
 
     /** Tells the server to terminate the session and clears saved auth. Does NOT clear local data. */
     logout(): Promise<void>
+
+    /** Resolves when auth becomes `authorized`; returns `false` only when `timeout` elapses. */
+    waitForAuthorized(timeout?: number): Promise<boolean>
   }
 
 // ---------------------------------------------------------------------------

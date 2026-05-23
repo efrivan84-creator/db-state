@@ -56,6 +56,7 @@ export function createDbState(input) {
     },
 
     async syncNow() {
+      if (state.auth.status !== "authorized") return
       if (syncPromise) return syncPromise
       state.sync.status = "syncing"
 
@@ -119,6 +120,7 @@ export function createDbState(input) {
       state.auth.status = "authorized"
       await refreshAllCountRefs(countRefs)
       await refreshAllIdsRefs(idsRefs)
+      await retryUnloadedTables(state, options)
       return result
     },
 
@@ -132,6 +134,7 @@ export function createDbState(input) {
           hash: state.auth.hash
         })
         state.auth.status = "authorized"
+        await retryUnloadedTables(state, options)
         return result.ok
       } catch (error) {
         clearAuth(options)
@@ -161,6 +164,10 @@ export function createDbState(input) {
       state.auth.userId = null
       state.auth.hash = null
       state.auth.status = "anonymous"
+    },
+
+    waitForAuthorized(timeout) {
+      return waitForAuthorized(state, timeout)
     }
   })
 
@@ -174,6 +181,9 @@ export function createDbState(input) {
   })
   state.socket.on("dbstate:socket_close", () => {
     state.sync.connected = false
+    if (state.auth.status === "authorized" || state.auth.status === "authorizing") {
+      state.auth.status = state.auth.userId && state.auth.hash ? "restored" : "anonymous"
+    }
   })
   state.socket.on(DB_STATE_EVENTS.hello, async () => {
     state.sync.connected = true
@@ -222,6 +232,7 @@ function normalizeOptions(input) {
     userIdKey: "db-state.userId",
     syncKey: "db-state.time1",
     waitTimeout: 15000,
+    writeAuthTimeout: 3000,
     wsUrl: `${wsOrigin}/db-state/ws`,
     ...options
   }
@@ -277,12 +288,38 @@ function applyReactiveChange(tables, change) {
   }
 
   if (change.action === "update") {
-    if (!table[change.id]) {
-      table[change.id] = { id: change.id, _id: change.id }
-    }
+    if (!table[change.id]) return
 
     applyPatch(table[change.id], change)
   }
+}
+
+async function retryUnloadedTables(state, options) {
+  const retries = []
+
+  for (const table of options.tables) {
+    retries.push(state[table].__retryUnloaded())
+  }
+
+  await Promise.all(retries)
+}
+
+function waitForAuthorized(state, timeout) {
+  if (state.auth.status === "authorized") return Promise.resolve(true)
+
+  const startedAt = Date.now()
+
+  return new Promise((resolve) => {
+    const timer = setInterval(() => {
+      if (state.auth.status === "authorized") {
+        clearInterval(timer)
+        resolve(true)
+      } else if (timeout != null && Date.now() - startedAt >= timeout) {
+        clearInterval(timer)
+        resolve(false)
+      }
+    }, 20)
+  })
 }
 
 function replaceRecord(target, source) {

@@ -60,6 +60,7 @@ createDbState<Schema>(["order", "product"])
 | `rpcTimeout` | `number` | `15000` | ms for RPC waits. |
 | `safetySyncInterval` | `number` | `30000` | Background sync interval. `0` = disabled. |
 | `waitTimeout` | `number` | `15000` | `getAsync` timeout. |
+| `writeAuthTimeout` | `number` | `3000` | How long writes wait for restored auth before failing. |
 | `countRefreshDelay` | `number` | `50` | Debounce for `countRef` refresh. |
 | `idsRefreshDelay` | `number` | `50` | Debounce for `idsRef` refresh. |
 | `onError` | `(err) => void` | `console.error` | Background error sink. |
@@ -88,6 +89,7 @@ interface DbState<TSchema> {
   authByHash(): Promise<boolean>
   autoAuth(): Promise<boolean>
   logout(): Promise<void>
+  waitForAuthorized(timeout?: number): Promise<boolean>
 }
 ```
 
@@ -122,6 +124,8 @@ Pulls the next batch of changes from the server and applies them. Idempotent —
 await state.syncNow()
 ```
 
+If `state.auth.status !== "authorized"`, `syncNow()` returns without sending a protected RPC.
+
 ### `applyChange(change)`
 
 Used internally and by tests. You generally don't call this directly.
@@ -136,7 +140,7 @@ await state.applyChange({
 })
 ```
 
-Updates the reactive store, writes/deletes cache row, schedules `countRef` / `idsRef` refresh.
+Updates the reactive store, writes/deletes cache row, schedules `countRef` / `idsRef` refresh. `update` changes patch only already-loaded local documents; they do not create partial objects. `insert` changes create the local document because the log carries the full object.
 
 ### `clearLocalDB()`
 
@@ -198,6 +202,8 @@ interface TableApi<T extends BaseDoc> {
 ```
 
 See [reactive-queries.md](reactive-queries.md) and [mutations.md](mutations.md) for deep dives.
+
+Reactive methods (`load`, `idsRef`, `countRef`, `listRef`) are cache-first and retry only missed loads after authorization. One-off read methods (`getAsync`, `getIds`, `getUnique`) wait for authorization before RPC. Writes wait up to `writeAuthTimeout`.
 
 ## `ListQuery<T>`
 
@@ -285,10 +291,10 @@ See [cache-and-offline.md](cache-and-offline.md).
 ## `ReactiveDoc<T>`
 
 ```ts
-type ReactiveDoc<T> = T & { __loaded?: boolean }
+type ReactiveDoc<T> = T & { __loaded?: boolean; __cacheChecked?: boolean }
 ```
 
-A reactive proxy over your document. `__loaded` becomes `true` once data arrives from cache or server.
+A reactive proxy over your document. `__cacheChecked` becomes `true` after the local cache lookup. `__loaded` becomes `true` once data arrives from cache or server.
 
 ## Service table types
 

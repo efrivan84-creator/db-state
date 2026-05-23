@@ -236,6 +236,8 @@ await state.logout()
 
 Auth hash is stored on the client and reused after page refresh. It is shared per user on the server, so opening another tab does not invalidate existing sessions. Rotate `_user.hash` if you need to force logout everywhere.
 
+Reactive reads are cache-first and auth-safe: `load`, `idsRef`, `listRef`, and `countRef` show cached values immediately and call protected RPCs only after `state.auth.status === "authorized"`. If a read missed cache while the socket was offline or still authorizing, it is retried after authorization. One-off reads (`getAsync`, `getIds`, `getUnique`) wait for authorization because they cannot update later.
+
 Default client storage:
 
 | Data | Storage |

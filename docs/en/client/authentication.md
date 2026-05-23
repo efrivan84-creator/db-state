@@ -18,7 +18,8 @@ What happens:
 2. Server verifies password (PBKDF2 by default), looks up `_user.hash`, creates it if missing, and assigns it to the socket.
 3. Client saves `userId` + `hash` to `localStorage` (configurable storage).
 4. All `countRef` / `idsRef` are refreshed.
-5. State transitions: `state.auth.status` becomes `"authorized"`.
+5. Reactive documents that missed cache/auth are retried.
+6. State transitions: `state.auth.status` becomes `"authorized"`.
 
 ## Hash reconnect
 
@@ -37,7 +38,8 @@ Enabled by default. On socket connect (initial or reconnect), the client:
 
 1. Reads saved `userId` / `hash`.
 2. If present, runs `authByHash`.
-3. On success, runs `syncNow`.
+3. On success, retries reactive reads that missed cache/auth.
+4. Then runs `syncNow`.
 
 ```js
 export const state = createDbState({
@@ -67,6 +69,8 @@ state.auth.status
 | `"restored"` | Saved credentials exist; UI can show cached data while we wait for the socket. |
 | `"authorizing"` | `authByHash` is in flight. |
 | `"authorized"` | Confirmed by the server; RPCs allowed. |
+
+A socket close downgrades `"authorized"` / `"authorizing"` to `"restored"` when saved credentials still exist, or to `"anonymous"` otherwise. Protected RPCs are sent only in `"authorized"` state; cache-first reactive reads wait and retry automatically.
 
 A common UI pattern:
 
