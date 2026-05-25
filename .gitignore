@@ -11,6 +11,7 @@ demo2/client/dist/
 .env
 .env.local
 .env.*.local
+autodev-config.json
 
 # Logs
 *.log
