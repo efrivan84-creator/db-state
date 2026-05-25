@@ -2,6 +2,12 @@
 
 Release notes and project status for db-state.
 
+## 0.0.7
+
+- Simplified server code access rules to `access[table].read/write` and global `access.read/write`; removed the nested `access.table` / `access.doc` shape from docs and runtime lookup.
+- Added a regression test for direct table and global code access rules.
+- Added server lifecycle hooks: `beforeRead`, `afterRead`, `errorRead`, `beforeWrite`, `afterWrite`, and `errorWrite`, available globally and per table.
+
 ## 0.0.6
 
 - Server `add` and `update` now strip client-supplied `info` / `info.*` fields before validation and persistence.
@@ -58,7 +64,7 @@ Initial public release:
 
 ## Current status
 
-- Realtime CRUD with permissions, offline cache, login, and sync is implemented and covered by 60 tests.
+- Realtime CRUD with permissions, offline cache, login, and sync is implemented and covered by 64 tests.
 - TypeScript declarations are included for all packages.
 - Append-only log supports audit trail, delete recovery, and time-travel reconstruction patterns.
 - Vue + MongoDB + WebSocket are the supported stack.

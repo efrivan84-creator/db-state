@@ -99,17 +99,15 @@ const dbState = createDbStateServer({
   mongo,
   tables: ["order"],
   access: {
-    table: {
-      order: {
-        read: async ({ user, loadDoc }) => {
-          const doc = await loadDoc()
-          return user.tenantIds?.includes(doc?.tenantId)
-        },
-        write: async ({ user, action, loadDoc }) => {
-          if (action === "insert") return true
-          const doc = await loadDoc()
-          return user.tenantIds?.includes(doc?.tenantId)
-        }
+    order: {
+      read: async ({ user, loadDoc }) => {
+        const doc = await loadDoc()
+        return user.tenantIds?.includes(doc?.tenantId)
+      },
+      write: async ({ user, action, loadDoc }) => {
+        if (action === "insert") return true
+        const doc = await loadDoc()
+        return user.tenantIds?.includes(doc?.tenantId)
       }
     }
   }
@@ -124,20 +122,18 @@ Example: users can read only their own tasks, admins can read all:
 
 ```js
 access: {
-  table: {
-    task: {
-      read: async ({ user, loadDoc }) => {
-        if (user.groups?.includes("admin")) return true
-        const task = await loadDoc()
-        return task?.ownerId === user._id
-      },
-      write: async ({ user, action, loadDoc }) => {
-        if (user.groups?.includes("admin")) return true
-        if (action === "insert") return true
+  task: {
+    read: async ({ user, loadDoc }) => {
+      if (user.groups?.includes("admin")) return true
+      const task = await loadDoc()
+      return task?.ownerId === user._id
+    },
+    write: async ({ user, action, loadDoc }) => {
+      if (user.groups?.includes("admin")) return true
+      if (action === "insert") return true
 
-        const task = await loadDoc()
-        return task?.ownerId === user._id
-      }
+      const task = await loadDoc()
+      return task?.ownerId === user._id
     }
   }
 }

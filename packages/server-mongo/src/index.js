@@ -10,6 +10,7 @@ import {
   resolveUser
 } from "./access.js"
 import { createAuth, defaultAuthHash, defaultPassword } from "./auth.js"
+import { runErrorHooks, runHooks } from "./hooks.js"
 import { createHandlers, handleRpc } from "./rpc.js"
 import { createSocketHub } from "./socket.js"
 
@@ -31,173 +32,272 @@ export function createDbStateServer(options) {
 
   async function update({ table, id, set, unset, sessionId, req }) {
     assertTable(config, table)
-    const user = await resolveUser(config, { req })
-    const now = config.now()
-    const old = await getDoc(config, table, id)
-    const clientSet = stripInfoSet(set)
-    const clientUnset = stripInfoUnset(unset)
-    const serverSet = {
-      ...clientSet,
-      "info.editid": user?._id,
-      "info.editdata": now
+    const ctx = { req, table, id, method: "update", action: "update", sessionId }
+
+    try {
+      ctx.user = await resolveUser(config, { req })
+      ctx.now = config.now()
+      ctx.old = await getDoc(config, table, id)
+      ctx.clientSet = stripInfoSet(set)
+      ctx.clientUnset = stripInfoUnset(unset)
+      ctx.set = {
+        ...ctx.clientSet,
+        "info.editid": ctx.user?._id,
+        "info.editdata": ctx.now
+      }
+      ctx.unset = ctx.clientUnset
+      await runHooks(config, table, "beforeWrite", ctx)
+      ctx.obj = applyPatch({ ...(ctx.old ?? { _id: id }) }, { set: ctx.set, unset: ctx.unset })
+      const access = await assertAccess(config, "write", ctx)
+      assertFieldsAccess(access, changeWritePaths({ set: ctx.clientSet, unset: ctx.clientUnset }), "Write")
+
+      await config.mongo.collection(table).updateOne(
+        { _id: id },
+        {
+          $set: ctx.set,
+          ...(ctx.unset?.length ? { $unset: Object.fromEntries(ctx.unset.map((key) => [key, ""])) } : {})
+        },
+        { upsert: true }
+      )
+
+      ctx.change = await appendLog(config, {
+        table,
+        id,
+        action: "update",
+        set: ctx.set,
+        unset: ctx.unset?.length ? ctx.unset : undefined,
+        sessionId,
+        userId: ctx.user?._id,
+        createdAt: ctx.now
+      })
+
+      changesBroadcaster.schedule()
+      ctx.result = { ok: true, change: ctx.change }
+      await runHooks(config, table, "afterWrite", ctx)
+      return ctx.result
+    } catch (error) {
+      ctx.error = error
+      await runErrorHooks(config, table, "errorWrite", ctx)
+      throw error
     }
-    const obj = applyPatch({ ...(old ?? { _id: id }) }, { set: serverSet, unset: clientUnset })
-    const access = await assertAccess(config, "write", { req, table, id, obj, old, set: clientSet, unset: clientUnset, action: "update" })
-    assertFieldsAccess(access, changeWritePaths({ set: clientSet, unset: clientUnset }), "Write")
-
-    await config.mongo.collection(table).updateOne(
-      { _id: id },
-      {
-        $set: serverSet,
-        ...(clientUnset?.length ? { $unset: Object.fromEntries(clientUnset.map((key) => [key, ""])) } : {})
-      },
-      { upsert: true }
-    )
-
-    const change = await appendLog(config, {
-      table,
-      id,
-      action: "update",
-      set: serverSet,
-      unset: clientUnset?.length ? clientUnset : undefined,
-      sessionId,
-      userId: user?._id,
-      createdAt: now
-    })
-
-    changesBroadcaster.schedule()
-    return { ok: true, change }
   }
 
   async function add({ table, obj, sessionId, req }) {
     assertTable(config, table)
-    const user = await resolveUser(config, { req })
-    const now = config.now()
-    const id = obj._id ?? obj.id ?? config.createLogId()
-    const clientDocument = stripInfoObject(obj)
-    const document = {
-      ...clientDocument,
-      _id: id,
-      info: {
-        makeid: user?._id,
-        makedata: now
+    const ctx = { req, table, method: "add", action: "insert", sessionId }
+
+    try {
+      ctx.user = await resolveUser(config, { req })
+      ctx.now = config.now()
+      ctx.id = obj._id ?? obj.id ?? config.createLogId()
+      ctx.clientObj = stripInfoObject(obj)
+      ctx.obj = {
+        ...ctx.clientObj,
+        _id: ctx.id,
+        info: {
+          makeid: ctx.user?._id,
+          makedata: ctx.now
+        }
       }
+      await runHooks(config, table, "beforeWrite", ctx)
+      ctx.id = ctx.id ?? ctx.obj._id ?? ctx.obj.id
+      ctx.obj._id = ctx.id
+      const access = await assertAccess(config, "write", ctx)
+      assertFieldsAccess(access, changeWritePaths({ obj: ctx.clientObj }), "Write")
+
+      await config.mongo.collection(table).insertOne(ctx.obj)
+      ctx.change = await appendLog(config, {
+        table,
+        id: ctx.id,
+        action: "insert",
+        obj: ctx.obj,
+        sessionId,
+        userId: ctx.user?._id,
+        createdAt: ctx.now
+      })
+
+      changesBroadcaster.schedule()
+      ctx.result = { ok: true, id: ctx.id, change: ctx.change }
+      await runHooks(config, table, "afterWrite", ctx)
+      return ctx.result
+    } catch (error) {
+      ctx.error = error
+      await runErrorHooks(config, table, "errorWrite", ctx)
+      throw error
     }
-    const access = await assertAccess(config, "write", { req, table, id, obj: document, action: "insert" })
-    assertFieldsAccess(access, changeWritePaths({ obj: clientDocument }), "Write")
-
-    await config.mongo.collection(table).insertOne(document)
-    const change = await appendLog(config, {
-      table,
-      id,
-      action: "insert",
-      obj: document,
-      sessionId,
-      userId: user?._id,
-      createdAt: now
-    })
-
-    changesBroadcaster.schedule()
-    return { ok: true, id, change }
   }
 
   async function remove({ table, id, sessionId, req }) {
     assertTable(config, table)
-    const user = await resolveUser(config, { req })
-    const old = await getDoc(config, table, id)
-    await assertAccess(config, "write", { req, table, id, obj: old, old, action: "delete" })
+    const ctx = { req, table, id, method: "remove", action: "delete", sessionId }
 
-    await config.mongo.collection(table).deleteOne({ _id: id })
-    const change = await appendLog(config, {
-      table,
-      id,
-      action: "delete",
-      old,
-      sessionId,
-      userId: user?._id
-    })
+    try {
+      ctx.user = await resolveUser(config, { req })
+      ctx.old = await getDoc(config, table, id)
+      ctx.obj = ctx.old
+      await runHooks(config, table, "beforeWrite", ctx)
+      await assertAccess(config, "write", ctx)
 
-    changesBroadcaster.schedule()
-    return { ok: true, change }
+      await config.mongo.collection(table).deleteOne({ _id: id })
+      ctx.change = await appendLog(config, {
+        table,
+        id,
+        action: "delete",
+        old: ctx.old,
+        sessionId,
+        userId: ctx.user?._id
+      })
+
+      changesBroadcaster.schedule()
+      ctx.result = { ok: true, change: ctx.change }
+      await runHooks(config, table, "afterWrite", ctx)
+      return ctx.result
+    } catch (error) {
+      ctx.error = error
+      await runErrorHooks(config, table, "errorWrite", ctx)
+      throw error
+    }
   }
 
   async function load({ table, id, req }) {
     assertTable(config, table)
-    const obj = await getDoc(config, table, id)
-    const access = await assertAccess(config, "read", { req, table, id, obj })
-    return projectFields(obj, access.fields)
+    const ctx = { req, table, id, method: "load" }
+
+    try {
+      ctx.user = await resolveUser(config, { req })
+      await runHooks(config, table, "beforeRead", ctx)
+      ctx.obj = await getDoc(config, table, id)
+      const access = await assertAccess(config, "read", ctx)
+      ctx.result = projectFields(ctx.obj, access.fields)
+      await runHooks(config, table, "afterRead", ctx)
+      return ctx.result
+    } catch (error) {
+      ctx.error = error
+      await runErrorHooks(config, table, "errorRead", ctx)
+      throw error
+    }
   }
 
   async function getIds({ table, filter = {}, sort, skip = 0, limit = 0, req }) {
     assertTable(config, table)
-    let cursor = config.mongo.collection(table).find(filter)
-    if (sort) cursor = cursor.sort(sort)
-    if (skip) cursor = cursor.skip(skip)
-    if (limit) cursor = cursor.limit(limit)
-    return (await filterReadable(config, req, table, await cursor.toArray())).map((row) => row._id ?? row.id)
+    const ctx = { req, table, method: "getIds", filter, sort, skip, limit }
+
+    try {
+      ctx.user = await resolveUser(config, { req })
+      await runHooks(config, table, "beforeRead", ctx)
+      let cursor = config.mongo.collection(table).find(ctx.filter)
+      if (ctx.sort) cursor = cursor.sort(ctx.sort)
+      if (ctx.skip) cursor = cursor.skip(ctx.skip)
+      if (ctx.limit) cursor = cursor.limit(ctx.limit)
+      ctx.rows = await filterReadable(config, req, table, await cursor.toArray())
+      ctx.result = ctx.rows.map((row) => row._id ?? row.id)
+      await runHooks(config, table, "afterRead", ctx)
+      return ctx.result
+    } catch (error) {
+      ctx.error = error
+      await runErrorHooks(config, table, "errorRead", ctx)
+      throw error
+    }
   }
 
   async function getUnique({ table, field, filter = {}, req }) {
     assertTable(config, table)
-    const values = []
-    for (const row of await config.mongo.collection(table).find(filter).toArray()) {
-      const access = await resolveAccess(config, "read", { req, table, id: row._id ?? row.id, obj: row })
-      if (!access.allowed) continue
-      values.push(getByPath(projectFields(row, access.fields), field))
+    const ctx = { req, table, method: "getUnique", field, filter }
+
+    try {
+      ctx.user = await resolveUser(config, { req })
+      await runHooks(config, table, "beforeRead", ctx)
+      const values = []
+      for (const row of await config.mongo.collection(table).find(ctx.filter).toArray()) {
+        const access = await resolveAccess(config, "read", { req, table, id: row._id ?? row.id, obj: row })
+        if (!access.allowed) continue
+        values.push(getByPath(projectFields(row, access.fields), field))
+      }
+      ctx.result = [...new Set(values.filter((value) => value != null))]
+      await runHooks(config, table, "afterRead", ctx)
+      return ctx.result
+    } catch (error) {
+      ctx.error = error
+      await runErrorHooks(config, table, "errorRead", ctx)
+      throw error
     }
-    return [...new Set(values.filter((value) => value != null))]
   }
 
   async function count({ table, filter = {}, req }) {
     assertTable(config, table)
-    return (await filterReadable(config, req, table, await config.mongo.collection(table).find(filter).toArray())).length
+    const ctx = { req, table, method: "count", filter }
+
+    try {
+      ctx.user = await resolveUser(config, { req })
+      await runHooks(config, table, "beforeRead", ctx)
+      ctx.rows = await filterReadable(config, req, table, await config.mongo.collection(table).find(ctx.filter).toArray())
+      ctx.result = ctx.rows.length
+      await runHooks(config, table, "afterRead", ctx)
+      return ctx.result
+    } catch (error) {
+      ctx.error = error
+      await runErrorHooks(config, table, "errorRead", ctx)
+      throw error
+    }
   }
 
   async function sync({ from, sessionId, req, limit = config.syncLimit }) {
-    const to = config.now()
-    const permissionRulesByTable = new Map()
-    const changes = await config.mongo
-      .collection(config.logCollection)
-      .find({
-        createdAt: { $gt: from, $lte: to },
-        ...(sessionId ? { sessionId: { $ne: sessionId } } : {})
-      })
-      .sort({ createdAt: 1, logId: 1 })
-      .limit(limit)
-      .toArray()
+    const readCtx = { req, method: "sync", from, sessionId, limit }
 
-    const allowed = []
-    for (const change of changes) {
-      const permissionRules = await getPermissionRules(config, permissionRulesByTable, change.table)
-      let didLoadDoc = change.action === "delete"
-      const ctx = {
-        req,
-        table: change.table,
-        id: change.id,
-        old: change.old,
-        change,
-        permissionRules,
-        obj: change.action === "delete" ? change.old : undefined,
-        loadDoc: async () => {
-          if (!didLoadDoc) {
-            ctx.obj = await getDoc(config, change.table, change.id)
-            didLoadDoc = true
+    try {
+      readCtx.user = await resolveUser(config, { req })
+      await runHooks(config, undefined, "beforeRead", readCtx)
+      readCtx.to = config.now()
+      const permissionRulesByTable = new Map()
+      const changes = await config.mongo
+        .collection(config.logCollection)
+        .find({
+          createdAt: { $gt: readCtx.from, $lte: readCtx.to },
+          ...(readCtx.sessionId ? { sessionId: { $ne: readCtx.sessionId } } : {})
+        })
+        .sort({ createdAt: 1, logId: 1 })
+        .limit(readCtx.limit)
+        .toArray()
+
+      const allowed = []
+      for (const change of changes) {
+        const permissionRules = await getPermissionRules(config, permissionRulesByTable, change.table)
+        let didLoadDoc = change.action === "delete"
+        const ctx = {
+          req,
+          table: change.table,
+          id: change.id,
+          old: change.old,
+          change,
+          permissionRules,
+          obj: change.action === "delete" ? change.old : undefined,
+          loadDoc: async () => {
+            if (!didLoadDoc) {
+              ctx.obj = await getDoc(config, change.table, change.id)
+              didLoadDoc = true
+            }
+
+            return ctx.obj
           }
-
-          return ctx.obj
         }
+
+        if (change.action !== "delete" && permissionRules.some((rule) => rule.if)) {
+          await ctx.loadDoc()
+        }
+
+        const access = await resolveAccess(config, "read", ctx)
+        const filtered = access.allowed ? filterChangeFields(change, access.fields) : undefined
+        if (filtered) allowed.push(filtered)
       }
 
-      if (change.action !== "delete" && permissionRules.some((rule) => rule.if)) {
-        await ctx.loadDoc()
-      }
-
-      const access = await resolveAccess(config, "read", ctx)
-      const filtered = access.allowed ? filterChangeFields(change, access.fields) : undefined
-      if (filtered) allowed.push(filtered)
+      readCtx.result = { to: readCtx.to, changes: allowed }
+      await runHooks(config, undefined, "afterRead", readCtx)
+      return readCtx.result
+    } catch (error) {
+      readCtx.error = error
+      await runErrorHooks(config, undefined, "errorRead", readCtx)
+      throw error
     }
-
-    return { to, changes: allowed }
   }
 
   router = createHandlers({ add, count, getIds, getUnique, load, remove, sync, update })
@@ -261,6 +361,7 @@ function normalizeOptions(options) {
     changesBroadcastDelay: 3000,
     changesBroadcastRate: 100,
     getUser: async ({ req, client }) => req?.user ?? req?.client?.user ?? client?.user ?? makeUser(req?.client ?? req ?? client),
+    hooks: {},
     logCollection: "log",
     now: () => new Date().toISOString(),
     normalizeAuthLogin: defaultNormalizeAuthLogin,

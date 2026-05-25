@@ -62,12 +62,13 @@ export interface AccessDecision {
 }
 
 /** Shape accepted by `createDbStateServer({ access })`. */
-export interface AccessConfig {
-  /** Per-(table, id) rules. */
-  doc?: Record<string, Record<string, { read?: AccessRule<any>; write?: AccessRule<any> }>>
-  /** Per-table rules. */
-  table?: Record<string, { read?: AccessRule<any>; write?: AccessRule<any> }>
-}
+export type AccessConfig =
+  {
+    /** Global read fallback. Checked after `access[table].read` and before `_permission`. */
+    read?: AccessRule<any>
+    /** Global write fallback. Checked after `access[table].write` and before `_permission`. */
+    write?: AccessRule<any>
+  } & Record<string, { read?: AccessRule<any>; write?: AccessRule<any> } | AccessRule<any> | undefined>
 
 /** Throws `Read denied` / `Write denied` if the decision says no. */
 export function assertAccess<T extends BaseDoc = BaseDoc>(

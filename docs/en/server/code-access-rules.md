@@ -2,36 +2,28 @@
 
 When `_permission` rows aren't expressive enough — for example, "user can read their own orders" — write rules in JavaScript. They run **before** any `_permission` lookup and can decide, deny, or pass.
 
-## Two scopes
+## Rule lookup
 
 ```js
 createDbStateServer({
   mongo,
   tables: ["order"],
   access: {
-    table: {
-      order: {
-        read:  async (ctx) => { ... },
-        write: async (ctx) => { ... }
-      }
+    read: async (ctx) => { ... },       // global fallback
+    write: async (ctx) => { ... },      // global fallback
+    order: {
+      read:  async (ctx) => { ... },    // table-specific rule
+      write: async (ctx) => { ... }     // table-specific rule
     },
-    doc: {
-      order: {
-        "special-order-id": {
-          read:  async (ctx) => true,
-          write: async (ctx) => false
-        }
-      }
-    }
   }
 })
 ```
 
 | Scope | When evaluated |
 |---|---|
-| `access.doc[table][id][action]` | First. If defined, checked first for that specific document. |
-| `access.table[table][action]` | Second. If defined, checked for any document in that table. |
-| `_permission` rows | Third. Only if both above return `null` / `undefined`. |
+| `access[table][action]` | First. Table-specific rule. |
+| `access[action]` | Second. Global fallback rule for every table. |
+| `_permission` rows | Third. Only if code rules return `null` / `undefined`. |
 | Deny | If nothing decides. |
 
 The first rule that returns a non-null value wins.
@@ -97,19 +89,17 @@ read: ({ user, id }) => {
 
 ```js
 access: {
-  table: {
-    order: {
-      read: async (ctx) => {
-        if (!ctx.user) return false
-        const obj = ctx.obj ?? await ctx.loadDoc?.()
-        return obj?.ownerId === ctx.user._id
-      },
-      write: async (ctx) => {
-        if (!ctx.user) return false
-        // For inserts, obj is the new doc.
-        // For updates/deletes, obj is the current/old state.
-        return ctx.obj?.ownerId === ctx.user._id || ctx.old?.ownerId === ctx.user._id
-      }
+  order: {
+    read: async (ctx) => {
+      if (!ctx.user) return false
+      const obj = ctx.obj ?? await ctx.loadDoc?.()
+      return obj?.ownerId === ctx.user._id
+    },
+    write: async (ctx) => {
+      if (!ctx.user) return false
+      // For inserts, obj is the new doc.
+      // For updates/deletes, obj is the current/old state.
+      return ctx.obj?.ownerId === ctx.user._id || ctx.old?.ownerId === ctx.user._id
     }
   }
 }
@@ -119,14 +109,12 @@ access: {
 
 ```js
 access: {
-  table: {
-    order: {
-      write: async (ctx) => {
-        if (ctx.action === "delete") {
-          return ctx.user?.groups?.includes("admin")  // only admins delete
-        }
-        return undefined  // for insert/update, fall through to _permission
+  order: {
+    write: async (ctx) => {
+      if (ctx.action === "delete") {
+        return ctx.user?.groups?.includes("admin")  // only admins delete
       }
+      return undefined  // for insert/update, fall through to _permission
     }
   }
 }
@@ -136,16 +124,14 @@ access: {
 
 ```js
 access: {
-  table: {
-    order: {
-      read: async (ctx) => {
-        if (!ctx.user) return false
-        if (ctx.user.groups?.includes("admin")) return true
-        if (ctx.user.groups?.includes("manager")) {
-          return { allowed: true, fields: ["_id", "status", "total"] }
-        }
-        return false
+  order: {
+    read: async (ctx) => {
+      if (!ctx.user) return false
+      if (ctx.user.groups?.includes("admin")) return true
+      if (ctx.user.groups?.includes("manager")) {
+        return { allowed: true, fields: ["_id", "status", "total"] }
       }
+      return false
     }
   }
 }
@@ -153,38 +139,38 @@ access: {
 
 The `fields` here is applied exactly like `_permission.read.fields` — server projects reads, validates writes.
 
-### Per-document rules
+### Specific document ids
 
 For one specific document with special handling:
 
 ```js
 access: {
-  doc: {
-    order: {
-      "o_global_announcement": {
-        read: async () => true,            // everyone can read
-        write: async ({ user }) => user?._id === "u_admin"  // only one user writes
-      }
+  order: {
+    read: async ({ id }) => {
+      if (id === "o_global_announcement") return true
+      return undefined
+    },
+    write: async ({ id, user }) => {
+      if (id === "o_global_announcement") return user?._id === "u_admin"
+      return undefined
     }
   }
 }
 ```
 
-Useful for singleton documents (app settings, announcements, feature flags).
+Use a normal `if` inside the table rule. This keeps the access config shallow and leaves the id-specific logic in code.
 
 ### Dynamic group check
 
 ```js
 access: {
-  table: {
-    project: {
-      read: async (ctx) => {
-        if (!ctx.user) return false
-        const obj = ctx.obj ?? await ctx.loadDoc?.()
-        if (!obj) return false
-        // The project document has a "memberIds" field.
-        return obj.memberIds?.includes(ctx.user._id)
-      }
+  project: {
+    read: async (ctx) => {
+      if (!ctx.user) return false
+      const obj = ctx.obj ?? await ctx.loadDoc?.()
+      if (!obj) return false
+      // The project document has a "memberIds" field.
+      return obj.memberIds?.includes(ctx.user._id)
     }
   }
 }
@@ -197,13 +183,11 @@ A common pattern: handle the dynamic check in code, but leave field-level projec
 ```js
 // Code rule: deny if not a member.
 access: {
-  table: {
-    project: {
-      read: async (ctx) => {
-        const obj = ctx.obj ?? await ctx.loadDoc?.()
-        if (!obj?.memberIds?.includes(ctx.user._id)) return false
-        return undefined  // pass to _permission for field rules
-      }
+  project: {
+    read: async (ctx) => {
+      const obj = ctx.obj ?? await ctx.loadDoc?.()
+      if (!obj?.memberIds?.includes(ctx.user._id)) return false
+      return undefined  // pass to _permission for field rules
     }
   }
 }
@@ -257,20 +241,22 @@ All callbacks may be async — return a Promise. The library awaits each. Use th
 
 Be aware: every RPC call awaits every rule that applies. Slow rules slow down every request.
 
-## Decision composition (the gotcha)
+## Decision composition
 
-Code rules at the **doc** scope are checked first. If they return a non-null value, the **table** code rule and `_permission` rows are **skipped**.
+Table-specific code rules are checked before global code rules. If a table rule returns a non-null value, the global rule and `_permission` rows are skipped.
 
 So:
 
 ```js
 access: {
-  doc: { order: { "o1": { read: async () => false } } },
-  table: { order: { read: async () => true } }
+  read: async () => true,
+  order: {
+    read: async ({ id }) => id === "o1" ? false : undefined
+  }
 }
 ```
 
-For `o1`: returns `false` from doc rule → denied. The table rule is not consulted. If you want table rules to apply unless doc rules say otherwise, return `null` from the doc rule when you don't want to decide.
+For `o1`: returns `false` from the table rule -> denied. The global rule is not consulted. For other orders, the table rule returns `undefined`, so the global rule allows access.
 
 ## Type safety
 
@@ -289,7 +275,7 @@ createDbStateServer({
   mongo,
   tables: ["order"],
   access: {
-    table: { order: { read: ownerOnly, write: ownerOnly } }
+    order: { read: ownerOnly, write: ownerOnly }
   }
 })
 ```

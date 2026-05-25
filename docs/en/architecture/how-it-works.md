@@ -70,8 +70,8 @@ The Node server.
    1. Looks up the calling user via `getUser(req)`.
    2. Fetches current `order/o1` from Mongo for permission checks.
    3. Runs `assertAccess("write", ctx)`:
-      - Tries `access.doc.order.o1.write` (your code rule, if any).
-      - Tries `access.table.order.write` (your table-level code rule).
+      - Tries `access.order.write` (your table-specific code rule, if any).
+      - Tries `access.write` (your global code fallback, if any).
       - Reads `_permission` rows for `table: "order"`, sorted by priority, finds the first matching rule for this user.
       - Validates every dot-path in `set`/`unset` against `write.fields`.
    4. `mongo.collection("order").updateOne({ _id: "o1" }, { $set: ... })`.

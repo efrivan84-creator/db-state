@@ -62,6 +62,9 @@ export interface DbStateServerConfig {
   /** Optional code-level access rules; checked before `_permission` rows. */
   access?: AccessConfig
 
+  /** Optional lifecycle hooks around server reads and writes. */
+  hooks?: ServerHooks
+
   /** Password hashing primitive. Default: PBKDF2-SHA256. */
   password?: PasswordHasher
 
@@ -110,6 +113,50 @@ export interface DbStateServerConfig {
   /** Maximum clients to wake per second during a changes broadcast wave. Default `100`. */
   changesBroadcastRate?: number
 }
+
+export interface ServerHookContext<T extends BaseDoc = BaseDoc> {
+  req?: unknown
+  user?: AccessUser
+  table?: string
+  method: "load" | "getIds" | "getUnique" | "count" | "sync" | "add" | "update" | "remove"
+  id?: string
+  action?: Change<T>["action"]
+  obj?: T
+  old?: T
+  set?: Partial<T> & Record<string, unknown>
+  unset?: string[]
+  clientObj?: Partial<T>
+  clientSet?: Partial<T> & Record<string, unknown>
+  clientUnset?: string[]
+  filter?: Filter<T>
+  sort?: Record<string, 1 | -1>
+  skip?: number
+  limit?: number
+  field?: string
+  from?: string
+  to?: string
+  sessionId?: string
+  now?: string
+  rows?: T[]
+  change?: Change<T>
+  result?: unknown
+  error?: Error
+}
+
+export type ServerHook<T extends BaseDoc = BaseDoc> =
+  (ctx: ServerHookContext<T>) => void | Promise<void>
+
+export interface ServerHookSet<T extends BaseDoc = BaseDoc> {
+  beforeRead?: ServerHook<T>
+  afterRead?: ServerHook<T>
+  errorRead?: ServerHook<T>
+  beforeWrite?: ServerHook<T>
+  afterWrite?: ServerHook<T>
+  errorWrite?: ServerHook<T>
+}
+
+export type ServerHooks =
+  ServerHookSet & Record<string, ServerHookSet | ServerHook | undefined>
 
 // ---------------------------------------------------------------------------
 // API

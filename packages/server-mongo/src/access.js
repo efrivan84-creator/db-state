@@ -102,12 +102,12 @@ export function resolveUser(config, ctx) {
 }
 
 function codeAccessDecision(access, action, ctx) {
-  const docRule = access?.doc?.[ctx.table]?.[ctx.id]?.[action]
-  const tableRule = access?.table?.[ctx.table]?.[action]
+  const tableRule = access?.[ctx.table]?.[action]
+  const globalRule = access?.[action]
 
-  return Promise.resolve(docRule?.(ctx)).then((docDecision) => {
-    if (docDecision !== undefined && docDecision !== null) return docDecision
-    return tableRule?.(ctx)
+  return Promise.resolve(tableRule?.(ctx)).then((tableDecision) => {
+    if (tableDecision !== undefined && tableDecision !== null) return tableDecision
+    return globalRule?.(ctx)
   })
 }
 

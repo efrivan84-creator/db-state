@@ -228,10 +228,8 @@ If you want users to see their own `_user` record but not others:
 ```js
 // This needs a code rule, since "id matches the caller's id" is not expressible in if:
 access: {
-  table: {
-    _user: {
-      read: ({ user, id }) => id === user?._id ? true : null  // null = pass to next layer
-    }
+  _user: {
+    read: ({ user, id }) => id === user?._id ? true : null  // null = pass to next layer
   }
 }
 ```

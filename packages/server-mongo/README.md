@@ -16,6 +16,7 @@ It exposes CRUD/sync behavior through WebSocket RPC only. There are no HTTP hand
 - Read/write permission checks for every RPC, including service tables.
 - Field-level permissions for reads, sync changes, inserts, and updates.
 - Code access rules that can override or extend `_permission` rows and lazily load documents only when needed.
+- Server read/write hooks for prefilters, normalization, side effects, and error audit.
 - Built-in socket hub plus an adapter hook for Redis/NATS-style multi-process broadcasts.
 
 ## Install
@@ -307,21 +308,13 @@ const dbState = createDbStateServer({
   mongo,
   tables: ["order"],
   access: {
-    table: {
-      order: {
-        read: async ({ user, loadDoc }) => {
-          const obj = await loadDoc()
-          return obj.ownerId === user._id
-        },
-        write: async ({ user, obj, set }) => false
-      }
-    },
-    doc: {
-      order: {
-        o1: {
-          read: async () => true
-        }
-      }
+    order: {
+      read: async ({ user, loadDoc, id }) => {
+        if (id === "public-order") return true
+        const obj = await loadDoc()
+        return obj.ownerId === user._id
+      },
+      write: async ({ user, obj, set }) => false
     }
   }
 })
@@ -344,14 +337,12 @@ const dbState = createDbStateServer({
   mongo,
   tables: ["order"],
   access: {
-    table: {
-      order: {
-        write: async ({ action, user }) => {
-          if (action === "insert") return true
-          if (action === "update") return true
-          if (action === "delete") return user.groups.includes("admin")
-          return undefined
-        }
+    order: {
+      write: async ({ action, user }) => {
+        if (action === "insert") return true
+        if (action === "update") return true
+        if (action === "delete") return user.groups.includes("admin")
+        return undefined
       }
     }
   }
@@ -364,6 +355,47 @@ Return values:
 - `false` - deny.
 - `{ action: true, fields: ["status"] }` - allow with field restrictions.
 - `undefined` or `null` - no decision, continue to the next layer.
+
+## Server Hooks
+
+Hooks are separate from `access`: access decides **allow/deny/fields**, hooks run lifecycle logic around server operations.
+
+```js
+const dbState = createDbStateServer({
+  mongo,
+  tables: ["order"],
+  hooks: {
+    beforeRead: async (ctx) => {
+      // Global read prefilter.
+      ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
+    },
+    order: {
+      beforeWrite: async (ctx) => {
+        if (ctx.action === "update") ctx.set.updatedBy = ctx.user._id
+      },
+      afterWrite: async ({ change }) => {
+        // change is already appended to log here.
+      },
+      errorWrite: async ({ error, method }) => {
+        console.warn("write failed", method, error.message)
+      }
+    }
+  }
+})
+```
+
+Available hook names:
+
+```text
+beforeRead   afterRead   errorRead
+beforeWrite  afterWrite  errorWrite
+```
+
+Global hooks run first, then table hooks: `hooks.beforeRead` -> `hooks.order.beforeRead`.
+
+`beforeRead` can mutate `ctx.filter`, `ctx.sort`, `ctx.skip`, `ctx.limit`, `ctx.from`, and similar request fields before Mongo reads. `beforeWrite` can mutate `ctx.obj`, `ctx.set`, and `ctx.unset` before access checks and persistence. `afterWrite` runs after Mongo write + append-log; `ctx.change` and `ctx.result` are available.
+
+`errorRead` / `errorWrite` receive `ctx.error`. They do not swallow the error; the original error is still thrown to the caller.
 
 ## Delete Logs
 
@@ -438,6 +470,7 @@ For high-write systems, keep `syncLimit` high enough for one sync window or add 
 
 - `index.js` - CRUD, sync, log writing, public factory.
 - `access.js` - code rules and `_permission` resolution.
+- `hooks.js` - server read/write lifecycle hook runner.
 - `rpc.js` - WebSocket RPC method dispatch.
 - `socket.js` - WebSocket client registry and broadcast.
 - `auth.js` - login/hash auth and password adapter.

@@ -16,6 +16,7 @@ CRUD и sync доступны только через WebSocket RPC. HTTP-обр
 - Проверка read/write прав для каждого RPC, включая служебные таблицы.
 - Field-level права для чтения, sync-изменений, insert и update.
 - Code access rules, которые могут переопределять или дополнять `_permission` и лениво грузить документы только когда это нужно.
+- Серверные read/write hooks для prefilter, нормализации, side effects и audit ошибок.
 - Встроенный socket hub и adapter hook для Redis/NATS-style broadcast в нескольких процессах.
 
 ## Установка
@@ -255,21 +256,13 @@ const dbState = createDbStateServer({
   mongo,
   tables: ["order"],
   access: {
-    table: {
-      order: {
-        read: async ({ user, loadDoc }) => {
-          const obj = await loadDoc()
-          return obj.ownerId === user._id
-        },
-        write: async ({ user, obj, set }) => false
-      }
-    },
-    doc: {
-      order: {
-        o1: {
-          read: async () => true
-        }
-      }
+    order: {
+      read: async ({ user, loadDoc, id }) => {
+        if (id === "public-order") return true
+        const obj = await loadDoc()
+        return obj.ownerId === user._id
+      },
+      write: async ({ user, obj, set }) => false
     }
   }
 })
@@ -292,14 +285,12 @@ const dbState = createDbStateServer({
   mongo,
   tables: ["order"],
   access: {
-    table: {
-      order: {
-        write: async ({ action, user }) => {
-          if (action === "insert") return true
-          if (action === "update") return true
-          if (action === "delete") return user.groups.includes("admin")
-          return undefined
-        }
+    order: {
+      write: async ({ action, user }) => {
+        if (action === "insert") return true
+        if (action === "update") return true
+        if (action === "delete") return user.groups.includes("admin")
+        return undefined
       }
     }
   }
@@ -312,6 +303,47 @@ const dbState = createDbStateServer({
 - `false` — запретить.
 - `{ action: true, fields: ["status"] }` — разрешить с ограничением полей.
 - `undefined` или `null` — без решения, передать на следующий слой.
+
+## Server Hooks
+
+Hooks отделены от `access`: access решает **разрешить/запретить/поля**, hooks выполняют lifecycle-логику вокруг серверных операций.
+
+```js
+const dbState = createDbStateServer({
+  mongo,
+  tables: ["order"],
+  hooks: {
+    beforeRead: async (ctx) => {
+      // Глобальный read-prefilter.
+      ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
+    },
+    order: {
+      beforeWrite: async (ctx) => {
+        if (ctx.action === "update") ctx.set.updatedBy = ctx.user._id
+      },
+      afterWrite: async ({ change }) => {
+        // change здесь уже записан в log.
+      },
+      errorWrite: async ({ error, method }) => {
+        console.warn("write failed", method, error.message)
+      }
+    }
+  }
+})
+```
+
+Доступные имена hooks:
+
+```text
+beforeRead   afterRead   errorRead
+beforeWrite  afterWrite  errorWrite
+```
+
+Глобальные hooks выполняются первыми, затем табличные: `hooks.beforeRead` -> `hooks.order.beforeRead`.
+
+`beforeRead` может менять `ctx.filter`, `ctx.sort`, `ctx.skip`, `ctx.limit`, `ctx.from` и похожие поля запроса до чтения Mongo. `beforeWrite` может менять `ctx.obj`, `ctx.set` и `ctx.unset` до проверки прав и сохранения. `afterWrite` вызывается после Mongo write + append-log; доступны `ctx.change` и `ctx.result`.
+
+`errorRead` / `errorWrite` получают `ctx.error`. Они не глотают ошибку; исходная ошибка всё равно уходит вызывающему коду.
 
 ## Логирование удалений
 
@@ -386,6 +418,7 @@ const dbState = createDbStateServer({
 
 - `index.js` — CRUD, sync, запись в лог, публичная фабрика.
 - `access.js` — code-правила и резолвинг `_permission`.
+- `hooks.js` — runner серверных read/write lifecycle hooks.
 - `rpc.js` — диспатчер WebSocket RPC.
 - `socket.js` — реестр WebSocket-клиентов и broadcast.
 - `auth.js` — login/hash-аут и адаптер паролей.

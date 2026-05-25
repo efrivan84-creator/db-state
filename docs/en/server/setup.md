@@ -95,6 +95,7 @@ createDbStateServer({
 
   // Optional:
   access:           { ... },     // code access rules (see code-access-rules.md)
+  hooks:            { ... },     // before/after/error read/write lifecycle hooks
   password:         { hash, verify },  // password adapter (default: PBKDF2)
   createAuthHash:   () => string,      // default: 32 random bytes hex
   createLogId:      () => string,      // default: crypto.randomUUID()

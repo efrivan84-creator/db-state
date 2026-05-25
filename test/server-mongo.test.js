@@ -856,12 +856,10 @@ test("code access can lazily load a sync document", async () => {
     now: () => "2026-05-21T10:00:01.000Z",
     createLogId: () => "log1",
     access: {
-      table: {
-        order: {
-          read: async ({ loadDoc }) => {
-            const doc = await loadDoc()
-            return doc?.status === "open"
-          }
+      order: {
+        read: async ({ loadDoc }) => {
+          const doc = await loadDoc()
+          return doc?.status === "open"
         }
       }
     }
@@ -889,6 +887,176 @@ test("code access can lazily load a sync document", async () => {
 
   assert.deepEqual(sync.changes.map((change) => change.id), ["o1"])
   assert.equal(mongo.collection("order").findOneCalls, 1)
+})
+
+test("code access supports direct table and global rules", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order", "product"],
+    access: {
+      read: async () => true,
+      order: {
+        write: async () => false
+      }
+    }
+  })
+
+  await mongo.collection("_permission").insertOne({
+    _id: "perm_order",
+    table: "order",
+    write: { groups: ["admin"] }
+  })
+  await mongo.collection("product").insertOne({
+    _id: "p1",
+    title: "Box"
+  })
+
+  assert.deepEqual(await server.load({
+    table: "product",
+    id: "p1",
+    req: { user: { _id: "guest", groups: [] } }
+  }), {
+    _id: "p1",
+    title: "Box"
+  })
+
+  await assert.rejects(
+    () => server.update({
+      table: "order",
+      id: "o1",
+      set: { status: "open" },
+      req: { user: { _id: "admin", groups: ["admin"] } }
+    }),
+    /Write denied/
+  )
+})
+
+test("read hooks can prefilter queries and observe results", async () => {
+  const mongo = createMemoryMongo()
+  const events = []
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    hooks: {
+      beforeRead: async (ctx) => {
+        events.push(`global:${ctx.method}`)
+        ctx.filter = { ...ctx.filter, status: "open" }
+      },
+      afterRead: async (ctx) => {
+        events.push(`after:${ctx.result.length}`)
+      },
+      order: {
+        beforeRead: async (ctx) => {
+          events.push(`table:${ctx.method}`)
+          ctx.filter = { ...ctx.filter, ownerId: ctx.user._id }
+        }
+      }
+    },
+    access: {
+      order: {
+        read: async () => true
+      }
+    }
+  })
+  await mongo.collection("order").insertOne({ _id: "o1", status: "open", ownerId: "u1" })
+  await mongo.collection("order").insertOne({ _id: "o2", status: "closed", ownerId: "u1" })
+  await mongo.collection("order").insertOne({ _id: "o3", status: "open", ownerId: "u2" })
+
+  const ids = await server.getIds({
+    table: "order",
+    filter: {},
+    req: { user: { _id: "u1", groups: [] } }
+  })
+
+  assert.deepEqual(ids, ["o1"])
+  assert.deepEqual(events, ["global:getIds", "table:getIds", "after:1"])
+})
+
+test("write hooks can mutate writes and observe appended changes", async () => {
+  const mongo = createMemoryMongo()
+  const events = []
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    now: () => "2026-05-21T10:00:01.000Z",
+    createLogId: idSeq(),
+    hooks: {
+      beforeWrite: async (ctx) => {
+        events.push(`global:${ctx.method}`)
+        ctx.set.status = String(ctx.set.status).toLowerCase()
+      },
+      order: {
+        beforeWrite: async (ctx) => {
+          events.push(`table:${ctx.action}`)
+          ctx.set.hook = true
+        },
+        afterWrite: async (ctx) => {
+          events.push(`after:${ctx.change.action}:${ctx.change.id}`)
+        }
+      }
+    },
+    access: {
+      order: {
+        write: async () => true
+      }
+    }
+  })
+
+  await server.update({
+    table: "order",
+    id: "o1",
+    set: { status: "OPEN" },
+    req: { user: { _id: "u1", groups: [] } }
+  })
+
+  assert.deepEqual(await mongo.collection("order").findOne({ _id: "o1" }), {
+    _id: "o1",
+    status: "open",
+    hook: true,
+    info: {
+      editid: "u1",
+      editdata: "2026-05-21T10:00:01.000Z"
+    }
+  })
+  assert.deepEqual(events, ["global:update", "table:update", "after:update:o1"])
+})
+
+test("error hooks run for failed reads and writes without swallowing errors", async () => {
+  const mongo = createMemoryMongo()
+  const events = []
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    hooks: {
+      errorRead: async (ctx) => events.push(`read:${ctx.method}:${ctx.error.message}`),
+      order: {
+        errorWrite: async (ctx) => events.push(`write:${ctx.method}:${ctx.error.message}`)
+      }
+    },
+    access: {
+      order: {
+        read: async () => false,
+        write: async () => false
+      }
+    }
+  })
+
+  await assert.rejects(
+    () => server.load({ table: "order", id: "o1", req: { user: { _id: "u1", groups: [] } } }),
+    /Read denied/
+  )
+  await assert.rejects(
+    () => server.update({
+      table: "order",
+      id: "o1",
+      set: { status: "open" },
+      req: { user: { _id: "u1", groups: [] } }
+    }),
+    /Write denied/
+  )
+
+  assert.deepEqual(events, ["read:load:Read denied", "write:update:Write denied"])
 })
 
 test("write fields reject forbidden update fields", async () => {
@@ -953,10 +1121,8 @@ test("code access rules decide before _permission table", async () => {
     mongo,
     tables: ["order"],
     access: {
-      table: {
-        order: {
-          write: async () => false
-        }
+      order: {
+        write: async () => false
       }
     }
   })

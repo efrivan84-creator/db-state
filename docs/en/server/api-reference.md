@@ -48,6 +48,7 @@ createDbStateServer(config: DbStateServerConfig): DbStateServer
 | `mongo` | `MongoDatabaseLike` | required | Mongo database handle. |
 | `tables` | `string[]` | required | App tables. `_user`, `_group`, `_permission` added automatically. |
 | `access` | `AccessConfig` | `{}` | Code access rules. |
+| `hooks` | `ServerHooks` | `{}` | Lifecycle hooks around read/write operations. |
 | `password` | `PasswordHasher` | PBKDF2 | Password hash adapter. |
 | `authLoginFields` | `string[]` | `["login"]` | `_user` fields accepted by `dbstate:login`, e.g. `["login", "email", "phone"]`. |
 | `normalizeAuthLogin` | `(value, field) => string` | `String(value).trim()` | Normalizes submitted login values before matching each configured field. |

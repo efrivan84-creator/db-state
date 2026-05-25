@@ -2,6 +2,12 @@
 
 Описание изменений и статус проекта db-state.
 
+## 0.0.7
+
+- Серверные code access rules упрощены до `access[table].read/write` и глобальных `access.read/write`; вложенный формат `access.table` / `access.doc` убран из документации и runtime lookup.
+- Добавлен regression-тест для прямых табличных и глобальных code access rules.
+- Добавлены серверные lifecycle hooks: `beforeRead`, `afterRead`, `errorRead`, `beforeWrite`, `afterWrite` и `errorWrite`, глобально и на уровне таблицы.
+
 ## 0.0.6
 
 - Серверные `add` и `update` теперь удаляют клиентские поля `info` / `info.*` до проверки прав и сохранения.
@@ -58,7 +64,7 @@
 
 ## Текущий статус
 
-- Realtime CRUD с правами, offline cache, login и sync реализован и покрыт 60 тестами.
+- Realtime CRUD с правами, offline cache, login и sync реализован и покрыт 64 тестами.
 - TypeScript declarations есть во всех пакетах.
 - Append-only log поддерживает audit trail, восстановление удалений и time-travel reconstruction patterns.
 - Поддерживаемый стек: Vue + MongoDB + WebSocket.
