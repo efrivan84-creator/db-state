@@ -2,7 +2,7 @@
 
 Описание изменений и статус проекта db-state.
 
-## Unreleased
+## 0.0.8
 
 - Vue mutation methods `add`, `update` и `remove` теперь принимают optional loading `key`, чтобы записи участвовали в счетчиках `state.getKeyRef(key)` для страницы/блока.
 - `state.getKeyRef(key)` теперь возвращает реактивный объект загрузки с `value`, `max`, `start`, `percent` и совместимым `ready`.

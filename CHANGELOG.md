@@ -2,7 +2,7 @@
 
 Release notes and project status for db-state.
 
-## Unreleased
+## 0.0.8
 
 - Vue mutation methods `add`, `update`, and `remove` now accept an optional loading `key`, so writes can participate in `state.getKeyRef(key)` page/block loading counters.
 - `state.getKeyRef(key)` now returns a reactive loading object with `value`, `max`, `start`, `percent`, and backward-compatible `ready`.
