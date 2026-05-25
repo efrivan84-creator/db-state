@@ -175,8 +175,8 @@ Important behavior:
 Access is denied by default. The server checks every RPC:
 
 ```text
-code rule for table+doc
-  -> code rule for table
+code rule for table: access[table].read/write
+  -> global code rule: access.read/write
   -> _permission rules
   -> deny
 ```

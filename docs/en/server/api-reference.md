@@ -258,10 +258,10 @@ function hashValue(value: unknown): string        // SHA-256 hex of String(value
 ## Access types
 
 ```ts
-interface AccessConfig {
-  doc?: Record<string, Record<string, { read?: AccessRule<any>; write?: AccessRule<any> }>>
-  table?: Record<string, { read?: AccessRule<any>; write?: AccessRule<any> }>
-}
+type AccessConfig = {
+  read?: AccessRule<any>
+  write?: AccessRule<any>
+} & Record<string, { read?: AccessRule<any>; write?: AccessRule<any> } | AccessRule<any> | undefined>
 
 type AccessRule<T> = (ctx: AccessContext<T>) => AccessDecisionValue | Promise<AccessDecisionValue>
 
@@ -296,6 +296,231 @@ interface AccessContext<T = BaseDoc> {
 ```
 
 See [code-access-rules.md](code-access-rules.md) for usage.
+
+## Lifecycle hooks
+
+`hooks` are lifecycle callbacks around server reads and writes. They are not permission rules: `access` decides allow/deny/fields, while hooks normalize input, add read prefilters, observe results, write side effects, and audit errors.
+
+```ts
+type ServerHooks =
+  ServerHookSet &
+  Record<string, ServerHookSet | ServerHook | undefined>
+
+interface ServerHookSet<T = BaseDoc> {
+  beforeRead?: ServerHook<T>
+  afterRead?: ServerHook<T>
+  errorRead?: ServerHook<T>
+  beforeWrite?: ServerHook<T>
+  afterWrite?: ServerHook<T>
+  errorWrite?: ServerHook<T>
+}
+
+type ServerHook<T = BaseDoc> =
+  (ctx: ServerHookContext<T>) => void | Promise<void>
+```
+
+Example:
+
+```js
+createDbStateServer({
+  mongo,
+  tables: ["order"],
+  hooks: {
+    beforeRead: async (ctx) => {
+      ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
+    },
+    order: {
+      beforeWrite: async (ctx) => {
+        if (ctx.action === "update") ctx.set.updatedBy = ctx.user._id
+      },
+      afterWrite: async ({ change }) => {
+        // change is already written to the log.
+      },
+      errorWrite: async ({ error, method }) => {
+        console.warn("write failed", method, error.message)
+      }
+    }
+  }
+})
+```
+
+### Hook lookup order
+
+For table operations, the global hook runs first, then the table hook:
+
+```text
+hooks.beforeRead
+  -> hooks[table].beforeRead
+```
+
+The same order applies to all hook names. For `sync`, there is no single table for the whole operation, so only global `beforeRead/afterRead/errorRead` run for the outer sync call. Per-change filtering still uses normal read access rules.
+
+### Read order
+
+For `load`:
+
+```text
+resolve user
+beforeRead
+Mongo findOne
+access read
+field projection
+afterRead
+return result
+```
+
+For `getIds`, `getUnique`, and `count`:
+
+```text
+resolve user
+beforeRead
+Mongo find(filter/sort/skip/limit)
+per-row access read + field projection where needed
+afterRead
+return result
+```
+
+For `sync`:
+
+```text
+resolve user
+beforeRead
+read log window
+for each change: access read + field filtering
+afterRead
+return { to, changes }
+```
+
+### Write order
+
+For `add`:
+
+```text
+resolve user
+strip client info
+create server info.makeid/info.makedata
+beforeWrite
+access write
+write.fields validation
+Mongo insert
+append log
+schedule changes_available
+afterWrite
+return result
+```
+
+For `update`:
+
+```text
+resolve user
+load old document
+strip client info/info.*
+create server info.editid/info.editdata
+beforeWrite
+apply patch for access ctx.obj
+access write
+write.fields validation
+Mongo update
+append log
+schedule changes_available
+afterWrite
+return result
+```
+
+For `remove`:
+
+```text
+resolve user
+load old document
+beforeWrite
+access write
+Mongo delete
+append log with change.old
+schedule changes_available
+afterWrite
+return result
+```
+
+### Mutable fields
+
+`beforeRead` may mutate request fields before Mongo reads:
+
+```ts
+ctx.filter
+ctx.sort
+ctx.skip
+ctx.limit
+ctx.field
+ctx.from
+ctx.sessionId
+```
+
+The main use is server-side prefiltering:
+
+```js
+hooks: {
+  order: {
+    beforeRead: async (ctx) => {
+      ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
+    }
+  }
+}
+```
+
+`beforeWrite` may mutate write payloads before access checks and persistence:
+
+```ts
+ctx.obj       // add document
+ctx.set       // update $set object
+ctx.unset     // update unset paths
+ctx.old       // loaded old document, normally read-only by convention
+```
+
+Do not mutate `ctx.clientObj`, `ctx.clientSet`, or `ctx.clientUnset`; they preserve the original client write for field-level validation.
+
+`afterRead` and `afterWrite` receive `ctx.result`; `afterWrite` also receives `ctx.change`. They can mutate `ctx.result` before it is returned, but should usually be used for side effects.
+
+### Errors
+
+If any read step throws, `errorRead(ctx)` runs with `ctx.error`, then the original error is thrown to the caller.
+
+If any write step throws, `errorWrite(ctx)` runs with `ctx.error`, then the original error is thrown to the caller.
+
+Errors thrown inside `errorRead/errorWrite` are ignored so they do not hide the original failure. Errors thrown inside `before*` or `after*` become the operation failure and then trigger the matching error hook.
+
+### Avoiding recursion
+
+Hooks run inside `dbState.add/update/remove/load/getIds/getUnique/count/sync`. If a hook calls the same `dbState` method directly, that nested call runs hooks again. This is sometimes useful, but can recurse forever.
+
+Avoid recursion by one of these patterns:
+
+- Write side effects directly through `mongo.collection(...)` when they are internal audit/aggregate writes and do not need db-state sync.
+- Use a guard flag on `ctx.req`, for example `req.internalHook === true`, and return early in the hook for nested calls.
+- Use a separate system helper that bypasses the hook that triggered it.
+- Keep `afterWrite` side effects idempotent, because a client may retry after an error.
+
+Example guard:
+
+```js
+hooks: {
+  order: {
+    afterWrite: async (ctx) => {
+      if (ctx.req?.internalHook) return
+
+      await dbState.add({
+        table: "audit",
+        obj: { sourceTable: ctx.table, sourceId: ctx.id },
+        req: { ...ctx.req, internalHook: true }
+      })
+    }
+  },
+  audit: {
+    afterWrite: async (ctx) => {
+      if (ctx.req?.internalHook) return
+    }
+  }
+}
+```
 
 ## Custom handlers
 
