@@ -2,6 +2,13 @@
 
 Описание изменений и статус проекта db-state.
 
+## 0.0.5
+
+- Серверная auth-логика умеет нормализовать login-идентификаторы по полю через `normalizeAuthLogin`, например lowercase email и канонический телефон.
+- Неоднозначные normalized login-совпадения отклоняются той же generic auth-ошибкой и отдают warning через `onAuthWarning({ type: "ambiguous_auth_login", ... })`.
+- Добавлен `authRateLimit` hook для login и hash-auth попыток.
+- `@db-state/server-mongo` экспортирует `defaultPassword`, `defaultAuthHash`, `hashValue`, `createAuth`, `createHandlers`, `handleRpc` и `createSocketHub` из корня пакета.
+
 ## 0.0.4
 
 - Серверные сигналы изменений теперь идут через debounce/rate-limit настройки `changesBroadcastDelay` и `changesBroadcastRate`, сигнал получает каждый клиент включая автора.
@@ -44,7 +51,7 @@
 
 ## Текущий статус
 
-- Realtime CRUD с правами, offline cache, login и sync реализован и покрыт 50 тестами.
+- Realtime CRUD с правами, offline cache, login и sync реализован и покрыт 56 тестами.
 - TypeScript declarations есть во всех пакетах.
 - Append-only log поддерживает audit trail, восстановление удалений и time-travel reconstruction patterns.
 - Поддерживаемый стек: Vue + MongoDB + WebSocket.
@@ -52,6 +59,10 @@
 ## Текущие ограничения
 
 - `_permission.if` сейчас поддерживает equality-style matching. Операторы вроде `$in`, `$ne`, `$gte` и dot-path сравнения с user планируются.
+- Фильтрация прав для list/count запросов сейчас выполняется после чтения подходящих документов из Mongo. Для больших таблиц пока добавляй узкие app-level фильтры; server-side access prefilter hook планируется.
+- Мультидокументные записи пока не атомарны. Для сценариев, где нужно менять несколько таблиц вместе, используй application/server-side код; `batch()`/transaction API планируется.
+- Доменные server actions пока не являются отдельным first-class слоем. Custom socket events уже есть, но request/response action layer планируется для операций вроде отправки сообщения в чат.
+- Binary upload/chunk helpers пока не входят в пакет. Для больших медиа используй отдельный upload path или custom WebSocket protocol.
 - Wake-up сигналы изменений уже идут через debounce/rate-limit, но для больших инсталляций может понадобиться per-table/per-client filtering или custom broadcast layer.
 - `syncLimit` должен вмещать одно sync-окно. Для очень большого числа записей нужен cursor continuation по `{ createdAt, logId }`.
 - Offline writes намеренно не ставятся в очередь. Клиент поддерживает offline read, а записи требуют онлайн-сокет.

@@ -2,7 +2,7 @@
 
 Release notes and project status for db-state.
 
-## Unreleased
+## 0.0.5
 
 - Server auth can normalize login identifiers per configured field via `normalizeAuthLogin`, allowing lowercase emails and canonical phone values.
 - Ambiguous normalized login matches are rejected with a generic auth error and reported through `onAuthWarning({ type: "ambiguous_auth_login", ... })`.
@@ -59,6 +59,10 @@ Initial public release:
 ## Current limitations
 
 - `_permission.if` currently supports equality-style matching. More operators such as `$in`, `$ne`, `$gte`, and dot-path user comparisons are planned.
+- Permission filtering for list/count queries currently happens after Mongo reads the matching documents. Large datasets should add narrow app-level filters today; a server-side access prefilter hook is planned.
+- Multi-document writes are not atomic yet. Use application/server-side code for workflows that must update several tables together; a `batch()`/transaction API is planned.
+- Domain-specific server actions are not first-class yet. Custom socket events exist, but a request/response action layer is planned for operations such as chat message sending.
+- Binary upload/chunk helpers are not included yet. Use a separate upload path or a custom WebSocket protocol for large media.
 - Change wake-ups are debounced and rate-limited globally, but large deployments may still want per-table/per-client filtering or a custom broadcast layer.
 - `syncLimit` should be high enough to fit one sync window. For very high write volume, add cursor continuation by `{ createdAt, logId }`.
 - Offline writes are intentionally not queued. The client supports offline read, while writes require an online socket.
