@@ -2,7 +2,7 @@
 
 > [English](README.md) · **Русский**
 
-Маленький реактивный Vue 3 клиент для [db-state](https://github.com/efrivan84-creator/db-state): типизированные таблицы, `listRef` / `idsRef` / `countRef`, логин, sync, офлайн-кэш. Примерно **4 KB brotli**.
+Маленький реактивный Vue 3 клиент для [db-state](https://github.com/efrivan84-creator/db-state): типизированные таблицы, `listRef` / `idsRef` / `countRef`, логин, sync, офлайн-кэш. Примерно **5.4 KB brotli** / **6.0 KB min+gz**.
 
 Создаёт глобальный реактивный объект состояния, под капотом — WebSocket RPC, локальный кэш и серверный sync.
 

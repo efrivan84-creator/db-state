@@ -292,9 +292,9 @@ await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 
 | Пакет | Размер | Для чего |
 |---|---:|---|
-| [`@db-state/core`](packages/core) | ~1.5 KB min+gz | Общий протокол, `Change`, dot-path helpers, sync-window helpers. Без runtime-зависимостей. |
-| [`@db-state/vue`](packages/vue) | ~5 KB min+gz | Vue 3 reactive client: документы, списки, счетчики, auth, cache, WebSocket sync. |
-| [`@db-state/server-mongo`](packages/server-mongo) | ~5 KB min+gz | MongoDB WebSocket server: CRUD, auth, log, sync, permissions, audit. |
+| [`@db-state/core`](packages/core) | ~1.2 KB min+gz / ~1.1 KB brotli | Общий протокол, `Change`, dot-path helpers, sync-window helpers. Без runtime-зависимостей. |
+| [`@db-state/vue`](packages/vue) | ~6.0 KB min+gz / ~5.4 KB brotli | Vue 3 reactive client: документы, списки, счетчики, auth, cache, WebSocket sync. |
+| [`@db-state/server-mongo`](packages/server-mongo) | ~5.5 KB min+gz / ~5.0 KB brotli | MongoDB WebSocket server: CRUD, auth, log, sync, permissions, audit. |
 
 ## Установка
 

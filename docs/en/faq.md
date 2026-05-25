@@ -6,7 +6,7 @@
 
 Because nothing in the Vue ecosystem combines reactive collections + realtime sync + permissions + offline cache in under 100 KB. Apollo is 33 KB just for queries. RxDB needs schemas + replication setup. Convex/Firestore are vendor services. Pinia + manual WebSocket is what most people end up writing, and that's hundreds of lines of boilerplate per project.
 
-db-state is the boilerplate, extracted into a library that fits in ~4 KB brotli on the client.
+db-state is the boilerplate, extracted into a library that fits in ~5.4 KB brotli on the client.
 
 ### Is it production-ready?
 
@@ -32,13 +32,12 @@ If you need React or Postgres, look at [Convex](https://convex.dev), [RxDB](http
 
 | Build | Size |
 |---|---|
-| Raw ESM source | 28.7 KB |
-| Minified (terser) | 17.2 KB |
-| Minified + gzip | 5.4 KB |
-| Tree-shaken (esbuild) + gzip | 4.6 KB |
-| Tree-shaken + brotli | **4.2 KB** |
+| Raw ESM source | 31.0 KB |
+| Comment/whitespace stripped | 24.3 KB |
+| Stripped + gzip | 6.0 KB |
+| Stripped + brotli | **5.4 KB** |
 
-Brotli is what modern CDNs serve over HTTPS. Without tree-shaking (unusual today), you ship ~5.4 KB instead of ~4.2 KB.
+Brotli is what modern CDNs serve over HTTPS. The table is a conservative source-only estimate for `@db-state/vue` and excludes peer dependencies like Vue itself.
 
 ## Client
 

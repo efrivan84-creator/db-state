@@ -30,7 +30,7 @@ Only one transport: WebSocket. Both **library RPC** (sync, CRUD, auth) and your 
 
 ### `@db-state/core`
 
-Pure protocol. Defines what a `Change` looks like, what dot-paths mean, what events are reserved. Used by both client and server. **Zero runtime dependencies.** ~5 KB source.
+Pure protocol. Defines what a `Change` looks like, what dot-paths mean, what events are reserved. Used by both client and server. **Zero runtime dependencies.** ~4.2 KB source, ~1.2 KB min+gz.
 
 Key exports:
 - `Change<T>` shape — every write is one of these in the log.
@@ -198,4 +198,4 @@ By design. db-state is a transport — what your documents look like is your cal
 - **Schema typing at the client**: use the TypeScript generic.
 - **Migrations**: run them on your Mongo directly (e.g. with `migrate-mongo`). The library doesn't care; it just reads and writes documents.
 
-Embedding a schema layer would have doubled the library's size and bound it to specific validation choices. The current ~5 KB does one thing well; schemas and migrations are well-served by existing tools.
+Embedding a schema layer would have doubled the library's size and bound it to specific validation choices. The current Vue client is still only ~6.0 KB min+gz / ~5.4 KB brotli and does one thing well; schemas and migrations are well-served by existing tools.

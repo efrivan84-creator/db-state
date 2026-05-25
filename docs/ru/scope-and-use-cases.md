@@ -17,7 +17,7 @@
 │ Ultra-low-latency слой              │  ← custom-код, ~50-500 строк на проект
 │  - позиции, попадания, голос, курсоры│
 ├─────────────────────────────────────┤
-│ State / sync слой (db-state)        │  ← @db-state/vue: 4 KB brotli
+│ State / sync слой (db-state)        │  ← @db-state/vue: 5.4 KB brotli
 │  - профили, инвентарь, очки         │
 │  - чат, matchmaking, лобби          │
 │  - настройки, achievements, история │

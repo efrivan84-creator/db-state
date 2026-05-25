@@ -1,7 +1,7 @@
 {
   "name": "@db-state/vue",
   "version": "0.0.8",
-  "description": "Tiny reactive Vue 3 client for db-state: typed tables, listRef / idsRef / countRef, login, sync, offline cache. ~4 KB brotli.",
+  "description": "Tiny reactive Vue 3 client for db-state: typed tables, listRef / idsRef / countRef, login, sync, offline cache. ~5.4 KB brotli.",
   "keywords": [
     "db-state",
     "vue",

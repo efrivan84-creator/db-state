@@ -17,7 +17,7 @@ Almost any non-trivial realtime product has state with **different latency requi
 │ Ultra-low-latency layer             │  ← custom code, ~50-500 lines per project
 │  - positions, hits, voice, cursors  │
 ├─────────────────────────────────────┤
-│ State / sync layer (db-state)       │  ← @db-state/vue: 4 KB brotli
+│ State / sync layer (db-state)       │  ← @db-state/vue: 5.4 KB brotli
 │  - profiles, inventory, scores      │
 │  - chat, matchmaking, lobby         │
 │  - settings, achievements, history  │
