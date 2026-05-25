@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(codebase.cmd search *)",
+      "Bash(codebase.cmd index *)",
+      "Bash(codebase.cmd config *)",
+      "Bash(codebase.cmd outline *)",
+      "PowerShell(codebase.cmd search \"subscribe to broadcast channel for state sync\" --path=\"C:\\\\Users\\\\Ivan\\\\Documents\\\\Codex\\\\mozg\\\\tmp\\\\db-state\" --config=\"C:\\\\Users\\\\Ivan\\\\Documents\\\\Codex\\\\mozg\\\\tmp\\\\db-state\\\\autodev-config.json\" --limit 5 --json 2>&1)"
+    ]
+  }
+}

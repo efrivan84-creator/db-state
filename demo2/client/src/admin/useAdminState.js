@@ -182,10 +182,15 @@ export function useAdminState() {
   const currentDoc = computed(() => selectedDoc(active.value.table))
   const visibleDocJson = computed(() => JSON.stringify(cleanDoc(currentDoc.value ?? {}), null, 2))
   const accountLabel = computed(() => accounts.find((item) => item.login === login.value)?.label ?? login.value)
+  const authorizedLogin = computed(() => String(state.auth.userId ?? "").replace(/^u_/, ""))
   const authorizedAccountLabel = computed(() => {
-    const loginByUserId = String(state.auth.userId ?? "").replace(/^u_/, "")
-    return accounts.find((item) => item.login === loginByUserId)?.label ?? state.auth.userId ?? accountLabel.value
+    return accounts.find((item) => item.login === authorizedLogin.value)?.label ?? state.auth.userId ?? accountLabel.value
   })
+  const currentWritableFieldKeys = computed(() => writableFieldKeys(active.value.table))
+  const currentChangedFieldKeys = computed(() => Object.keys(changedPatch(active.value.table)))
+  const currentPatch = computed(() => writablePatch(active.value.table))
+  const currentPatchPreview = computed(() => JSON.stringify(currentPatch.value, null, 2))
+  const canSave = computed(() => Boolean(selected[active.value.table]) && Object.keys(currentPatch.value).length > 0)
   const connectionText = computed(() => state.sync.connected ? "онлайн" : "нет связи")
   const authText = computed(() => {
     if (state.auth.status === "authorized") return "авторизован"
@@ -286,6 +291,34 @@ export function useAdminState() {
     }
   }
 
+  function writableFieldKeys(table) {
+    const account = authorizedLogin.value
+
+    if (account === "admin") {
+      if (table === "_permission") return Object.keys(changedPatch(table))
+      return (tableConfigs[table]?.fields ?? [])
+        .filter((field) => !field.disabled)
+        .map((field) => field.key)
+    }
+
+    if (account === "manager" && table === "order") return ["status", "comment"]
+    return []
+  }
+
+  function changedPatch(table) {
+    const config = tableConfigs[table]
+    if (!config) return {}
+    const nextPatch = config.toPatch(drafts[table])
+    const originalPatch = config.toPatch(originals[table])
+    return diffSet(originalPatch, nextPatch)
+  }
+
+  function writablePatch(table) {
+    const keys = writableFieldKeys(table)
+    const patchKeys = table === "_user" && keys.includes("password") ? [...keys, "passwordHash"] : keys
+    return pickKeys(changedPatch(table), patchKeys)
+  }
+
   async function saveTable(table) {
     await run(async () => {
       const config = tableConfigs[table]
@@ -293,9 +326,7 @@ export function useAdminState() {
 
       if (!id) throw new Error("Нечего сохранять: запись не выбрана")
 
-      const nextPatch = config.toPatch(drafts[table])
-      const originalPatch = config.toPatch(originals[table])
-      const patch = diffSet(originalPatch, nextPatch)
+      const patch = table === active.value.table ? currentPatch.value : writablePatch(table)
 
       if (Object.keys(patch).length === 0) {
         notice.value = "Изменений нет"
@@ -356,13 +387,18 @@ export function useAdminState() {
     addTable,
     authText,
     authorizedAccountLabel,
+    canSave,
     cleanDoc,
     connectionText,
+    currentChangedFieldKeys,
     currentDoc,
     currentColumns,
     currentFields,
     currentIds,
+    currentPatch,
+    currentPatchPreview,
     currentRows,
+    currentWritableFieldKeys,
     deleteTable,
     drafts,
     error,
@@ -408,6 +444,10 @@ function diffSet(original, next) {
     }
   }
   return out
+}
+
+function pickKeys(obj, keys) {
+  return Object.fromEntries(keys.filter((key) => Object.hasOwn(obj, key)).map((key) => [key, obj[key]]))
 }
 
 function isDeepEqual(a, b) {
