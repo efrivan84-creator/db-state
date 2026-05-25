@@ -5,7 +5,27 @@ import { DB_STATE_MESSAGES } from "@db-state/core"
 export function createAuth(config) {
   return {
     async login(client, message) {
-      const user = await config.mongo.collection(config.userTable).findOne(loginFilter(config, message.login))
+      if (await isRateLimited(config, { type: "login", login: message.login, client })) {
+        send(client, DB_STATE_MESSAGES.loginError, message.id, { error: "Too many attempts" })
+        return
+      }
+
+      const users = await config.mongo.collection(config.userTable)
+        .find(loginFilter(config, message.login))
+        .limit(2)
+        .toArray()
+      const user = users.length === 1 ? users[0] : undefined
+
+      if (users.length > 1) {
+        config.onAuthWarning?.({
+          type: "ambiguous_auth_login",
+          login: message.login,
+          normalized: normalizedAuthLoginValues(config, message.login),
+          fields: config.authLoginFields,
+          count: users.length,
+          client
+        })
+      }
 
       if (!user || !(await config.password.verify(message.password, user.passwordHash))) {
         send(client, DB_STATE_MESSAGES.loginError, message.id, { error: "Invalid login or password" })
@@ -31,6 +51,11 @@ export function createAuth(config) {
     },
 
     async auth(client, message) {
+      if (await isRateLimited(config, { type: "auth", userId: message.userId, client })) {
+        send(client, DB_STATE_MESSAGES.authError, message.id, { error: "Too many attempts" })
+        return
+      }
+
       const user = await config.mongo.collection(config.userTable).findOne({
         _id: message.userId,
         hash: message.hash,
@@ -85,9 +110,23 @@ export function hashValue(value) {
 
 function loginFilter(config, login) {
   const fields = config.authLoginFields ?? ["login"]
+  const normalized = normalizedAuthLoginValues(config, login)
+  const matches = fields.map((field) => ({ [field]: normalized[field] }))
   const active = { disabled: { $ne: true } }
-  if (fields.length === 1) return { [fields[0]]: login, ...active }
-  return { ...active, $or: fields.map((field) => ({ [field]: login })) }
+  if (matches.length === 1) return { ...matches[0], ...active }
+  return { ...active, $or: matches }
+}
+
+function normalizedAuthLoginValues(config, login) {
+  return Object.fromEntries((config.authLoginFields ?? ["login"]).map((field) => [
+    field,
+    config.normalizeAuthLogin(login, field)
+  ]))
+}
+
+async function isRateLimited(config, ctx) {
+  if (!config.authRateLimit) return false
+  return await config.authRateLimit(ctx) === false
 }
 
 function attachUser(client, user) {

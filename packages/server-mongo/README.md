@@ -60,6 +60,8 @@ Create these indexes in production:
 await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
 await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
 await mongo.collection("_user").createIndex({ login: 1 }, { unique: true, sparse: true })
+await mongo.collection("_user").createIndex({ email: 1 }, { unique: true, sparse: true })
+await mongo.collection("_user").createIndex({ phone: 1 }, { unique: true, sparse: true })
 ```
 
 Add normal Mongo indexes for app queries used by `getIds`, `count`, and `getUnique`:
@@ -173,13 +175,46 @@ By default `dbstate:login` matches `_user.login`. To accept other identifiers, c
 createDbStateServer({
   mongo,
   tables,
-  authLoginFields: ["login", "name", "email", "phone"]
+  authLoginFields: ["login", "name", "email", "phone"],
+  normalizeAuthLogin: (value, field) => {
+    const text = String(value).trim()
+    if (field === "email") return text.toLowerCase()
+    if (field === "phone") return text.replace(/\D/g, "")
+    return text
+  }
 })
 ```
 
-The client still calls `state.login(value, password)`; the server searches the configured fields.
+The client still calls `state.login(value, password)`; the server normalizes that value per field and searches the configured fields. Store normalized identifier values in `_user` too, for example lowercase emails and canonical phone digits.
 
 For production, add sparse unique indexes for every identifier field you allow, for example `_user.email` and `_user.phone`.
+
+If a normalized identifier matches multiple active users, login fails with the same generic `Invalid login or password` response and the server calls:
+
+```js
+onAuthWarning?.({
+  type: "ambiguous_auth_login",
+  login,
+  normalized,
+  fields,
+  count,
+  client
+})
+```
+
+You can rate-limit login and hash auth with a hook. Return `false` to reject the attempt:
+
+```js
+createDbStateServer({
+  mongo,
+  tables,
+  authRateLimit: async ({ type, login, userId, client }) => {
+    return await limiter.allow(client.ip ?? login ?? userId)
+  }
+})
+```
+
+Rate-limited attempts return `Too many attempts`.
 
 Reconnect authorization:
 

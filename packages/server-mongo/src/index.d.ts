@@ -1,10 +1,10 @@
 import type { BaseDoc, Change, Filter, ListQuery, UpdatePatch } from "@db-state/core"
 import type { AccessConfig, AccessUser } from "./access"
-import type { PasswordHasher } from "./auth"
+import type { AuthRateLimitContext, AuthWarning, PasswordHasher } from "./auth"
 import type { SocketHub } from "./socket"
 
 export type { AccessConfig, AccessContext, AccessDecision, AccessRule, AccessUser, ServerPermissionRule, PermissionPart } from "./access"
-export type { PasswordHasher, AuthHandlers, LoginMessage, AuthMessage, LogoutMessage } from "./auth"
+export type { PasswordHasher, AuthHandlers, LoginMessage, AuthMessage, LogoutMessage, AuthRateLimitContext, AuthWarning } from "./auth"
 export type { BroadcastOptions, ClientMeta, DetachClient, SocketAdapter, SocketClient, SocketHub } from "./socket"
 export type { RpcHandler, RpcRequest, RpcRouter } from "./rpc"
 export type { BaseDoc, Change, ChangeAction, Filter, ListQuery, SortSpec, UpdatePatch } from "@db-state/core"
@@ -85,6 +85,15 @@ export interface DbStateServerConfig {
 
   /** User fields accepted by `dbstate:login`. Default `["login"]`. */
   authLoginFields?: ReadonlyArray<string>
+
+  /** Normalizes the submitted login value before matching a configured auth field. Default: `String(value).trim()`. */
+  normalizeAuthLogin?: (value: unknown, field: string) => string
+
+  /** Optional login/hash-auth rate-limit hook. Return `false` to reject with `Too many attempts`. */
+  authRateLimit?: (ctx: AuthRateLimitContext) => Promise<boolean | void> | boolean | void
+
+  /** Optional security warning hook, e.g. for ambiguous login identifiers. */
+  onAuthWarning?: (warning: AuthWarning) => void
 
   /** Returns the current ISO timestamp. Default: `new Date().toISOString()`. */
   now?: () => string

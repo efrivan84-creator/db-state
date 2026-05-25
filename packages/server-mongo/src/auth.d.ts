@@ -35,6 +35,22 @@ export interface LogoutMessage {
   id?: string
 }
 
+export interface AuthRateLimitContext {
+  type: "login" | "auth"
+  login?: string
+  userId?: string
+  client: SocketClient
+}
+
+export interface AuthWarning {
+  type: "ambiguous_auth_login"
+  login: string
+  normalized: Record<string, string>
+  fields: ReadonlyArray<string>
+  count: number
+  client: SocketClient
+}
+
 /** Auth namespace exposed to the socket dispatcher. */
 export interface AuthHandlers {
   login(client: SocketClient, message: LoginMessage): Promise<void>
@@ -46,6 +62,9 @@ export function createAuth(config: {
   mongo: { collection(name: string): unknown }
   userTable: string
   authLoginFields: ReadonlyArray<string>
+  normalizeAuthLogin: (value: unknown, field: string) => string
+  authRateLimit?: (ctx: AuthRateLimitContext) => Promise<boolean | void> | boolean | void
+  onAuthWarning?: (warning: AuthWarning) => void
   password: PasswordHasher
   createAuthHash: () => string
 }): AuthHandlers

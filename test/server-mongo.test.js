@@ -362,6 +362,157 @@ test("socket login can match configured user fields", async () => {
   )
 })
 
+test("socket login normalizes configured user fields", async () => {
+  const sent = []
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["user"],
+    authLoginFields: ["email", "phone"],
+    normalizeAuthLogin: (value, field) => {
+      const text = String(value).trim()
+      if (field === "email") return text.toLowerCase()
+      if (field === "phone") return text.replace(/\D/g, "")
+      return text
+    },
+    password: {
+      hash: async (password) => `hashed:${password}`,
+      verify: async (password, hash) => hash === `hashed:${password}`
+    },
+    createAuthHash: () => "auth-hash"
+  })
+  await mongo.collection("_user").insertOne({
+    _id: "u1",
+    email: "ivan@example.com",
+    phone: "79990001122",
+    passwordHash: "hashed:secret",
+    disabled: false
+  })
+
+  for (const login of [" IVAN@Example.COM ", "+7 (999) 000-11-22"]) {
+    const client = { send: (message) => sent.push(JSON.parse(message)) }
+    server.socket.addClient(client, { sessionId: login })
+    await server.socket.handleMessage(client, JSON.stringify({
+      type: "dbstate:login",
+      id: login,
+      login,
+      password: "secret"
+    }))
+  }
+
+  assert.deepEqual(
+    sent.filter((message) => message.type === "dbstate:login_result").map((message) => message.userId),
+    ["u1", "u1"]
+  )
+})
+
+test("socket login rejects ambiguous normalized identifiers and reports a warning", async () => {
+  const sent = []
+  const warnings = []
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["user"],
+    authLoginFields: ["email"],
+    normalizeAuthLogin: (value) => String(value).trim().toLowerCase(),
+    onAuthWarning: (warning) => warnings.push(warning),
+    password: {
+      hash: async (password) => `hashed:${password}`,
+      verify: async (password, hash) => hash === `hashed:${password}`
+    }
+  })
+  await mongo.collection("_user").insertOne({
+    _id: "u1",
+    email: "ivan@example.com",
+    passwordHash: "hashed:secret",
+    disabled: false
+  })
+  await mongo.collection("_user").insertOne({
+    _id: "u2",
+    email: "ivan@example.com",
+    passwordHash: "hashed:secret",
+    disabled: false
+  })
+
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { sessionId: "s1" })
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:login",
+    id: "login1",
+    login: "IVAN@example.com",
+    password: "secret"
+  }))
+
+  const error = sent.find((message) => message.type === "dbstate:login_error")
+  assert.equal(error.error, "Invalid login or password")
+  assert.deepEqual(warnings.map((warning) => warning.type), ["ambiguous_auth_login"])
+  assert.equal(client.user, undefined)
+})
+
+test("socket login can be rejected by authRateLimit", async () => {
+  const sent = []
+  const calls = []
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["user"],
+    authRateLimit: (ctx) => {
+      calls.push(ctx)
+      return false
+    }
+  })
+
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { sessionId: "s1" })
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:login",
+    id: "login1",
+    login: "ivan",
+    password: "secret"
+  }))
+
+  const error = sent.find((message) => message.type === "dbstate:login_error")
+  assert.equal(error.error, "Too many attempts")
+  assert.equal(calls[0].type, "login")
+  assert.equal(calls[0].login, "ivan")
+})
+
+test("socket hash auth can be rejected by authRateLimit", async () => {
+  const sent = []
+  const calls = []
+  const server = createDbStateServer({
+    mongo: createMemoryMongo(),
+    tables: ["user"],
+    authRateLimit: (ctx) => {
+      calls.push(ctx)
+      return false
+    }
+  })
+
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { sessionId: "s1" })
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:auth",
+    id: "auth1",
+    userId: "u1",
+    hash: "auth-hash"
+  }))
+
+  const error = sent.find((message) => message.type === "dbstate:auth_error")
+  assert.equal(error.error, "Too many attempts")
+  assert.equal(calls[0].type, "auth")
+  assert.equal(calls[0].userId, "u1")
+})
+
+test("server-mongo entrypoint exports auth helpers", async () => {
+  const module = await import("../packages/server-mongo/src/index.js")
+
+  assert.equal(typeof module.defaultPassword.hash, "function")
+  assert.equal(typeof module.defaultPassword.verify, "function")
+  assert.equal(typeof module.defaultAuthHash, "function")
+  assert.equal(typeof module.hashValue, "function")
+})
+
 test("socket RPC is denied before auth", async () => {
   const sent = []
   const server = createDbStateServer({

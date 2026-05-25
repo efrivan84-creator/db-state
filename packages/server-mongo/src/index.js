@@ -13,6 +13,10 @@ import { createAuth, defaultAuthHash, defaultPassword } from "./auth.js"
 import { createHandlers, handleRpc } from "./rpc.js"
 import { createSocketHub } from "./socket.js"
 
+export { createAuth, defaultAuthHash, defaultPassword, hashValue } from "./auth.js"
+export { createHandlers, handleRpc } from "./rpc.js"
+export { createSocketHub } from "./socket.js"
+
 export function createDbStateServer(options) {
   const config = normalizeOptions(options)
   const auth = createAuth(config)
@@ -212,6 +216,7 @@ async function getPermissionRules(config, cache, table) {
 function normalizeOptions(options) {
   return {
     access: {},
+    authRateLimit: undefined,
     createAuthHash: defaultAuthHash,
     createLogId: defaultId,
     changesBroadcastDelay: 3000,
@@ -219,6 +224,8 @@ function normalizeOptions(options) {
     getUser: async ({ req, client }) => req?.user ?? req?.client?.user ?? client?.user ?? makeUser(req?.client ?? req ?? client),
     logCollection: "log",
     now: () => new Date().toISOString(),
+    normalizeAuthLogin: defaultNormalizeAuthLogin,
+    onAuthWarning: undefined,
     password: defaultPassword,
     permissionTable: "_permission",
     syncLimit: 1000,
@@ -232,6 +239,10 @@ function normalizeOptions(options) {
 function normalizeAuthLoginFields(fields) {
   const normalized = [...new Set((fields ?? ["login"]).filter(Boolean))]
   return normalized.length > 0 ? normalized : ["login"]
+}
+
+function defaultNormalizeAuthLogin(value) {
+  return String(value ?? "").trim()
 }
 
 function assertTable(config, table) {

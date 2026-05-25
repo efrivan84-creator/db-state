@@ -81,7 +81,13 @@ The protocol field is still named `login`, but it can contain any identifier val
 createDbStateServer({
   mongo,
   tables: [...],
-  authLoginFields: ["login", "name", "email", "phone"]
+  authLoginFields: ["login", "name", "email", "phone"],
+  normalizeAuthLogin: (value, field) => {
+    const text = String(value).trim()
+    if (field === "email") return text.toLowerCase()
+    if (field === "phone") return text.replace(/\D/g, "")
+    return text
+  }
 })
 ```
 
@@ -108,7 +114,44 @@ The server query becomes:
 }
 ```
 
-Add sparse unique Mongo indexes for each configured identifier field in production, otherwise duplicate emails or phones can make login ambiguous.
+Store normalized values in `_user`, too. For example, save lowercase emails and canonical phone digits.
+
+Add sparse unique Mongo indexes for each configured identifier field in production, otherwise duplicate emails or phones can make login ambiguous:
+
+```js
+await mongo.collection("_user").createIndex({ login: 1 }, { unique: true, sparse: true })
+await mongo.collection("_user").createIndex({ email: 1 }, { unique: true, sparse: true })
+await mongo.collection("_user").createIndex({ phone: 1 }, { unique: true, sparse: true })
+```
+
+If a normalized identifier matches multiple active users, login fails with the same generic `Invalid login or password` response and `onAuthWarning` is called:
+
+```js
+createDbStateServer({
+  mongo,
+  tables: [...],
+  onAuthWarning: (warning) => {
+    if (warning.type === "ambiguous_auth_login") {
+      console.warn("ambiguous auth login", warning.login, warning.normalized, warning.count)
+    }
+  }
+})
+```
+
+## Login and auth rate limiting
+
+Use `authRateLimit` to throttle public login and hash-auth attempts. Return `false` to reject with `Too many attempts`:
+
+```js
+createDbStateServer({
+  mongo,
+  tables: [...],
+  authRateLimit: async ({ type, login, userId, client }) => {
+    const key = client.ip ?? login ?? userId
+    return await limiter.allow(`${type}:${key}`)
+  }
+})
+```
 
 ## Hash auth
 

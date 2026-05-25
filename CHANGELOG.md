@@ -2,6 +2,13 @@
 
 Release notes and project status for db-state.
 
+## Unreleased
+
+- Server auth can normalize login identifiers per configured field via `normalizeAuthLogin`, allowing lowercase emails and canonical phone values.
+- Ambiguous normalized login matches are rejected with a generic auth error and reported through `onAuthWarning({ type: "ambiguous_auth_login", ... })`.
+- Added `authRateLimit` hook for both login and hash-auth attempts.
+- `@db-state/server-mongo` now exports `defaultPassword`, `defaultAuthHash`, `hashValue`, `createAuth`, `createHandlers`, `handleRpc`, and `createSocketHub` from the package root.
+
 ## 0.0.4
 
 - Server change wake-ups are now debounced/rate-limited via `changesBroadcastDelay` and `changesBroadcastRate`, and signals are sent to every client including the writer.
@@ -44,7 +51,7 @@ Initial public release:
 
 ## Current status
 
-- Realtime CRUD with permissions, offline cache, login, and sync is implemented and covered by 50 tests.
+- Realtime CRUD with permissions, offline cache, login, and sync is implemented and covered by 56 tests.
 - TypeScript declarations are included for all packages.
 - Append-only log supports audit trail, delete recovery, and time-travel reconstruction patterns.
 - Vue + MongoDB + WebSocket are the supported stack.

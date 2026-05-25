@@ -50,6 +50,9 @@ createDbStateServer(config: DbStateServerConfig): DbStateServer
 | `access` | `AccessConfig` | `{}` | Code access rules. |
 | `password` | `PasswordHasher` | PBKDF2 | Password hash adapter. |
 | `authLoginFields` | `string[]` | `["login"]` | `_user` fields accepted by `dbstate:login`, e.g. `["login", "email", "phone"]`. |
+| `normalizeAuthLogin` | `(value, field) => string` | `String(value).trim()` | Normalizes submitted login values before matching each configured field. |
+| `authRateLimit` | `(ctx) => boolean \| void` | undefined | Optional login/hash-auth rate-limit hook. Return `false` to reject. |
+| `onAuthWarning` | `(warning) => void` | undefined | Optional security warning hook, currently `ambiguous_auth_login`. |
 | `createAuthHash` | `() => string` | 32 random hex | Auth-hash generator. |
 | `createLogId` | `() => string` | `crypto.randomUUID()` | Log entry id generator. |
 | `getUser` | `GetUserFn` | reads `req.client.user` | Resolve calling user. |
@@ -249,7 +252,7 @@ function defaultAuthHash(): string                // 32 random hex bytes
 function hashValue(value: unknown): string        // SHA-256 hex of String(value)
 ```
 
-`hashValue` is exposed for app-level hashing needs unrelated to auth.
+`defaultPassword`, `defaultAuthHash`, and `hashValue` are runtime exports from the package root. Use them in public registration flows, seed scripts, tests, and app-level hashing needs.
 
 ## Access types
 
