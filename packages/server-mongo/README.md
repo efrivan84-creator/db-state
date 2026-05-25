@@ -379,6 +379,30 @@ Every log entry stores the actor id:
 }
 ```
 
+## Server-owned info fields
+
+Client writes cannot set or remove `info` fields. On `add`, the server strips `info` from the input object and writes:
+
+```js
+{
+  info: {
+    makeid: user._id,
+    makedata: serverTime
+  }
+}
+```
+
+On `update`, the server strips `info` / `info.*` from client `set` and `unset`, then writes:
+
+```js
+{
+  "info.editid": user._id,
+  "info.editdata": serverTime
+}
+```
+
+These fields are stored in MongoDB and in the append-only log, so create/edit metadata cannot be forged by the client.
+
 ## Sync and audit log
 
 Every successful write appends one compact log row:

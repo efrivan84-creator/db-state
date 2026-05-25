@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { setByPath, unsetByPath } from "../packages/core/src/index.js"
 import { createDbStateServer } from "../packages/server-mongo/src/index.js"
 
 test("server update writes data, appends log, broadcasts to everyone, and sync excludes current session", async () => {
@@ -30,7 +31,11 @@ test("server update writes data, appends log, broadcasts to everyone, and sync e
   assert.equal(update.ok, true)
   assert.deepEqual(await mongo.collection("user").findOne({ _id: "u1" }), {
     _id: "u1",
-    name: "Ivan"
+    name: "Ivan",
+    info: {
+      editid: "u-admin",
+      editdata: "2026-05-21T10:00:01.000Z"
+    }
   })
   const [log] = await mongo.collection("log").find({}).toArray()
   assert.equal(log.userId, "u-admin")
@@ -140,6 +145,95 @@ test("delete log stores old document and compact actor id", async () => {
   assert.equal("user" in log, false)
 })
 
+test("add strips client info and writes server create info", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    now: () => "2026-05-21T10:00:01.000Z",
+    createLogId: () => "log1"
+  })
+  await allowTable(mongo, "order", "admins")
+
+  const result = await server.add({
+    table: "order",
+    obj: {
+      _id: "o1",
+      status: "open",
+      info: {
+        makeid: "client",
+        makedata: "client-date",
+        editid: "client-edit"
+      }
+    },
+    sessionId: "s1",
+    req: adminReq()
+  })
+
+  assert.deepEqual(await mongo.collection("order").findOne({ _id: "o1" }), {
+    _id: "o1",
+    status: "open",
+    info: {
+      makeid: "u-admin",
+      makedata: "2026-05-21T10:00:01.000Z"
+    }
+  })
+  assert.deepEqual(result.change.obj.info, {
+    makeid: "u-admin",
+    makedata: "2026-05-21T10:00:01.000Z"
+  })
+})
+
+test("update strips client info and writes server edit info", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    now: () => "2026-05-21T10:00:01.000Z",
+    createLogId: () => "log1"
+  })
+  await allowTable(mongo, "order", "admins")
+  await mongo.collection("order").insertOne({
+    _id: "o1",
+    status: "open",
+    info: {
+      makeid: "u-admin",
+      makedata: "2026-05-21T09:00:00.000Z"
+    }
+  })
+
+  const result = await server.update({
+    table: "order",
+    id: "o1",
+    set: {
+      status: "done",
+      info: { makeid: "client" },
+      "info.editid": "client",
+      "info.note": "client"
+    },
+    unset: ["info.makedata", "info.any"],
+    sessionId: "s1",
+    req: adminReq()
+  })
+
+  assert.deepEqual(await mongo.collection("order").findOne({ _id: "o1" }), {
+    _id: "o1",
+    status: "done",
+    info: {
+      makeid: "u-admin",
+      makedata: "2026-05-21T09:00:00.000Z",
+      editid: "u-admin",
+      editdata: "2026-05-21T10:00:01.000Z"
+    }
+  })
+  assert.deepEqual(result.change.set, {
+    status: "done",
+    "info.editid": "u-admin",
+    "info.editdata": "2026-05-21T10:00:01.000Z"
+  })
+  assert.equal(result.change.unset, undefined)
+})
+
 test("socket hub exposes custom events without sending reserved dbstate messages from users", () => {
   const sent = []
   const server = createDbStateServer({
@@ -195,7 +289,11 @@ test("socket RPC handles db-state methods over WebSocket", async () => {
   assert.equal(response.result.ok, true)
   assert.deepEqual(await server.load({ table: "user", id: "u1", req: adminReq() }), {
     _id: "u1",
-    name: "Ivan"
+    name: "Ivan",
+    info: {
+      editid: "u1",
+      editdata: "2026-05-21T10:00:01.000Z"
+    }
   })
 })
 
@@ -912,10 +1010,14 @@ class MemoryCollection {
       this.#items.push(item)
     }
 
-    if (item && update.$set) Object.assign(item, update.$set)
+    if (item && update.$set) {
+      for (const [path, value] of Object.entries(update.$set)) {
+        setByPath(item, path, value)
+      }
+    }
     if (item && update.$unset) {
       for (const key of Object.keys(update.$unset)) {
-        delete item[key]
+        unsetByPath(item, key)
       }
     }
 

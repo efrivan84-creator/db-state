@@ -32,16 +32,24 @@ export function createDbStateServer(options) {
   async function update({ table, id, set, unset, sessionId, req }) {
     assertTable(config, table)
     const user = await resolveUser(config, { req })
+    const now = config.now()
     const old = await getDoc(config, table, id)
-    const obj = applyPatch({ ...(old ?? { _id: id }) }, { set, unset })
-    const access = await assertAccess(config, "write", { req, table, id, obj, old, set, unset, action: "update" })
-    assertFieldsAccess(access, changeWritePaths({ set, unset }), "Write")
+    const clientSet = stripInfoSet(set)
+    const clientUnset = stripInfoUnset(unset)
+    const serverSet = {
+      ...clientSet,
+      "info.editid": user?._id,
+      "info.editdata": now
+    }
+    const obj = applyPatch({ ...(old ?? { _id: id }) }, { set: serverSet, unset: clientUnset })
+    const access = await assertAccess(config, "write", { req, table, id, obj, old, set: clientSet, unset: clientUnset, action: "update" })
+    assertFieldsAccess(access, changeWritePaths({ set: clientSet, unset: clientUnset }), "Write")
 
     await config.mongo.collection(table).updateOne(
       { _id: id },
       {
-        ...(set ? { $set: set } : {}),
-        ...(unset ? { $unset: Object.fromEntries(unset.map((key) => [key, ""])) } : {})
+        $set: serverSet,
+        ...(clientUnset?.length ? { $unset: Object.fromEntries(clientUnset.map((key) => [key, ""])) } : {})
       },
       { upsert: true }
     )
@@ -50,10 +58,11 @@ export function createDbStateServer(options) {
       table,
       id,
       action: "update",
-      set,
-      unset,
+      set: serverSet,
+      unset: clientUnset?.length ? clientUnset : undefined,
       sessionId,
-      userId: user?._id
+      userId: user?._id,
+      createdAt: now
     })
 
     changesBroadcaster.schedule()
@@ -63,10 +72,19 @@ export function createDbStateServer(options) {
   async function add({ table, obj, sessionId, req }) {
     assertTable(config, table)
     const user = await resolveUser(config, { req })
+    const now = config.now()
     const id = obj._id ?? obj.id ?? config.createLogId()
-    const document = { ...obj, _id: id }
+    const clientDocument = stripInfoObject(obj)
+    const document = {
+      ...clientDocument,
+      _id: id,
+      info: {
+        makeid: user?._id,
+        makedata: now
+      }
+    }
     const access = await assertAccess(config, "write", { req, table, id, obj: document, action: "insert" })
-    assertFieldsAccess(access, changeWritePaths({ obj: document }), "Write")
+    assertFieldsAccess(access, changeWritePaths({ obj: clientDocument }), "Write")
 
     await config.mongo.collection(table).insertOne(document)
     const change = await appendLog(config, {
@@ -75,7 +93,8 @@ export function createDbStateServer(options) {
       action: "insert",
       obj: document,
       sessionId,
-      userId: user?._id
+      userId: user?._id,
+      createdAt: now
     })
 
     changesBroadcaster.schedule()
@@ -190,7 +209,7 @@ async function appendLog(config, change) {
   const item = createChange({
     ...change,
     logId: config.createLogId(),
-    createdAt: config.now()
+    createdAt: change.createdAt ?? config.now()
   })
 
   await config.mongo.collection(config.logCollection).insertOne(item)
@@ -199,6 +218,26 @@ async function appendLog(config, change) {
 
 function getDoc(config, table, id) {
   return config.mongo.collection(table).findOne({ _id: id })
+}
+
+function stripInfoObject(obj = {}) {
+  const { info, ...rest } = obj
+  return rest
+}
+
+function stripInfoSet(set) {
+  if (!set) return undefined
+
+  const entries = Object.entries(set).filter(([path]) => !isInfoPath(path))
+  return entries.length ? Object.fromEntries(entries) : undefined
+}
+
+function stripInfoUnset(unset) {
+  return (unset ?? []).filter((path) => !isInfoPath(path))
+}
+
+function isInfoPath(path) {
+  return path === "info" || path.startsWith("info.")
 }
 
 async function getPermissionRules(config, cache, table) {

@@ -2,6 +2,7 @@ import { reactive } from "vue"
 
 import { DB_STATE_MESSAGES, applyPatch, normalizeTables } from "@db-state/core"
 import { createIndexedDbCache, createMemoryCache, createStorageCache } from "./cache.js"
+import { createChangeHooks, notifyChangeHooks, subscribe } from "./hooks.js"
 import { getKeyRef } from "./keys.js"
 import { createSocketFacade } from "./socket.js"
 import { getSessionId, safeStorage } from "./storage.js"
@@ -24,6 +25,7 @@ export function createDbState(input) {
   const loadingByKey = new Map()
   const countRefs = new Map()
   const idsRefs = new Map()
+  const changeHooks = createChangeHooks(options.tables)
   const sessionId = getSessionId(options.sessionStorage, options.sessionKey, options.userId)
   const savedUserId = options.authStorage.getItem(options.userIdKey)
   const savedAuthHash = options.authStorage.getItem(options.authHashKey)
@@ -53,6 +55,10 @@ export function createDbState(input) {
     resetKey(key) {
       loadingByKey.delete(key)
       getKeyRef(keyRefs, key).value = 0
+    },
+
+    onChange(callback) {
+      return subscribe(changeHooks.global, callback)
     },
 
     async syncNow() {
@@ -87,13 +93,16 @@ export function createDbState(input) {
 
     async applyChange(change) {
       const wasLoaded = Boolean(tables[change.table]?.[change.id]?.__loaded)
+      const oldObj = change.action === "delete" ? (change.old ?? tables[change.table]?.[change.id]) : undefined
       applyReactiveChange(tables, change)
+      const obj = tables[change.table]?.[change.id]
       if (change.action === "insert" && tables[change.table]?.[change.id]) {
         tables[change.table][change.id].__loaded = true
       }
       await writeCache(options.cache, change, tables[change.table]?.[change.id], wasLoaded)
       scheduleCountRefresh(countRefs, change.table, options)
       scheduleIdsRefresh(idsRefs, change.table, options)
+      notifyChangeHooks(changeHooks, options, change, obj, oldObj)
     },
 
     async clearLocalDB() {
@@ -174,7 +183,7 @@ export function createDbState(input) {
   })
 
   for (const table of options.tables) {
-    state[table] = createTableApi({ options, state, table, tables, loadingByKey, keyRefs, countRefs, idsRefs })
+    state[table] = createTableApi({ options, state, table, tables, loadingByKey, keyRefs, countRefs, idsRefs, changeHooks })
   }
 
   state.socket.on(DB_STATE_MESSAGES.socketOpen, async () => {

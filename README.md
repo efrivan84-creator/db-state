@@ -155,6 +155,8 @@ Each table gets the same methods:
 | `idsRef({ filter, sort, skip, limit })` | Reactive cached id list. |
 | `listRef({ filter, sort, skip, limit }, key?)` | Reactive computed document list. |
 | `countRef(filter)` | Reactive cached counter for a MongoDB filter. |
+| `state.onChange(fn)` | Global hook for every applied change. |
+| `state.order.onAdd/onEdit/onDelete(fn)` | Table hooks after inserts, updates, and deletes. |
 | `add(obj)` | Inserts a document and applies the returned change locally. |
 | `update({ id, set, unset, objedit })` | Patches a document and updates local state/cache. |
 | `remove(id)` | Deletes a document and removes it from local state/cache. |

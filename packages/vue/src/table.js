@@ -1,11 +1,13 @@
 import { computed, reactive, ref } from "vue"
 
+import { createChangeHooks, subscribe, subscribeAction } from "./hooks.js"
 import { trackLoadedKey, trackPendingKey } from "./keys.js"
 
 export function createTableApi(ctx) {
-  const { options, state, table, tables, loadingByKey, keyRefs, countRefs, idsRefs } = ctx
+  const { options, state, table, tables, loadingByKey, keyRefs, countRefs, idsRefs, changeHooks } = ctx
   const loading = new Set()
   const errors = reactive({})
+  const tableHooks = (changeHooks ?? createChangeHooks([table])).tables.get(table)
 
   function load(id, key) {
     if (id == null) return undefined
@@ -33,6 +35,22 @@ export function createTableApi(ctx) {
     items: tables[table],
     errors,
     load,
+
+    onChange(callback) {
+      return subscribe(tableHooks, (event) => callback(event.change))
+    },
+
+    onAdd(callback) {
+      return subscribeAction(tableHooks, "insert", callback)
+    },
+
+    onEdit(callback) {
+      return subscribeAction(tableHooks, "update", callback)
+    },
+
+    onDelete(callback) {
+      return subscribeAction(tableHooks, "delete", callback)
+    },
 
     async getAsync(id, key) {
       const item = this.load(id, key)

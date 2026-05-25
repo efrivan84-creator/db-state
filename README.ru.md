@@ -155,6 +155,8 @@ client update()
 | `idsRef({ filter, sort, skip, limit })` | Реактивный закэшированный список id. |
 | `listRef({ filter, sort, skip, limit }, key?)` | Реактивный computed-список документов. |
 | `countRef(filter)` | Реактивный закэшированный счетчик по MongoDB-фильтру. |
+| `state.onChange(fn)` | Глобальный хук на каждое примененное изменение. |
+| `state.order.onAdd/onEdit/onDelete(fn)` | Хуки таблицы после insert, update и delete. |
 | `add(obj)` | Вставляет документ и применяет вернувшееся изменение локально. |
 | `update({ id, set, unset, objedit })` | Патчит документ и обновляет local state/cache. |
 | `remove(id)` | Удаляет документ и убирает его из local state/cache. |

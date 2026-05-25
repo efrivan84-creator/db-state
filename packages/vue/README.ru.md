@@ -108,6 +108,10 @@ state.user.listRef(query, key)
 state.user.update({ id, objedit })
 state.user.add(obj)
 state.user.remove(id)
+state.user.onChange((change) => {})
+state.user.onAdd((obj, change) => {})
+state.user.onEdit((obj, change) => {})
+state.user.onDelete((oldObj, change) => {})
 state.user.isLoading(id)
 state.user.getError(id)
 ```
@@ -126,11 +130,35 @@ state.user.getError(id)
 | `countRef(filter)` | Реактивный закэшированный count для фильтра. |
 | `idsRef(query)` | Реактивный закэшированный список id для query. |
 | `listRef(query, key?)` | Computed-список: `idsRef(query)` + `load(id, key)`. |
+| `onChange(fn)` | Хук таблицы на каждое примененное изменение. |
+| `onAdd(fn)` / `onEdit(fn)` / `onDelete(fn)` | Хуки таблицы на insert, update и delete. |
 | `isLoading(id)` / `getError(id)` | Состояние запроса конкретного документа. |
 
 Реактивные чтения (`load`, `idsRef`, `listRef`, `countRef`) работают cache-first. Они не вызывают защищенные серверные RPC, пока `state.auth.status !== "authorized"`. Если кэш не найден, пока auth/сокет еще не готовы, loaded-маркер остается false и чтение перезапрашивается после авторизации.
 
 Одноразовые чтения (`getAsync`, `getIds`, `getUnique`) ждут авторизацию, потому что их результат уже не обновится. Для UI лучше использовать реактивные методы. Записи (`add`, `update`, `remove`) ждут авторизацию до `writeAuthTimeout` (по умолчанию 3000 мс), затем выбрасывают ошибку, если сокет все еще не авторизован.
+
+### Change Hooks
+
+Хуки вызываются после того, как `applyChange()` обновил реактивную таблицу и кэш. Они работают и для локальных ответов на mutation, и для изменений, пришедших через sync.
+
+```js
+const offAll = state.onChange((change) => {
+  console.log(change.table, change.action, change.id)
+})
+
+const offOrderEdit = state.order.onEdit((order, change) => {
+  if (order) console.log(order.status)
+})
+
+state.order.onAdd((order, change) => {})
+state.order.onDelete((oldOrder, change) => {})
+
+offAll()
+offOrderEdit()
+```
+
+`onEdit` получает `undefined`, если update пришел по документу, который локально не был загружен. `onDelete` получает `change.old`, если сервер его прислал, иначе ранее загруженный локальный объект.
 
 ### Реактивные запросы
 

@@ -16,7 +16,8 @@ import {
 import type {
   DbState, DbStateOptions, DbStateSchema,
   TableApi, ReactiveDoc, ListQuery, Filter, SortSpec,
-  UpdateArgs, MutationResult,
+  UpdateArgs, MutationResult, ChangeUnsubscribe,
+  TableChangeHandler, TableAddHandler, TableEditHandler, TableDeleteHandler,
   DbStateCache, StorageLike, LoadingKeyRef,
   DbStateSocketFacade, SocketMessage,
   AuthResult, AuthStatus, SyncStatus, SyncState, AuthState,
@@ -82,6 +83,8 @@ interface DbState<TSchema> {
   getKeyRef(key: string): LoadingKeyRef
   resetKey(key: string): void
 
+  onChange(callback: (change: Change) => void): () => void
+
   syncNow(): Promise<void>
   applyChange(change: Change): Promise<void>
   clearLocalDB(): Promise<void>
@@ -143,6 +146,20 @@ await state.applyChange({
 
 Updates the reactive store, writes/deletes cache row, schedules `countRef` / `idsRef` refresh. `update` changes patch only already-loaded local documents; they do not create partial objects. `insert` changes create the local document because the log carries the full object.
 
+### `onChange(callback)`
+
+Registers a global hook for every applied change from every table. The returned function unsubscribes the hook.
+
+```ts
+const off = state.onChange((change) => {
+  console.log(change.table, change.action, change.id)
+})
+
+off()
+```
+
+Hooks run after `applyChange()` updates the reactive table and cache, and fire for both local mutation responses and remote sync changes. Hook errors are sent to `options.onError`.
+
 ### `clearLocalDB()`
 
 ```ts
@@ -193,6 +210,11 @@ interface TableApi<T extends BaseDoc> {
   idsRef(query?: ListQuery<T>): Ref<string[]>
   listRef(query?: ListQuery<T>, key?: string): ComputedRef<ReactiveDoc<T>[]>
 
+  onChange(callback: (change: Change<T>) => void): () => void
+  onAdd(callback: (obj: ReactiveDoc<T> | undefined, change: Change<T>) => void): () => void
+  onEdit(callback: (obj: ReactiveDoc<T> | undefined, change: Change<T>) => void): () => void
+  onDelete(callback: (oldObj: T | ReactiveDoc<T> | undefined, change: Change<T>) => void): () => void
+
   update(args: UpdateArgs<T>): Promise<MutationResult<T>>
   add(obj: Partial<T> & { _id?: string; id?: string }): Promise<MutationResult<T>>
   remove(id: string): Promise<MutationResult<T>>
@@ -205,6 +227,17 @@ interface TableApi<T extends BaseDoc> {
 See [reactive-queries.md](reactive-queries.md) and [mutations.md](mutations.md) for deep dives.
 
 Reactive methods (`load`, `idsRef`, `countRef`, `listRef`) are cache-first and retry only missed loads after authorization. One-off read methods (`getAsync`, `getIds`, `getUnique`) wait for authorization before RPC. Writes wait up to `writeAuthTimeout`.
+
+Table hooks:
+
+```ts
+state.order.onChange((change) => {})
+state.order.onAdd((order, change) => {})
+state.order.onEdit((order, change) => {})
+state.order.onDelete((oldOrder, change) => {})
+```
+
+`onEdit` receives `undefined` if the updated document was not loaded locally. `onDelete` receives `change.old` when available, otherwise the previously loaded local object.
 
 ## `ListQuery<T>`
 

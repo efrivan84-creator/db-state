@@ -327,6 +327,30 @@ const dbState = createDbStateServer({
 }
 ```
 
+## Серверные поля info
+
+Клиентские записи не могут выставлять или удалять поля `info`. При `add` сервер удаляет `info` из входного объекта и записывает:
+
+```js
+{
+  info: {
+    makeid: user._id,
+    makedata: serverTime
+  }
+}
+```
+
+При `update` сервер удаляет `info` / `info.*` из клиентских `set` и `unset`, затем записывает:
+
+```js
+{
+  "info.editid": user._id,
+  "info.editdata": serverTime
+}
+```
+
+Эти поля сохраняются в MongoDB и append-only log, поэтому клиент не может подделать create/edit metadata.
+
 ## Sync и audit log
 
 Каждая успешная запись добавляет компактную строку в log:

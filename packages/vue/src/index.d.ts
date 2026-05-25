@@ -3,7 +3,7 @@ import type { DbStateCache } from "./cache"
 import type { LoadingKeyRef } from "./keys"
 import type { DbStateSocketFacade } from "./socket"
 import type { StorageLike } from "./storage"
-import type { TableApi } from "./table"
+import type { ChangeUnsubscribe, TableApi } from "./table"
 
 export type { DbStateCache } from "./cache"
 export type { LoadingKeyRef } from "./keys"
@@ -17,6 +17,11 @@ export type {
   ReactiveDoc,
   SortSpec,
   TableApi,
+  ChangeUnsubscribe,
+  TableAddHandler,
+  TableChangeHandler,
+  TableDeleteHandler,
+  TableEditHandler,
   UpdateArgs
 } from "./table"
 export type {
@@ -168,6 +173,9 @@ export type DbState<TSchema extends DbStateSchema = DbStateSchema> =
 
     /** Resets the loading counter for a page-level key to zero. */
     resetKey(key: string): void
+
+    /** Registers a callback for every applied change from any table. */
+    onChange(callback: (change: Change) => void): ChangeUnsubscribe
 
     /** Pulls the next batch of log changes from the server and applies them. */
     syncNow(): Promise<void>

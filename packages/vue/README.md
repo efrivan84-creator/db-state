@@ -108,6 +108,10 @@ state.user.listRef(query, key)
 state.user.update({ id, objedit })
 state.user.add(obj)
 state.user.remove(id)
+state.user.onChange((change) => {})
+state.user.onAdd((obj, change) => {})
+state.user.onEdit((obj, change) => {})
+state.user.onDelete((oldObj, change) => {})
 state.user.isLoading(id)
 state.user.getError(id)
 ```
@@ -126,11 +130,35 @@ state.user.getError(id)
 | `countRef(filter)` | Reactive cached count for a filter. |
 | `idsRef(query)` | Reactive cached id list for a query. |
 | `listRef(query, key?)` | Computed list: `idsRef(query)` + `load(id, key)`. |
+| `onChange(fn)` | Table-level hook for every applied change. |
+| `onAdd(fn)` / `onEdit(fn)` / `onDelete(fn)` | Table-level hooks for inserts, updates, and deletes. |
 | `isLoading(id)` / `getError(id)` | Per-document request state. |
 
 Reactive reads (`load`, `idsRef`, `listRef`, `countRef`) are cache-first. They do not call protected server RPCs until `state.auth.status === "authorized"`. If they miss the cache while auth/socket is not ready, they keep their loaded marker false and are retried after authorization.
 
 One-off reads (`getAsync`, `getIds`, `getUnique`) wait for authorization because their result cannot update later. Prefer the reactive APIs for UI. Writes (`add`, `update`, `remove`) wait up to `writeAuthTimeout` (default 3000 ms) for authorization, then throw if the socket is still not authorized.
+
+### Change Hooks
+
+Hooks run after `applyChange()` updates the reactive table and cache. They fire for local mutation responses and for remote sync changes.
+
+```js
+const offAll = state.onChange((change) => {
+  console.log(change.table, change.action, change.id)
+})
+
+const offOrderEdit = state.order.onEdit((order, change) => {
+  if (order) console.log(order.status)
+})
+
+state.order.onAdd((order, change) => {})
+state.order.onDelete((oldOrder, change) => {})
+
+offAll()
+offOrderEdit()
+```
+
+`onEdit` receives `undefined` when an update arrives for a document that was never loaded locally. `onDelete` receives `change.old` when the server sent it, otherwise the previously loaded local object.
 
 ### Reactive Queries
 

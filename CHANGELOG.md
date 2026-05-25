@@ -2,6 +2,13 @@
 
 Release notes and project status for db-state.
 
+## 0.0.6
+
+- Server `add` and `update` now strip client-supplied `info` / `info.*` fields before validation and persistence.
+- Server `add` writes `info.makeid` and `info.makedata`; server `update` writes `info.editid` and `info.editdata` from the authorized user and server time.
+- Added regression tests for server-owned create/edit metadata.
+- Vue client now exposes `state.onChange`, table `onChange`, and filtered `onAdd` / `onEdit` / `onDelete` hooks after local changes are applied.
+
 ## 0.0.5
 
 - Server auth can normalize login identifiers per configured field via `normalizeAuthLogin`, allowing lowercase emails and canonical phone values.
@@ -51,7 +58,7 @@ Initial public release:
 
 ## Current status
 
-- Realtime CRUD with permissions, offline cache, login, and sync is implemented and covered by 56 tests.
+- Realtime CRUD with permissions, offline cache, login, and sync is implemented and covered by 60 tests.
 - TypeScript declarations are included for all packages.
 - Append-only log supports audit trail, delete recovery, and time-travel reconstruction patterns.
 - Vue + MongoDB + WebSocket are the supported stack.

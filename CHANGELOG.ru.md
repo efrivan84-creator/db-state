@@ -2,6 +2,13 @@
 
 Описание изменений и статус проекта db-state.
 
+## 0.0.6
+
+- Серверные `add` и `update` теперь удаляют клиентские поля `info` / `info.*` до проверки прав и сохранения.
+- Серверный `add` записывает `info.makeid` и `info.makedata`; серверный `update` записывает `info.editid` и `info.editdata` из авторизованного пользователя и времени сервера.
+- Добавлены regression-тесты для серверных create/edit metadata.
+- Vue-клиент теперь поддерживает `state.onChange`, табличный `onChange` и фильтрованные `onAdd` / `onEdit` / `onDelete` хуки после применения локальных изменений.
+
 ## 0.0.5
 
 - Серверная auth-логика умеет нормализовать login-идентификаторы по полю через `normalizeAuthLogin`, например lowercase email и канонический телефон.
@@ -51,7 +58,7 @@
 
 ## Текущий статус
 
-- Realtime CRUD с правами, offline cache, login и sync реализован и покрыт 56 тестами.
+- Realtime CRUD с правами, offline cache, login и sync реализован и покрыт 60 тестами.
 - TypeScript declarations есть во всех пакетах.
 - Append-only log поддерживает audit trail, восстановление удалений и time-travel reconstruction patterns.
 - Поддерживаемый стек: Vue + MongoDB + WebSocket.

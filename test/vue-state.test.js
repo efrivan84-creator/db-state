@@ -87,6 +87,86 @@ test("insert sync keeps the same reactive object when a page already loaded it",
   assert.equal(visibleDoc.status, "done")
 })
 
+test("change hooks fire globally and per table", async () => {
+  const state = createDbState({
+    autoConnect: false,
+    cache: createMemoryCache(),
+    safetySyncInterval: 0,
+    ...testStorage(),
+    tables: ["order", "user"]
+  })
+  const globalChanges = []
+  const orderChanges = []
+  const userChanges = []
+
+  const offGlobal = state.onChange((change) => globalChanges.push(change.id))
+  state.order.onChange((change) => orderChanges.push(change.id))
+  state.user.onChange((change) => userChanges.push(change.id))
+
+  await state.applyChange({
+    table: "order",
+    id: "o1",
+    action: "insert",
+    obj: { _id: "o1", status: "open" }
+  })
+  await state.applyChange({
+    table: "user",
+    id: "u1",
+    action: "insert",
+    obj: { _id: "u1", name: "Ivan" }
+  })
+  offGlobal()
+  await state.applyChange({
+    table: "order",
+    id: "o2",
+    action: "insert",
+    obj: { _id: "o2", status: "new" }
+  })
+
+  assert.deepEqual(globalChanges, ["o1", "u1"])
+  assert.deepEqual(orderChanges, ["o1", "o2"])
+  assert.deepEqual(userChanges, ["u1"])
+})
+
+test("table action hooks receive current and deleted objects", async () => {
+  const state = createDbState({
+    autoConnect: false,
+    cache: createMemoryCache(),
+    safetySyncInterval: 0,
+    ...testStorage(),
+    tables: ["order"]
+  })
+  const events = []
+
+  state.order.onAdd((obj, change) => events.push(["add", obj.status, change.id]))
+  state.order.onEdit((obj, change) => events.push(["edit", obj.status, change.set.status]))
+  state.order.onDelete((oldObj, change) => events.push(["delete", oldObj.status, change.id]))
+
+  await state.applyChange({
+    table: "order",
+    id: "o1",
+    action: "insert",
+    obj: { _id: "o1", status: "open" }
+  })
+  await state.applyChange({
+    table: "order",
+    id: "o1",
+    action: "update",
+    set: { status: "done" }
+  })
+  await state.applyChange({
+    table: "order",
+    id: "o1",
+    action: "delete"
+  })
+
+  assert.deepEqual(events, [
+    ["add", "open", "o1"],
+    ["edit", "done", "done"],
+    ["delete", "done", "o1"]
+  ])
+})
+
 test("countRef refreshes from server after table changes", async () => {
   const cache = createMemoryCache()
   const state = createDbState({

@@ -24,6 +24,21 @@ export interface MutationResult<T extends BaseDoc> {
   change: Change<T>
 }
 
+/** Returned by change-hook registration methods. Call it to unsubscribe. */
+export type ChangeUnsubscribe = () => void
+
+/** Callback for every visible change in one table. */
+export type TableChangeHandler<T extends BaseDoc = BaseDoc> = (change: Change<T>) => void
+
+/** Callback for inserted documents. */
+export type TableAddHandler<T extends BaseDoc = BaseDoc> = (obj: ReactiveDoc<T> | undefined, change: Change<T>) => void
+
+/** Callback for updated documents. `obj` is undefined when an unloaded row receives an update. */
+export type TableEditHandler<T extends BaseDoc = BaseDoc> = (obj: ReactiveDoc<T> | undefined, change: Change<T>) => void
+
+/** Callback for deleted documents. Uses `change.old` when present, otherwise the local loaded object. */
+export type TableDeleteHandler<T extends BaseDoc = BaseDoc> = (oldObj: T | ReactiveDoc<T> | undefined, change: Change<T>) => void
+
 /**
  * Per-table reactive API. One instance per table is created lazily when
  * `state[tableName]` is accessed.
@@ -36,6 +51,18 @@ export interface TableApi<T extends BaseDoc = BaseDoc> {
 
   /** Map of `id → Error` for the most recent failed `load`/`getAsync`. */
   readonly errors: Record<string, Error>
+
+  /** Registers a callback for every applied change in this table. */
+  onChange(callback: TableChangeHandler<T>): ChangeUnsubscribe
+
+  /** Registers a callback for inserted documents in this table. */
+  onAdd(callback: TableAddHandler<T>): ChangeUnsubscribe
+
+  /** Registers a callback for updated documents in this table. */
+  onEdit(callback: TableEditHandler<T>): ChangeUnsubscribe
+
+  /** Registers a callback for deleted documents in this table. */
+  onDelete(callback: TableDeleteHandler<T>): ChangeUnsubscribe
 
   /**
    * Returns a reactive document by id, loading it from cache/server in the
