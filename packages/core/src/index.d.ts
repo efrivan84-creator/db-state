@@ -92,7 +92,10 @@ export interface UpdateArgs<T extends BaseDoc = BaseDoc> extends UpdatePatch<T> 
 
 /** Built-in shape of the `_user` service table. */
 export interface ServiceUser extends BaseDoc {
-  login: string
+  login?: string
+  name?: string
+  email?: string
+  phone?: string
   passwordHash: string
   hash?: string
   groups?: string[]

@@ -83,6 +83,9 @@ export interface DbStateServerConfig {
   /** Name of the users table. Default `"_user"`. */
   userTable?: string
 
+  /** User fields accepted by `dbstate:login`. Default `["login"]`. */
+  authLoginFields?: ReadonlyArray<string>
+
   /** Returns the current ISO timestamp. Default: `new Date().toISOString()`. */
   now?: () => string
 

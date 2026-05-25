@@ -18,6 +18,7 @@ export function hashValue(value: unknown): string
 /** Incoming message shape recognised by `dbstate:login`. */
 export interface LoginMessage {
   id?: string
+  /** Login identifier value. The server matches it against `authLoginFields`. */
   login: string
   password: string
 }
@@ -44,6 +45,7 @@ export interface AuthHandlers {
 export function createAuth(config: {
   mongo: { collection(name: string): unknown }
   userTable: string
+  authLoginFields: ReadonlyArray<string>
   password: PasswordHasher
   createAuthHash: () => string
 }): AuthHandlers

@@ -5,10 +5,7 @@ import { DB_STATE_MESSAGES } from "@db-state/core"
 export function createAuth(config) {
   return {
     async login(client, message) {
-      const user = await config.mongo.collection(config.userTable).findOne({
-        login: message.login,
-        disabled: { $ne: true }
-      })
+      const user = await config.mongo.collection(config.userTable).findOne(loginFilter(config, message.login))
 
       if (!user || !(await config.password.verify(message.password, user.passwordHash))) {
         send(client, DB_STATE_MESSAGES.loginError, message.id, { error: "Invalid login or password" })
@@ -84,6 +81,13 @@ export function defaultAuthHash() {
 
 export function hashValue(value) {
   return createHash("sha256").update(String(value)).digest("hex")
+}
+
+function loginFilter(config, login) {
+  const fields = config.authLoginFields ?? ["login"]
+  const active = { disabled: { $ne: true } }
+  if (fields.length === 1) return { [fields[0]]: login, ...active }
+  return { ...active, $or: fields.map((field) => ({ [field]: login })) }
 }
 
 function attachUser(client, user) {

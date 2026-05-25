@@ -49,6 +49,7 @@ createDbStateServer(config: DbStateServerConfig): DbStateServer
 | `tables` | `string[]` | required | App tables. `_user`, `_group`, `_permission` added automatically. |
 | `access` | `AccessConfig` | `{}` | Code access rules. |
 | `password` | `PasswordHasher` | PBKDF2 | Password hash adapter. |
+| `authLoginFields` | `string[]` | `["login"]` | `_user` fields accepted by `dbstate:login`, e.g. `["login", "email", "phone"]`. |
 | `createAuthHash` | `() => string` | 32 random hex | Auth-hash generator. |
 | `createLogId` | `() => string` | `crypto.randomUUID()` | Log entry id generator. |
 | `getUser` | `GetUserFn` | reads `req.client.user` | Resolve calling user. |

@@ -224,8 +224,14 @@ function normalizeOptions(options) {
     syncLimit: 1000,
     userTable: "_user",
     ...options,
+    authLoginFields: normalizeAuthLoginFields(options.authLoginFields),
     tables: new Set(normalizeTables(options.tables))
   }
+}
+
+function normalizeAuthLoginFields(fields) {
+  const normalized = [...new Set((fields ?? ["login"]).filter(Boolean))]
+  return normalized.length > 0 ? normalized : ["login"]
 }
 
 function assertTable(config, table) {

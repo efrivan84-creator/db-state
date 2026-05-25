@@ -9,7 +9,9 @@ Each user is a Mongo document:
 ```js
 {
   _id: "u_123",                 // any unique string
-  login: "ivan",                // unique login (your code should enforce this)
+  login: "ivan",                // optional login identifier
+  email: "ivan@example.com",    // optional identifier
+  phone: "+79990001122",        // optional identifier
   passwordHash: "pbkdf2:...",   // see "Password adapters" below
   hash: "abc...",               // auth secret, server-managed
   groups: ["manager"],          // optional, used by permissions
@@ -18,7 +20,7 @@ Each user is a Mongo document:
 }
 ```
 
-The library reads exactly `login`, `passwordHash`, `hash`, `groups`, `disabled`. Anything else is your app's data.
+The library reads `passwordHash`, `hash`, `groups`, `disabled`, and the fields configured by `authLoginFields`. Anything else is your app's data.
 
 To create a user:
 
@@ -44,7 +46,7 @@ Client sends:
 
 Server:
 
-1. `mongo.collection("_user").findOne({ login, disabled: { $ne: true } })`.
+1. Finds an active `_user` by the configured login fields. Default query: `mongo.collection("_user").findOne({ login, disabled: { $ne: true } })`.
 2. Verifies password via `password.verify(plain, stored)`.
 3. If `_user.hash` is missing, generates one (`defaultAuthHash()` = 32 random hex bytes) and saves it.
 4. Attaches `{ _id, login, groups }` to the socket as `client.user`.
@@ -70,6 +72,43 @@ On failure:
   "error": "Invalid login or password"
 }
 ```
+
+### Login by email, phone, or name
+
+The protocol field is still named `login`, but it can contain any identifier value. Configure the server:
+
+```js
+createDbStateServer({
+  mongo,
+  tables: [...],
+  authLoginFields: ["login", "name", "email", "phone"]
+})
+```
+
+Then all of these can authenticate the same `_user` row if the password matches:
+
+```js
+await state.login("ivan", "...")
+await state.login("Ivan Petrov", "...")
+await state.login("ivan@example.com", "...")
+await state.login("+79990001122", "...")
+```
+
+The server query becomes:
+
+```js
+{
+  disabled: { $ne: true },
+  $or: [
+    { login: value },
+    { name: value },
+    { email: value },
+    { phone: value }
+  ]
+}
+```
+
+Add sparse unique Mongo indexes for each configured identifier field in production, otherwise duplicate emails or phones can make login ambiguous.
 
 ## Hash auth
 

@@ -322,6 +322,46 @@ test("socket login reuses existing user hash across tabs", async () => {
   assert.equal(authResult.ok, true)
 })
 
+test("socket login can match configured user fields", async () => {
+  const sent = []
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["user"],
+    authLoginFields: ["login", "name", "email", "phone"],
+    password: {
+      hash: async (password) => `hashed:${password}`,
+      verify: async (password, hash) => hash === `hashed:${password}`
+    },
+    createAuthHash: () => "auth-hash"
+  })
+  await mongo.collection("_user").insertOne({
+    _id: "u1",
+    name: "Ivan",
+    email: "ivan@example.com",
+    phone: "+79990001122",
+    passwordHash: "hashed:secret",
+    groups: ["admins"],
+    disabled: false
+  })
+
+  for (const login of ["Ivan", "ivan@example.com", "+79990001122"]) {
+    const client = { send: (message) => sent.push(JSON.parse(message)) }
+    server.socket.addClient(client, { sessionId: login })
+    await server.socket.handleMessage(client, JSON.stringify({
+      type: "dbstate:login",
+      id: login,
+      login,
+      password: "secret"
+    }))
+  }
+
+  assert.deepEqual(
+    sent.filter((message) => message.type === "dbstate:login_result").map((message) => message.userId),
+    ["u1", "u1", "u1"]
+  )
+})
+
 test("socket RPC is denied before auth", async () => {
   const sent = []
   const server = createDbStateServer({
@@ -781,6 +821,11 @@ function adminReq() {
 }
 
 function matches(item, filter = {}) {
+  if (filter.$or) {
+    const { $or, ...rest } = filter
+    return matches(item, rest) && $or.some((part) => matches(item, part))
+  }
+
   return Object.entries(filter).every(([key, expected]) => {
     const value = item[key]
     if (expected && typeof expected === "object" && !Array.isArray(expected)) {

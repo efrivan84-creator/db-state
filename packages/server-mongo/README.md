@@ -59,6 +59,7 @@ Create these indexes in production:
 ```js
 await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
 await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
+await mongo.collection("_user").createIndex({ login: 1 }, { unique: true, sparse: true })
 ```
 
 Add normal Mongo indexes for app queries used by `getIds`, `count`, and `getUnique`:
@@ -131,6 +132,8 @@ Users live in `_user`:
 {
   _id: "u1",
   login: "ivan",
+  email: "ivan@example.com",
+  phone: "+79990001122",
   passwordHash: "...",
   hash: "auth-secret",
   groups: ["manager"],
@@ -163,6 +166,20 @@ Login response:
 ```
 
 `hash` is reused across logins. A second browser tab or device logging in as the same user receives the existing `_user.hash`; it does not invalidate already opened tabs. If `_user.hash` is missing, the server creates it on the first successful login.
+
+By default `dbstate:login` matches `_user.login`. To accept other identifiers, configure `authLoginFields`:
+
+```js
+createDbStateServer({
+  mongo,
+  tables,
+  authLoginFields: ["login", "name", "email", "phone"]
+})
+```
+
+The client still calls `state.login(value, password)`; the server searches the configured fields.
+
+For production, add sparse unique indexes for every identifier field you allow, for example `_user.email` and `_user.phone`.
 
 Reconnect authorization:
 
