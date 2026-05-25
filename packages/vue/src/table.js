@@ -166,42 +166,48 @@ export function createTableApi(ctx) {
       return computed(() => ids.value.map((id) => load(id, key)))
     },
 
-    async update({ id, objedit, set = objedit, unset }) {
-      await requireAuthorizedForWrite(state, options)
-      const response = await state.socket.rpc("update", {
-        table,
-        id,
-        set,
-        unset,
-        sessionId: state.sync.sessionId
-      })
+    async update({ id, objedit, set = objedit, unset }, key) {
+      return trackMutationKey({ table, id, action: "update", key, loadingByKey, keyRefs }, async () => {
+        await requireAuthorizedForWrite(state, options)
+        const response = await state.socket.rpc("update", {
+          table,
+          id,
+          set,
+          unset,
+          sessionId: state.sync.sessionId
+        })
 
-      await state.applyChange(response.change)
-      return response
+        await state.applyChange(response.change)
+        return response
+      })
     },
 
-    async add(obj) {
-      await requireAuthorizedForWrite(state, options)
-      const response = await state.socket.rpc("add", {
-        table,
-        obj,
-        sessionId: state.sync.sessionId
-      })
+    async add(obj, key) {
+      return trackMutationKey({ table, id: obj?._id ?? obj?.id ?? "new", action: "add", key, loadingByKey, keyRefs }, async () => {
+        await requireAuthorizedForWrite(state, options)
+        const response = await state.socket.rpc("add", {
+          table,
+          obj,
+          sessionId: state.sync.sessionId
+        })
 
-      await state.applyChange(response.change)
-      return response
+        await state.applyChange(response.change)
+        return response
+      })
     },
 
-    async remove(id) {
-      await requireAuthorizedForWrite(state, options)
-      const response = await state.socket.rpc("remove", {
-        table,
-        id,
-        sessionId: state.sync.sessionId
-      })
+    async remove(id, key) {
+      return trackMutationKey({ table, id, action: "remove", key, loadingByKey, keyRefs }, async () => {
+        await requireAuthorizedForWrite(state, options)
+        const response = await state.socket.rpc("remove", {
+          table,
+          id,
+          sessionId: state.sync.sessionId
+        })
 
-      await state.applyChange(response.change)
-      return response
+        await state.applyChange(response.change)
+        return response
+      })
     },
 
     getError(id) {
@@ -320,6 +326,18 @@ async function queueLoad(input) {
     errors[id] = error
   } finally {
     loading.delete(id)
+    trackLoadedKey({ key, loadingByKey, keyRefs, token })
+  }
+}
+
+async function trackMutationKey(input, run) {
+  const { table, id, action, key, loadingByKey, keyRefs } = input
+  const token = `${table}:${action}:${id}`
+  trackPendingKey({ key, loadingByKey, keyRefs, token })
+
+  try {
+    return await run()
+  } finally {
     trackLoadedKey({ key, loadingByKey, keyRefs, token })
   }
 }

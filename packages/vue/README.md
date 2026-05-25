@@ -74,6 +74,16 @@ The server still decides access through the normal permission rules.
 
 ## Page Usage
 
+The main pattern is direct reactive document access:
+
+```js
+state.user.load(userId, "profile").profile.name
+state.user.load(userId, "profile").profile.phone
+state.user.load(userId, "profile").settings.theme
+```
+
+For one table/id pair, `load(id, key)` returns the same reactive object everywhere. The first call starts one cache/server load; later calls reuse the object and do not duplicate requests. When sync receives a server change, the object is patched in place and every component using it updates automatically. The `key` groups those reads, and optional mutation keys, into one page/form loading progress state.
+
 ```js
 const progress = state.getKeyRef("profile")
 const user = state.user.load(userId, "profile")
@@ -90,8 +100,16 @@ await state.user.update({
   objedit: {
     fio: user.fio
   }
-})
+}, "profile")
+
+// progress.value   active operations
+// progress.max     peak active operations in the current wave
+// progress.start   false until the first operation starts
+// progress.percent active operations left: progress.value / progress.max * 100
+// use 100 - progress.percent for a filling progress bar
 ```
+
+Use the same key for reads and writes when one page needs a single progress state. For example, `load` / `listRef` can show page loading progress, and `add` / `update` / `remove` can show the progress of submitted changes.
 
 ## Table API
 
@@ -105,9 +123,9 @@ state.user.getUnique(query, key)
 state.user.countRef(filter)
 state.user.idsRef(query)
 state.user.listRef(query, key)
-state.user.update({ id, objedit })
-state.user.add(obj)
-state.user.remove(id)
+state.user.update({ id, objedit }, key)
+state.user.add(obj, key)
+state.user.remove(id, key)
 state.user.onChange((change) => {})
 state.user.onAdd((obj, change) => {})
 state.user.onEdit((obj, change) => {})
@@ -124,9 +142,9 @@ state.user.getError(id)
 | `getAsync(id, key?)` | One-off async document load. |
 | `getIds(query, key?)` | One-off id query with `filter`, `sort`, `skip`, `limit`. |
 | `getUnique(query, key?)` | One-off unique-field query. |
-| `add(obj)` | Creates a document and applies the returned change locally. |
-| `update({ id, set, unset, objedit })` | Patches a document and updates local state/cache on success. |
-| `remove(id)` | Deletes a document and removes it from local state/cache. |
+| `add(obj, key?)` | Creates a document, tracks optional loading key, and applies the returned change locally. |
+| `update({ id, set, unset, objedit }, key?)` | Patches a document, tracks optional loading key, and updates local state/cache on success. |
+| `remove(id, key?)` | Deletes a document, tracks optional loading key, and removes it from local state/cache. |
 | `countRef(filter)` | Reactive cached count for a filter. |
 | `idsRef(query)` | Reactive cached id list for a query. |
 | `listRef(query, key?)` | Computed list: `idsRef(query)` + `load(id, key)`. |

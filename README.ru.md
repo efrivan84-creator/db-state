@@ -20,6 +20,16 @@ user.profile.city
 
 Объект реактивный. Если другой клиент изменит эту же строку, сервер запишет изменение в log, отправит WebSocket-уведомление, клиент подтянет diff через sync, и этот же объект обновится на месте.
 
+Главная сила в том, что `load(id, key)` возвращает общий reactive object для строки таблицы:
+
+```js
+state.user.load(userId, "profile").profile.name
+state.user.load(userId, "profile").profile.phone
+state.user.load(userId, "profile").settings.theme
+```
+
+При одном и том же `id` документ скачивается один раз, все места получают один и тот же reactive object, повторные `load(id, key)` не плодят запросы, а изменения с сервера патчат этот объект на месте. Optional `key` объединяет связанные загрузки и записи в один loading/progress-объект для страницы или формы.
+
 Также есть реактивные запросы к базе:
 
 ```js
@@ -98,7 +108,7 @@ async function closeOrder(order) {
 </script>
 
 <template>
-  <div v-if="loading > 0">Загрузка...</div>
+  <div v-if="loading.value > 0">Загрузка {{ 100 - loading.percent }}%</div>
   <div>Открытых заказов: {{ openCount }}</div>
 
   <button
@@ -157,10 +167,10 @@ client update()
 | `countRef(filter)` | Реактивный закэшированный счетчик по MongoDB-фильтру. |
 | `state.onChange(fn)` | Глобальный хук на каждое примененное изменение. |
 | `state.order.onAdd/onEdit/onDelete(fn)` | Хуки таблицы после insert, update и delete. |
-| `add(obj)` | Вставляет документ и применяет вернувшееся изменение локально. |
-| `update({ id, set, unset, objedit })` | Патчит документ и обновляет local state/cache. |
-| `remove(id)` | Удаляет документ и убирает его из local state/cache. |
-| `getKeyRef(key)` | Считает активные загрузки для страницы/блока. |
+| `add(obj, key?)` | Вставляет документ и учитывает optional loading key. |
+| `update({ id, set, unset, objedit }, key?)` | Патчит документ и учитывает optional loading key. |
+| `remove(id, key?)` | Удаляет документ и учитывает optional loading key. |
+| `getKeyRef(key)` | Реактивный объект загрузки страницы/блока: `value`, `max`, `start`, `percent`; подходит для процента загрузки или процента внесения изменений. |
 
 Важное поведение:
 

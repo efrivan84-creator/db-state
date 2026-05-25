@@ -116,14 +116,14 @@ export interface TableApi<T extends BaseDoc = BaseDoc> {
    */
   listRef(query?: ListQuery<T>, key?: PageKey): ComputedRef<ReactiveDoc<T>[]>
 
-  /** Sends an update RPC and applies the resulting change locally. */
-  update(args: UpdateArgs<T>): Promise<MutationResult<T>>
+  /** Sends an update RPC and applies the resulting change locally. Optionally tracks loading under `key`. */
+  update(args: UpdateArgs<T>, key?: PageKey): Promise<MutationResult<T>>
 
-  /** Sends an insert RPC and applies the resulting change locally. */
-  add(obj: Partial<T> & { _id?: string; id?: string }): Promise<MutationResult<T>>
+  /** Sends an insert RPC and applies the resulting change locally. Optionally tracks loading under `key`. */
+  add(obj: Partial<T> & { _id?: string; id?: string }, key?: PageKey): Promise<MutationResult<T>>
 
-  /** Sends a delete RPC and applies the resulting change locally. */
-  remove(id: string): Promise<MutationResult<T>>
+  /** Sends a delete RPC and applies the resulting change locally. Optionally tracks loading under `key`. */
+  remove(id: string, key?: PageKey): Promise<MutationResult<T>>
 
   /** Returns the error from the latest failed load for `id`, if any. */
   getError(id: string): Error | undefined

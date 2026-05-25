@@ -54,7 +54,10 @@ export function createDbState(input) {
 
     resetKey(key) {
       loadingByKey.delete(key)
-      getKeyRef(keyRefs, key).value = 0
+      const loading = getKeyRef(keyRefs, key)
+      loading.value = 0
+      loading.max = 0
+      loading.start = false
     },
 
     onChange(callback) {

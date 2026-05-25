@@ -1,14 +1,16 @@
-import type { ComputedRef, Ref } from "vue"
+import type { ComputedRef } from "vue"
 
-/** Number of pending loads tracked for a single page-level key. */
-export type LoadingCount = number
-
-/**
- * Vue ref returned by `state.getKeyRef(key)`. Its value is the number of
- * outstanding loads tied to that page-level key. The `.ready` computed
- * is `true` when all loads have finished.
- */
-export interface LoadingKeyRef extends Ref<LoadingCount> {
+/** Reactive loading state returned by `state.getKeyRef(key)`. */
+export interface LoadingKeyRef {
+  /** Current number of active operations tied to this key. */
+  value: number
+  /** Highest `value` reached during the current loading wave; reset to 0 when `value` returns to 0. */
+  max: number
+  /** `false` until the first operation starts, then `true` until `resetKey(key)`. */
+  start: boolean
+  /** `value / max * 100`, or 0 when `max` is 0. */
+  readonly percent: number
+  /** Backward-compatible ready flag: true when `value === 0`. */
   ready: ComputedRef<boolean>
 }
 

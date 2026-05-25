@@ -38,6 +38,16 @@ Key properties:
 - **Auto-updated**: when the server pushes an update for `o1` via sync, the same reactive object is patched in place.
 - Returns `undefined` only when `id` is `null` / `undefined`.
 
+This means page code can freely read different paths from the same row without coordinating requests:
+
+```js
+state.user.load(userId, "profile").profile.name
+state.user.load(userId, "profile").profile.phone
+state.user.load(userId, "profile").settings.theme
+```
+
+For the same table/id, the document loads once, every call receives the same object, remote updates patch that object, and all Vue consumers update automatically.
+
 ### Loading keys
 
 ```js
@@ -46,11 +56,15 @@ const customer = state.user.load(order.customerId, "order-page")
 
 // Track combined loading state for the whole page:
 const loading = state.getKeyRef("order-page")
-// loading.value = number of pending loads for "order-page"
-// loading.ready.value = true when all are done
+// loading.value       = active operations for "order-page"
+// loading.max         = peak active operations in the current wave
+// loading.start       = false until the first operation starts
+// loading.percent     = active operations left: loading.value / loading.max * 100
+// 100 - loading.percent is the completed percentage for a filling progress bar
+// loading.ready.value = true when loading.value === 0
 ```
 
-Use loading keys when you have several related loads on one page and want a single "is everything ready" signal. The key is just a label — pick anything stable.
+Use loading keys when you have several related loads on one page and want a single "is everything ready" or progress signal. The same key can also wrap writes, so a page or form can show the progress of submitted changes with the same object.
 
 ### Error handling
 

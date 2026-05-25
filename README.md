@@ -20,6 +20,16 @@ user.profile.city
 
 The object is reactive. If another client changes the same row, the server writes the change to the log, sends a WebSocket notification, the client syncs the log diff, and this same object updates in place.
 
+The important part is that `load(id, key)` returns the shared reactive object for that table row:
+
+```js
+state.user.load(userId, "profile").profile.name
+state.user.load(userId, "profile").profile.phone
+state.user.load(userId, "profile").settings.theme
+```
+
+For the same `id`, the document is fetched once, every caller receives the same reactive object, repeated `load(id, key)` calls do not create duplicate requests, and server changes patch that object in place. The optional `key` groups all related loads and writes into one loading/progress object for the page or form.
+
 It also gives you reactive database queries:
 
 ```js
@@ -98,7 +108,7 @@ async function closeOrder(order) {
 </script>
 
 <template>
-  <div v-if="loading > 0">Loading...</div>
+  <div v-if="loading.value > 0">Loading {{ 100 - loading.percent }}%</div>
   <div>Open orders: {{ openCount }}</div>
 
   <button
@@ -157,10 +167,10 @@ Each table gets the same methods:
 | `countRef(filter)` | Reactive cached counter for a MongoDB filter. |
 | `state.onChange(fn)` | Global hook for every applied change. |
 | `state.order.onAdd/onEdit/onDelete(fn)` | Table hooks after inserts, updates, and deletes. |
-| `add(obj)` | Inserts a document and applies the returned change locally. |
-| `update({ id, set, unset, objedit })` | Patches a document and updates local state/cache. |
-| `remove(id)` | Deletes a document and removes it from local state/cache. |
-| `getKeyRef(key)` | Tracks loading count for a page/block. |
+| `add(obj, key?)` | Inserts a document and tracks optional loading key. |
+| `update({ id, set, unset, objedit }, key?)` | Patches a document and tracks optional loading key. |
+| `remove(id, key?)` | Deletes a document and tracks optional loading key. |
+| `getKeyRef(key)` | Reactive page/block loading object: `value`, `max`, `start`, `percent`; use it for page loading progress or write/apply progress. |
 
 Important behavior:
 

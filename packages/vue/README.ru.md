@@ -74,6 +74,16 @@ state._permission.getIds()
 
 ## Использование на странице
 
+Главный паттерн — прямой реактивный доступ к документу:
+
+```js
+state.user.load(userId, "profile").profile.name
+state.user.load(userId, "profile").profile.phone
+state.user.load(userId, "profile").settings.theme
+```
+
+Для одной пары таблица/id `load(id, key)` везде возвращает один и тот же reactive object. Первый вызов запускает одну загрузку из cache/server; следующие вызовы переиспользуют объект и не создают лишние запросы. Когда sync получает изменение с сервера, объект патчится на месте, и все компоненты обновляются автоматически. `key` объединяет эти чтения и optional mutation keys в один loading/progress state страницы или формы.
+
 ```js
 const progress = state.getKeyRef("profile")
 const user = state.user.load(userId, "profile")
@@ -90,8 +100,16 @@ await state.user.update({
   objedit: {
     fio: user.fio
   }
-})
+}, "profile")
+
+// progress.value   активные операции
+// progress.max     максимум активных операций в текущей волне
+// progress.start   false, пока первая операция не началась
+// progress.percent активные операции, которые еще идут: progress.value / progress.max * 100
+// для заполняющегося progress bar используй 100 - progress.percent
 ```
+
+Один и тот же key можно использовать для чтения и записи, когда странице нужен общий прогресс. Например, `load` / `listRef` показывают процент загрузки страницы, а `add` / `update` / `remove` — процент отправки и применения изменений.
 
 ## Table API
 
@@ -105,9 +123,9 @@ state.user.getUnique(query, key)
 state.user.countRef(filter)
 state.user.idsRef(query)
 state.user.listRef(query, key)
-state.user.update({ id, objedit })
-state.user.add(obj)
-state.user.remove(id)
+state.user.update({ id, objedit }, key)
+state.user.add(obj, key)
+state.user.remove(id, key)
 state.user.onChange((change) => {})
 state.user.onAdd((obj, change) => {})
 state.user.onEdit((obj, change) => {})
@@ -124,9 +142,9 @@ state.user.getError(id)
 | `getAsync(id, key?)` | Одноразовая async-загрузка документа. |
 | `getIds(query, key?)` | Одноразовый запрос id с `filter`, `sort`, `skip`, `limit`. |
 | `getUnique(query, key?)` | Одноразовый запрос уникальных значений поля. |
-| `add(obj)` | Создаёт документ и применяет вернувшееся изменение локально. |
-| `update({ id, set, unset, objedit })` | Патчит документ и обновляет локальный state/cache после успеха. |
-| `remove(id)` | Удаляет документ и убирает его из локального state/cache. |
+| `add(obj, key?)` | Создаёт документ, учитывает optional loading key и применяет изменение локально. |
+| `update({ id, set, unset, objedit }, key?)` | Патчит документ, учитывает optional loading key и обновляет local state/cache. |
+| `remove(id, key?)` | Удаляет документ, учитывает optional loading key и убирает его из local state/cache. |
 | `countRef(filter)` | Реактивный закэшированный count для фильтра. |
 | `idsRef(query)` | Реактивный закэшированный список id для query. |
 | `listRef(query, key?)` | Computed-список: `idsRef(query)` + `load(id, key)`. |

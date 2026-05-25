@@ -547,6 +547,89 @@ test("writes wait briefly for authorization and fail when it is not restored", a
   assert.deepEqual(calls, [])
 })
 
+test("mutation methods track page loading keys", async () => {
+  const state = createDbState({
+    autoConnect: false,
+    cache: createMemoryCache(),
+    safetySyncInterval: 0,
+    ...testStorage(),
+    tables: ["order"]
+  })
+  state.auth.status = "authorized"
+  const pendingRpc = []
+  state.socket.rpc = async (method, payload) => {
+    await new Promise((resolve) => pendingRpc.push(resolve))
+    return {
+      ok: true,
+      id: payload.id ?? payload.obj?._id,
+      change: {
+        table: "order",
+        id: payload.id ?? payload.obj?._id,
+        action: method === "remove" ? "delete" : method === "add" ? "insert" : "update",
+        obj: method === "add" ? payload.obj : undefined,
+        set: method === "update" ? payload.set : undefined
+      }
+    }
+  }
+
+  const loading = state.getKeyRef("orders-page")
+  assert.equal(loading.value, 0)
+  assert.equal(loading.max, 0)
+  assert.equal(loading.start, false)
+  assert.equal(loading.percent, 0)
+  assert.equal(loading.ready.value, true)
+
+  const addPromise = state.order.add({ _id: "o1", status: "open" }, "orders-page")
+  assert.equal(loading.value, 1)
+  assert.equal(loading.max, 1)
+  assert.equal(loading.start, true)
+  assert.equal(loading.percent, 100)
+  await waitFor(() => pendingRpc.length === 1)
+  pendingRpc.shift()()
+  await addPromise
+  assert.equal(loading.value, 0)
+  assert.equal(loading.max, 0)
+  assert.equal(loading.start, true)
+  assert.equal(loading.percent, 0)
+
+  const updatePromise = state.order.update({ id: "o1", set: { status: "done" } }, "orders-page")
+  assert.equal(loading.value, 1)
+  assert.equal(loading.max, 1)
+  await waitFor(() => pendingRpc.length === 1)
+  pendingRpc.shift()()
+  await updatePromise
+  assert.equal(loading.value, 0)
+
+  const addSecondPromise = state.order.add({ _id: "o2", status: "open" }, "orders-page")
+  const addThirdPromise = state.order.add({ _id: "o3", status: "open" }, "orders-page")
+  assert.equal(loading.value, 2)
+  assert.equal(loading.max, 2)
+  assert.equal(loading.percent, 100)
+  await waitFor(() => pendingRpc.length === 2)
+  pendingRpc.shift()()
+  await waitFor(() => loading.value === 1)
+  assert.equal(loading.max, 2)
+  assert.equal(loading.percent, 50)
+  pendingRpc.shift()()
+  await Promise.all([addSecondPromise, addThirdPromise])
+  assert.equal(loading.value, 0)
+  assert.equal(loading.max, 0)
+  assert.equal(loading.percent, 0)
+
+  const removePromise = state.order.remove("o1", "orders-page")
+  assert.equal(loading.value, 1)
+  await waitFor(() => pendingRpc.length === 1)
+  pendingRpc.shift()()
+  await removePromise
+  assert.equal(loading.value, 0)
+
+  state.resetKey("orders-page")
+  assert.equal(loading.value, 0)
+  assert.equal(loading.max, 0)
+  assert.equal(loading.start, false)
+  assert.equal(loading.percent, 0)
+})
+
 test("countRef reuses an existing ref for equal filter settings", async () => {
   const cache = createMemoryCache()
   const state = createDbState({

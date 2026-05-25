@@ -2,6 +2,13 @@
 
 Release notes and project status for db-state.
 
+## Unreleased
+
+- Vue mutation methods `add`, `update`, and `remove` now accept an optional loading `key`, so writes can participate in `state.getKeyRef(key)` page/block loading counters.
+- `state.getKeyRef(key)` now returns a reactive loading object with `value`, `max`, `start`, `percent`, and backward-compatible `ready`.
+- Documentation now highlights `getKeyRef(key)` as both a page loading progress helper and a submitted-changes progress helper.
+- Documentation now emphasizes that repeated `load(id, key)` calls for different document paths share one reactive object, one fetch, server-side in-place patches, and one page/form progress key.
+
 ## 0.0.7
 
 - Simplified server code access rules to `access[table].read/write` and global `access.read/write`; removed the nested `access.table` / `access.doc` shape from docs and runtime lookup.
@@ -64,7 +71,7 @@ Initial public release:
 
 ## Current status
 
-- Realtime CRUD with permissions, offline cache, login, and sync is implemented and covered by 64 tests.
+- Realtime CRUD with permissions, offline cache, login, and sync is implemented and covered by 65 tests.
 - TypeScript declarations are included for all packages.
 - Append-only log supports audit trail, delete recovery, and time-travel reconstruction patterns.
 - Vue + MongoDB + WebSocket are the supported stack.

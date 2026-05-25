@@ -2,6 +2,13 @@
 
 Описание изменений и статус проекта db-state.
 
+## Unreleased
+
+- Vue mutation methods `add`, `update` и `remove` теперь принимают optional loading `key`, чтобы записи участвовали в счетчиках `state.getKeyRef(key)` для страницы/блока.
+- `state.getKeyRef(key)` теперь возвращает реактивный объект загрузки с `value`, `max`, `start`, `percent` и совместимым `ready`.
+- Документация теперь отдельно показывает, что `getKeyRef(key)` подходит и для процента загрузки страницы, и для процента внесения изменений.
+- Документация теперь подчеркивает, что повторные `load(id, key)` для разных путей документа используют один reactive object, одну загрузку, патчи с сервера на месте и один progress key страницы/формы.
+
 ## 0.0.7
 
 - Серверные code access rules упрощены до `access[table].read/write` и глобальных `access.read/write`; вложенный формат `access.table` / `access.doc` убран из документации и runtime lookup.
@@ -64,7 +71,7 @@
 
 ## Текущий статус
 
-- Realtime CRUD с правами, offline cache, login и sync реализован и покрыт 64 тестами.
+- Realtime CRUD с правами, offline cache, login и sync реализован и покрыт 65 тестами.
 - TypeScript declarations есть во всех пакетах.
 - Append-only log поддерживает audit trail, восстановление удалений и time-travel reconstruction patterns.
 - Поддерживаемый стек: Vue + MongoDB + WebSocket.

@@ -168,10 +168,10 @@ export type DbState<TSchema extends DbStateSchema = DbStateSchema> =
     auth: AuthState
     socket: DbStateSocketFacade
 
-    /** Returns or creates a page-level loading-counter ref. */
+    /** Returns or creates a page-level reactive loading state. */
     getKeyRef(key: string): LoadingKeyRef
 
-    /** Resets the loading counter for a page-level key to zero. */
+    /** Resets the page-level loading state to idle and `start: false`. */
     resetKey(key: string): void
 
     /** Registers a callback for every applied change from any table. */

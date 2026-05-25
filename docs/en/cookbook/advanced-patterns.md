@@ -161,11 +161,13 @@ const user = state._user.load(state.auth.userId, "orders-page")
 In Vue:
 
 ```vue
-<div v-if="loading > 0">Loading...</div>
+<div v-if="loading.value > 0">Loading... {{ 100 - loading.percent }}%</div>
 <OrderTable v-else :rows="orders" />
 ```
 
-The key counts pending loads for all calls that use it.
+The key counts active operations for all calls that use it. `max` stores the peak active count for the current loading wave, `percent` is the active percentage left (`value / max * 100`), and `start` stays `false` until the first operation starts.
+
+This is useful for both read and write progress. Use one key for page reads (`load`, `listRef`, `getAsync`) to show loading progress, or pass the same key into mutations (`add`, `update`, `remove`) to show the progress of submitted changes being applied.
 
 ## Sharing the socket with app events
 

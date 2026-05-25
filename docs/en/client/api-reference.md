@@ -181,11 +181,27 @@ Track combined loading state for a page-level key.
 
 ```ts
 const loading = state.getKeyRef("orders-page")
-// loading.value      = number of pending loads
-// loading.ready.value = true when all are done
+// loading.value       = active operations
+// loading.max         = peak active operations in the current wave
+// loading.start       = false until the first operation starts
+// loading.percent     = active operations left: loading.value / loading.max * 100
+// 100 - loading.percent is the completed percentage for a filling progress bar
+// loading.ready.value = true when loading.value === 0
 
-state.resetKey("orders-page")  // reset counter to 0
+state.resetKey("orders-page")  // reset to value=0, max=0, start=false
 ```
+
+The same key works for reads and writes. Use it as a page loading progress indicator for `load` / `listRef` / `getAsync`, or as a submitted-changes progress indicator for `add` / `update` / `remove`.
+
+The key is especially useful with repeated path reads from the same document:
+
+```js
+state.user.load(userId, "profile").profile.name
+state.user.load(userId, "profile").profile.phone
+state.user.load(userId, "profile").settings.theme
+```
+
+These calls share one reactive object and one load for the same id, while `profile` receives the combined loading/progress state.
 
 See [reactive-queries.md](reactive-queries.md#loading-keys).
 
@@ -215,9 +231,9 @@ interface TableApi<T extends BaseDoc> {
   onEdit(callback: (obj: ReactiveDoc<T> | undefined, change: Change<T>) => void): () => void
   onDelete(callback: (oldObj: T | ReactiveDoc<T> | undefined, change: Change<T>) => void): () => void
 
-  update(args: UpdateArgs<T>): Promise<MutationResult<T>>
-  add(obj: Partial<T> & { _id?: string; id?: string }): Promise<MutationResult<T>>
-  remove(id: string): Promise<MutationResult<T>>
+  update(args: UpdateArgs<T>, key?: string): Promise<MutationResult<T>>
+  add(obj: Partial<T> & { _id?: string; id?: string }, key?: string): Promise<MutationResult<T>>
+  remove(id: string, key?: string): Promise<MutationResult<T>>
 
   getError(id: string): Error | undefined
   isLoading(id: string): boolean
@@ -227,6 +243,8 @@ interface TableApi<T extends BaseDoc> {
 See [reactive-queries.md](reactive-queries.md) and [mutations.md](mutations.md) for deep dives.
 
 Reactive methods (`load`, `idsRef`, `countRef`, `listRef`) are cache-first and retry only missed loads after authorization. One-off read methods (`getAsync`, `getIds`, `getUnique`) wait for authorization before RPC. Writes wait up to `writeAuthTimeout`.
+
+Mutation methods accept the same optional page-level loading `key` used by `load` and `listRef`. While the RPC is pending, `state.getKeyRef(key).value` is incremented and then decremented in `finally`; `max`, `start`, and `percent` update from the same reactive object. This lets a form show the percentage of writes still being applied, not just read loading state.
 
 Table hooks:
 
