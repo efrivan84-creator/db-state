@@ -25,7 +25,6 @@ export interface FileProgress {
 }
 
 export interface UploadOptions {
-  key?: string
   name?: string
   mime?: string
   policy?: DownloadPolicy
@@ -33,7 +32,6 @@ export interface UploadOptions {
 }
 
 export interface DownloadOptions {
-  key?: string
   chunkSize?: number
   onProgress?: (progress: FileProgress) => void
 }

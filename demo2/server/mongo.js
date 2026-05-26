@@ -15,6 +15,7 @@ const seed = {
     { _id: "perm_user_admin", table: "_user", priority: 100, read: { groups: ["admin"] }, write: { groups: ["admin"] } },
     { _id: "perm_group_admin", table: "_group", priority: 100, read: { groups: ["admin"] }, write: { groups: ["admin"] } },
     { _id: "perm_permission_admin", table: "_permission", priority: 100, read: { groups: ["admin"] }, write: { groups: ["admin"] } },
+    { _id: "perm_log_admin", table: "log", priority: 100, read: { groups: ["admin"] }, write: { groups: ["admin"], action: false } },
     { _id: "perm_order_admin", table: "order", priority: 100, read: { groups: ["admin"] }, write: { groups: ["admin"] } },
     {
       _id: "perm_order_manager",
@@ -41,7 +42,9 @@ const seed = {
 export async function createDemoMongo() {
   const uri = mongoUri()
   const dbName = process.env.DB_STATE_MONGO_DB ?? "db_state_demo2"
-  const client = new MongoClient(uri)
+  const client = new MongoClient(uri, {
+    serverSelectionTimeoutMS: Number(process.env.DB_STATE_MONGO_TIMEOUT_MS ?? 5000)
+  })
 
   await client.connect()
 
@@ -52,7 +55,7 @@ export async function createDemoMongo() {
 }
 
 async function seedDemo(db) {
-  for (const name of ["_user", "_group", "_permission", "order", "log"]) {
+  for (const name of ["_user", "_group", "_permission", "order", "file", "log"]) {
     await db.collection(name).deleteMany({})
   }
 
@@ -62,6 +65,8 @@ async function seedDemo(db) {
 
   await db.collection("log").createIndex({ createdAt: 1, logId: 1 })
   await db.collection("_permission").createIndex({ table: 1, priority: -1 })
+  await db.collection("file").createIndex({ ownerId: 1, status: 1 })
+  await db.collection("file").createIndex({ token: 1 }, { unique: true, sparse: true })
 }
 
 function mongoUri() {

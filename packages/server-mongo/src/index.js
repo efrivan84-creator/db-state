@@ -264,7 +264,8 @@ export function createDbStateServer(options) {
         .toArray()
 
       const allowed = []
-      for (const change of changes) {
+      for (const row of changes) {
+        const change = publicChange(row)
         const permissionRules = await getPermissionRules(config, permissionRulesByTable, change.table)
         let didLoadDoc = change.action === "delete"
         const ctx = {
@@ -323,8 +324,13 @@ async function appendLog(config, change) {
     createdAt: change.createdAt ?? config.now()
   })
 
-  await config.mongo.collection(config.logCollection).insertOne(item)
+  await config.mongo.collection(config.logCollection).insertOne({ _id: item.logId, ...item })
   return item
+}
+
+function publicChange(change) {
+  const { _id, ...rest } = change
+  return rest
 }
 
 function getDoc(config, table, id) {

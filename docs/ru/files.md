@@ -171,7 +171,6 @@ uploads/
 
 ```js
 const uploaded = await files.upload(file, {
-  key: "message-form",
   policy: { mode: "registered" },
   onProgress(progress) {
     console.log(progress.loaded, progress.total, progress.percent)
@@ -199,7 +198,6 @@ Options:
 
 | Option | Значение |
 |---|---|
-| `key` | Интеграция с `state.getKeyRef(key)` для progress формы/страницы. |
 | `name` | Переопределяет `file.name`. |
 | `mime` | Переопределяет `file.type`. |
 | `policy` | Download policy для файла. Если нет, используется серверный `defaultPolicy`. |
@@ -234,7 +232,6 @@ Options:
 
 | Option | Значение |
 |---|---|
-| `key` | Интеграция с `state.getKeyRef(key)`. |
 | `chunkSize` | Запрошенный размер download chunk. Сервер валидирует значение и может использовать default. |
 | `onProgress` | Получает `{ loaded, total, percent }`. |
 
@@ -441,22 +438,24 @@ type FileProgress = {
 }
 ```
 
-## Loading Keys
+## Progress передачи
 
-Upload и download могут участвовать в `state.getKeyRef(key)`:
+Progress upload/download специально отделен от `state.getKeyRef(key)`.
+Для бинарной передачи используй `onProgress`:
 
 ```js
-const loading = state.getKeyRef("message-form")
+const transfer = reactive({ loaded: 0, total: 0, percent: 0 })
 
-await files.upload(file, { key: "message-form" })
-await state.message.add({ text, file: [token] }, "message-form")
+await files.upload(file, {
+  onProgress(progress) {
+    Object.assign(transfer, progress)
+  }
+})
 ```
 
-Так одна форма может показывать общий activity/progress для:
-
-- upload файла;
-- записи metadata/сообщения в базу;
-- последующих реактивных загрузок из БД.
+`state.getKeyRef(key)` остается для db-state чтений и мутаций: `load`,
+`listRef`, `add`, `update`, `remove`. Файловые chunks идут отдельным transport
+и имеют свой byte-level progress.
 
 ## Частые сценарии
 
@@ -464,7 +463,6 @@ await state.message.add({ text, file: [token] }, "message-form")
 
 ```js
 const uploaded = await files.upload(file, {
-  key: "message-form",
   policy: { mode: "groups", groups: [`chat:${chatId}`] }
 })
 

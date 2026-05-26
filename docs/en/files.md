@@ -171,7 +171,6 @@ The directory sharding (`ab/cd`) keeps large folders from becoming too dense.
 
 ```js
 const uploaded = await files.upload(file, {
-  key: "message-form",
   policy: { mode: "registered" },
   onProgress(progress) {
     console.log(progress.loaded, progress.total, progress.percent)
@@ -199,7 +198,6 @@ Options:
 
 | Option | Meaning |
 |---|---|
-| `key` | Optional `state.getKeyRef(key)` integration. Useful for form/page progress. |
 | `name` | Overrides `file.name`. |
 | `mime` | Overrides `file.type`. |
 | `policy` | Download policy stored on the file. Defaults to server `defaultPolicy`. |
@@ -234,7 +232,6 @@ Options:
 
 | Option | Meaning |
 |---|---|
-| `key` | Optional `state.getKeyRef(key)` integration. |
 | `chunkSize` | Requested download chunk size. Server validates it and may use its default. |
 | `onProgress` | Called with `{ loaded, total, percent }`. |
 
@@ -441,22 +438,24 @@ type FileProgress = {
 }
 ```
 
-## Loading Keys
+## Transfer Progress
 
-Both upload and download can participate in `state.getKeyRef(key)`:
+Upload and download progress is intentionally separate from `state.getKeyRef(key)`.
+Use `onProgress` for binary transfer state:
 
 ```js
-const loading = state.getKeyRef("message-form")
+const transfer = reactive({ loaded: 0, total: 0, percent: 0 })
 
-await files.upload(file, { key: "message-form" })
-await state.message.add({ text, file: [token] }, "message-form")
+await files.upload(file, {
+  onProgress(progress) {
+    Object.assign(transfer, progress)
+  }
+})
 ```
 
-This lets one form display a shared activity/progress state for:
-
-- file upload;
-- metadata/database write;
-- later reactive database loads.
+Keep `state.getKeyRef(key)` for db-state reads and mutations such as
+`load`, `listRef`, `add`, `update`, and `remove`. File chunks have their own
+transport and their own byte-level progress.
 
 ## Common Patterns
 
@@ -464,7 +463,6 @@ This lets one form display a shared activity/progress state for:
 
 ```js
 const uploaded = await files.upload(file, {
-  key: "message-form",
   policy: { mode: "groups", groups: [`chat:${chatId}`] }
 })
 

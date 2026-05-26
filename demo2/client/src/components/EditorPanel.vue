@@ -11,6 +11,8 @@ const props = defineProps({
   writableFieldKeys: { type: Array, required: true },
   changedFieldKeys: { type: Array, required: true },
   patchPreview: { type: String, required: true },
+  canAdd: { type: Boolean, default: true },
+  canDelete: { type: Boolean, default: true },
   canSave: { type: Boolean, required: true }
 })
 
@@ -72,7 +74,13 @@ onBeforeUnmount(() => {
         <p class="text-xs text-gray-500">Выбранная запись: {{ selected[active.table] || "не выбрана" }}</p>
       </div>
       <div class="flex flex-wrap gap-2">
-        <button class="h-9 rounded bg-gray-950 px-3 text-sm font-medium text-white hover:bg-gray-800" @click="emit('add', active.table)">Добавить</button>
+        <button
+          class="h-9 rounded bg-gray-950 px-3 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+          :disabled="!canAdd"
+          @click="emit('add', active.table)"
+        >
+          Добавить
+        </button>
         <button
           class="h-9 rounded bg-emerald-700 px-3 text-sm font-medium text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="!canSave"
@@ -83,8 +91,8 @@ onBeforeUnmount(() => {
         <div ref="deleteRootRef" class="relative">
           <button
             class="h-9 rounded border border-red-300 px-3 text-sm font-medium text-red-700 hover:bg-red-50"
-            :disabled="!selected[active.table]"
-            :class="{ 'opacity-50 cursor-not-allowed': !selected[active.table] }"
+            :disabled="!canDelete"
+            :class="{ 'opacity-50 cursor-not-allowed': !canDelete }"
             @click="requestDelete"
           >
             Удалить
@@ -117,6 +125,12 @@ onBeforeUnmount(() => {
           ></textarea>
           <p v-if="!canEditRawJson" class="mt-2 text-xs text-gray-500">Только чтение</p>
           <p class="mt-2 text-xs text-gray-500">Поле <code>_id</code> не редактируется здесь — оно присваивается автоматически при сохранении.</p>
+        </template>
+
+        <template v-else-if="config.managedBy === 'file-api'">
+          <p class="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+            Таблица file доступна для чтения. Загрузка и скачивание выполняются через file API над тем же WebSocket.
+          </p>
         </template>
 
         <div v-else class="grid gap-3 md:grid-cols-2">

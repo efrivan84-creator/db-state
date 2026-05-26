@@ -40,6 +40,8 @@ defineEmits(["refresh-all"])
       <div><dt class="text-xs text-gray-500">Пользователи</dt><dd class="font-semibold text-white">{{ stats.users }}</dd></div>
       <div><dt class="text-xs text-gray-500">Группы</dt><dd class="font-semibold text-white">{{ stats.groups }}</dd></div>
       <div><dt class="text-xs text-gray-500">Права</dt><dd class="font-semibold text-white">{{ stats.permissions }}</dd></div>
+      <div><dt class="text-xs text-gray-500">Файлы</dt><dd class="font-semibold text-white">{{ stats.files }}</dd></div>
+      <div><dt class="text-xs text-gray-500">Аудит</dt><dd class="font-semibold text-white">{{ stats.log }}</dd></div>
     </dl>
     <button class="mt-3 h-9 w-full rounded border border-white/15 text-sm font-medium text-white hover:bg-white/10" @click="$emit('refresh-all')">
       Обновить все

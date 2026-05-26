@@ -309,7 +309,11 @@ const dbState = createDbStateServer({
 })
 
 const fileClient = createFileClient(state)
-const uploaded = await fileClient.upload(file, { key: "message-form" })
+const uploaded = await fileClient.upload(file, {
+  onProgress: ({ loaded, total, percent }) => {
+    // update file-transfer UI state
+  }
+})
 
 await state.message.add({
   text,
@@ -317,7 +321,7 @@ await state.message.add({
 }, "message-form")
 ```
 
-The file packages use `dbfile:*` control messages and binary WebSocket frames. The `file` table is registered automatically for metadata and owner history, while binary access is controlled by `token + downloadPolicy` (`public`, `registered`, `verified`, or `groups`). Direct `state.file.add/update/remove` is denied; upload/download go through the file API.
+The file packages use `dbfile:*` control messages and binary WebSocket frames. The `file` table is registered automatically for metadata and owner history, while binary access is controlled by `token + downloadPolicy` (`public`, `registered`, `verified`, or `groups`). Direct `state.file.add/update/remove` is denied; upload/download go through the file API. File transfer progress is reported through `onProgress`, separately from `state.getKeyRef(key)`.
 
 ## Packages
 

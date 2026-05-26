@@ -4,7 +4,6 @@ export function createFileClient(state, options = {}) {
   const table = options.table ?? "file"
   const uploads = new Map()
   const downloads = new Map()
-  const loadingByKey = new Map()
   let activeDownload
 
   state.registerTable?.(table)
@@ -18,7 +17,6 @@ export function createFileClient(state, options = {}) {
     const upload = uploads.get(message.id)
     if (!upload) return
     uploads.delete(message.id)
-    upload.finishKey()
     if (message.file) {
       await state.applyChange({ table, id: message.fileId, action: "insert", obj: message.file })
     }
@@ -39,7 +37,6 @@ export function createFileClient(state, options = {}) {
     if (!download) return
     downloads.delete(message.id)
     if (activeDownload?.id === message.id) activeDownload = undefined
-    download.finishKey()
     const blob = new Blob(download.chunks, { type: message.mime || download.mime || "application/octet-stream" })
     download.resolve(blob)
   })
@@ -49,7 +46,6 @@ export function createFileClient(state, options = {}) {
     if (!item) return
     uploads.delete(message.id)
     downloads.delete(message.id)
-    item.finishKey()
     item.reject(new Error(message.error || "db-state file error"))
   })
 
@@ -70,8 +66,7 @@ export function createFileClient(state, options = {}) {
         file,
         loaded: 0,
         total: size,
-        onProgress: uploadOptions.onProgress,
-        finishKey: startKey(state, uploadOptions.key, loadingByKey)
+        onProgress: uploadOptions.onProgress
       }
 
       uploads.set(id, {
@@ -95,7 +90,6 @@ export function createFileClient(state, options = {}) {
       }).catch((error) => {
         const current = uploads.get(id)
         uploads.delete(id)
-        upload.finishKey()
         current?.reject?.(error)
       })
 
@@ -111,7 +105,6 @@ export function createFileClient(state, options = {}) {
         loaded: 0,
         total: 0,
         onProgress: downloadOptions.onProgress,
-        finishKey: startKey(state, downloadOptions.key, loadingByKey),
         resolve: undefined,
         reject: undefined
       }
@@ -130,7 +123,6 @@ export function createFileClient(state, options = {}) {
         chunkSize: downloadOptions.chunkSize ?? DEFAULT_CHUNK_SIZE
       }).catch((error) => {
         downloads.delete(id)
-        download.finishKey()
         reject(error)
       })
 
@@ -155,26 +147,6 @@ export function createFileClient(state, options = {}) {
 
 function sendJson(state, message) {
   return state.socket.sendRaw(JSON.stringify(message))
-}
-
-function startKey(state, key, loadingByKey) {
-  if (!key) return () => {}
-  const token = createId()
-  if (!loadingByKey.has(key)) loadingByKey.set(key, new Set())
-  const tokens = loadingByKey.get(key)
-  tokens.add(token)
-  const loading = state.getKeyRef(key)
-  loading.value = tokens.size
-  loading.max = Math.max(loading.max, tokens.size)
-  loading.start = true
-  return () => {
-    tokens.delete(token)
-    loading.value = tokens.size
-    if (tokens.size === 0) {
-      loading.max = 0
-      loadingByKey.delete(key)
-    }
-  }
 }
 
 function progress(item) {

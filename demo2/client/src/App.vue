@@ -3,6 +3,7 @@ import { useAdminState } from "./admin/useAdminState.js"
 import AdminHeader from "./components/AdminHeader.vue"
 import AdminSidebar from "./components/AdminSidebar.vue"
 import EditorPanel from "./components/EditorPanel.vue"
+import FileTransferPanel from "./components/FileTransferPanel.vue"
 import RecordList from "./components/RecordList.vue"
 import StatusPanel from "./components/StatusPanel.vue"
 import ToastMessages from "./components/ToastMessages.vue"
@@ -54,16 +55,29 @@ const admin = useAdminState()
           :active="admin.active.value"
           :columns="admin.currentColumns.value"
           :current-ids="admin.currentIds.value"
+          :page-count="admin.currentPageCount.value"
+          :page-end="admin.currentPageEnd.value"
+          :page-start="admin.currentPageStart.value"
+          :query-config="admin.currentQueryConfig.value"
+          :query-control="admin.currentQueryControl.value"
           :rows="admin.currentRows.value"
           :selected="admin.selected"
           :table-errors="admin.tableErrors"
+          :total-count="admin.currentTotal.value"
           @refresh-table="admin.refreshTable"
           @select-row="admin.selectRow"
+          @set-filter="admin.setQueryFilter"
+          @set-page="admin.setPage"
+          @set-page-size="admin.setPageSize"
+          @set-search="admin.setSearch"
+          @set-sort="admin.setSort"
         />
 
         <EditorPanel
           :active="admin.active.value"
           :config="admin.activeConfig.value"
+          :can-add="admin.canAdd.value"
+          :can-delete="admin.canDelete.value"
           :can-save="admin.canSave.value"
           :changed-field-keys="admin.currentChangedFieldKeys.value"
           :fields="admin.currentFields.value"
@@ -75,6 +89,17 @@ const admin = useAdminState()
           @add="admin.addTable"
           @delete="admin.deleteTable"
           @save="admin.saveTable"
+        />
+
+        <FileTransferPanel
+          v-if="admin.active.value.table === 'file'"
+          v-model:policy="admin.filePolicy.value"
+          :loading="admin.fileTransfer"
+          :policy-options="admin.filePolicyOptions"
+          :selected-file="admin.selectedFileDoc.value"
+          :selected-file-url="admin.selectedFileUrl.value"
+          @download="admin.downloadSelectedFile"
+          @upload="admin.uploadFile"
         />
       </div>
     </section>

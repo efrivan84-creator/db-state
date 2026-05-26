@@ -18,6 +18,7 @@ autodev-config.json
 .logs/
 demo-server.err.log
 demo-server.out.log
+demo2/uploads/
 
 # Scratch / temp
 tmp/

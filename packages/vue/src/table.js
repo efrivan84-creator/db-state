@@ -120,7 +120,7 @@ export function createTableApi(ctx) {
       }
 
       countRefs.get(table).set(filterKey, entry)
-      readCachedQuery(options.cache, entry)
+      readCachedQuery(options.cache, entry).then(() => refreshMissingQuery(state, entry))
 
       return value
     },
@@ -156,7 +156,7 @@ export function createTableApi(ctx) {
       }
 
       idsRefs.get(table).set(queryKey, entry)
-      readCachedQuery(options.cache, entry)
+      readCachedQuery(options.cache, entry).then(() => refreshMissingQuery(state, entry))
 
       return value
     },
@@ -379,6 +379,10 @@ async function readCachedQuery(cache, entry) {
   } catch {
     // Cache reads are an offline optimization; server refresh remains authoritative.
   }
+}
+
+async function refreshMissingQuery(state, entry) {
+  if (!entry.loaded && state.auth.status === "authorized") await entry.refresh()
 }
 
 async function requireAuthorizedForWrite(state, options) {

@@ -11,7 +11,6 @@ import { createFileClient } from "@db-state/vue-files"
 const files = createFileClient(state)
 
 const uploaded = await files.upload(file, {
-  key: "message-form",
   policy: { mode: "registered" },
   onProgress: ({ loaded, total, percent }) => {}
 })
@@ -28,7 +27,8 @@ const blob = await files.download(uploaded.token, {
 files.url(uploaded.token) // /f/<token>
 ```
 
-Optional `key` участвует в `state.getKeyRef(key)`, поэтому одна форма может
-показывать общий progress для передачи файла и следующей записи через db-state.
+Progress передачи файлов идет через `onProgress`. Он специально отделен от
+`state.getKeyRef(key)`, который остается loading/helper-объектом для обычных
+db-state чтений и записей.
 
 Полная документация: [docs/ru/files.md](https://github.com/efrivan84-creator/db-state/blob/main/docs/ru/files.md).

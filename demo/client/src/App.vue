@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue"
+import { computed, ref, watch } from "vue"
 
 import { state } from "./state.js"
 
@@ -11,6 +11,19 @@ const error = ref("")
 const info = ref("")
 const loading = state.getKeyRef("order-card")
 const order = computed(() => state.order.load("o1", "order-card"))
+const orderJson = computed(() => JSON.stringify(order.value, null, 2))
+const loadingPercent = computed(() => Math.round(loading.percent))
+const hasLoadedOrder = computed(() => order.value.__loaded === true)
+
+watch(
+  () => [order.value.status, order.value.comment, order.value.__loaded],
+  ([nextStatus, nextComment, loaded]) => {
+    if (!loaded) return
+    status.value = nextStatus ?? ""
+    comment.value = nextComment ?? ""
+  },
+  { immediate: true }
+)
 
 async function signIn() {
   error.value = ""
@@ -18,11 +31,7 @@ async function signIn() {
 
   try {
     await state.login(login.value, password.value)
-    await state.syncNow()
-    const fresh = await state.order.getAsync("o1", "order-card")
-    status.value = fresh?.status ?? ""
-    comment.value = fresh?.comment ?? ""
-    info.value = "Logged in and loaded order o1"
+    info.value = "Logged in. Reactive load will refresh order o1."
   } catch (err) {
     error.value = err.message
   }
@@ -39,7 +48,7 @@ async function saveAllowed() {
         status: status.value,
         comment: comment.value
       }
-    })
+    }, "order-card")
     info.value = "Allowed fields saved"
   } catch (err) {
     error.value = err.message
@@ -56,7 +65,7 @@ async function saveForbidden() {
       objedit: {
         margin: 999
       }
-    })
+    }, "order-card")
     info.value = "Margin saved"
   } catch (err) {
     error.value = err.message
@@ -69,7 +78,7 @@ async function saveForbidden() {
     <header class="flex flex-wrap items-end justify-between gap-3 border-b border-gray-200 pb-4">
       <div>
         <h1 class="text-2xl font-semibold tracking-normal text-gray-950">db-state demo</h1>
-        <p class="mt-1 text-sm text-gray-600">Vue client, WebSocket server, auth, permissions, field sync.</p>
+        <p class="mt-1 text-sm text-gray-600">Vue client, WebSocket server, auth, permissions, reactive load, field sync.</p>
       </div>
       <div class="text-right text-sm text-gray-600">
         <div>Socket: {{ state.sync.connected ? "connected" : "offline" }}</div>
@@ -100,10 +109,12 @@ async function saveForbidden() {
       <section class="rounded border border-gray-200 bg-white p-4 shadow-sm">
         <div class="flex items-center justify-between gap-3">
           <h2 class="text-base font-semibold text-gray-950">Order o1</h2>
-          <span class="rounded bg-gray-100 px-2 py-1 text-xs text-gray-600">loading key: {{ loading }}</span>
+          <span class="rounded bg-gray-100 px-2 py-1 text-xs text-gray-600">
+            key: {{ loading.value }}/{{ loading.max }} · {{ loadingPercent }}%
+          </span>
         </div>
 
-        <div v-if="loading > 0" class="mt-4 h-28 animate-pulse rounded bg-gray-100"></div>
+        <div v-if="!hasLoadedOrder" class="mt-4 h-28 animate-pulse rounded bg-gray-100"></div>
 
         <div v-else class="mt-4 grid gap-4 md:grid-cols-2">
           <div class="space-y-3">
@@ -125,9 +136,12 @@ async function saveForbidden() {
             </div>
           </div>
 
-          <pre class="overflow-auto rounded bg-gray-950 p-3 text-xs text-gray-100">{{ JSON.stringify(order, null, 2) }}</pre>
+          <pre class="overflow-auto rounded bg-gray-950 p-3 text-xs text-gray-100">{{ orderJson }}</pre>
         </div>
 
+        <p v-if="hasLoadedOrder && loading.value > 0" class="mt-4 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+          Active operations for order-card: {{ loading.value }}
+        </p>
         <p v-if="info" class="mt-4 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{{ info }}</p>
         <p v-if="error" class="mt-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{{ error }}</p>
       </section>

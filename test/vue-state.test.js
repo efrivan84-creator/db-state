@@ -167,7 +167,7 @@ test("table action hooks receive current and deleted objects", async () => {
   ])
 })
 
-test("countRef refreshes from server after table changes", async () => {
+test("countRef refreshes from server after creation and table changes", async () => {
   const cache = createMemoryCache()
   const state = createDbState({
     autoConnect: false,
@@ -178,7 +178,7 @@ test("countRef refreshes from server after table changes", async () => {
     tables: ["order"]
   })
   const calls = []
-  const counts = [4]
+  const counts = [3, 4]
   state.socket.rpc = async (method, payload) => {
     calls.push({ method, payload })
     return counts.shift()
@@ -186,7 +186,7 @@ test("countRef refreshes from server after table changes", async () => {
   state.auth.status = "authorized"
 
   const count = state.order.countRef({ status: "open" })
-  await waitFor(() => calls.length === 0)
+  await waitFor(() => count.value === 3)
 
   await state.applyChange({
     table: "order",
@@ -197,6 +197,7 @@ test("countRef refreshes from server after table changes", async () => {
   await waitFor(() => count.value === 4)
 
   assert.deepEqual(calls, [
+    { method: "count", payload: { table: "order", filter: { status: "open" } } },
     { method: "count", payload: { table: "order", filter: { status: "open" } } }
   ])
 })
@@ -653,7 +654,7 @@ test("countRef reuses an existing ref for equal filter settings", async () => {
   assert.deepEqual(calls, [])
 })
 
-test("idsRef refreshes from server after table changes and auth", async () => {
+test("idsRef refreshes from server after creation, table changes and auth", async () => {
   const cache = createMemoryCache()
   const state = createDbState({
     autoConnect: false,
@@ -664,7 +665,7 @@ test("idsRef refreshes from server after table changes and auth", async () => {
     tables: ["order"]
   })
   const calls = []
-  const ids = [["o1", "o2"], ["o1", "o2", "o3"]]
+  const ids = [["o1"], ["o1", "o2"], ["o1", "o2", "o3"]]
   state.socket.rpc = async (method, payload) => {
     calls.push({ method, payload })
     return ids.shift()
@@ -672,7 +673,7 @@ test("idsRef refreshes from server after table changes and auth", async () => {
   state.auth.status = "authorized"
 
   const list = state.order.idsRef({ sort: { _id: 1 } })
-  await waitFor(() => calls.length === 0)
+  await waitFor(() => list.value.length === 1)
 
   await state.applyChange({
     table: "order",
@@ -691,6 +692,7 @@ test("idsRef refreshes from server after table changes and auth", async () => {
   await waitFor(() => list.value.length === 3)
 
   assert.deepEqual(calls, [
+    { method: "getIds", payload: { table: "order", sort: { _id: 1 } } },
     { method: "getIds", payload: { table: "order", sort: { _id: 1 } } },
     { method: "getIds", payload: { table: "order", sort: { _id: 1 } } }
   ])
@@ -742,6 +744,7 @@ test("idsRef includes skip in query deduplication", async () => {
 
   assert.equal(first, same)
   assert.notEqual(first, secondPage)
+  await waitFor(() => first.value.length === 1 && secondPage.value.length === 1)
 
   await state.applyChange({
     table: "order",
@@ -749,9 +752,11 @@ test("idsRef includes skip in query deduplication", async () => {
     action: "insert",
     obj: { _id: "o1", status: "open" }
   })
-  await waitFor(() => first.value.length === 1 && secondPage.value.length === 1)
+  await waitFor(() => calls.length === 4)
 
   assert.deepEqual(calls, [
+    { method: "getIds", payload: { table: "order", sort: { _id: 1 }, skip: 0, limit: 10 } },
+    { method: "getIds", payload: { table: "order", sort: { _id: 1 }, skip: 10, limit: 10 } },
     { method: "getIds", payload: { table: "order", sort: { _id: 1 }, skip: 0, limit: 10 } },
     { method: "getIds", payload: { table: "order", sort: { _id: 1 }, skip: 10, limit: 10 } }
   ])
