@@ -23,6 +23,10 @@ export function createDbStateServer(options) {
   const auth = createAuth(config)
   let router
   const socket = createSocketHub(config.socket, async (client, message) => {
+    for (const module of config.files) {
+      if (await module.handleMessage?.(client, message)) return
+    }
+
     if (message.type === DB_STATE_MESSAGES.login) return auth.login(client, message)
     if (message.type === DB_STATE_MESSAGES.auth) return auth.auth(client, message)
     if (message.type === DB_STATE_MESSAGES.logout) return auth.logout(client, message)
@@ -302,7 +306,14 @@ export function createDbStateServer(options) {
 
   router = createHandlers({ add, count, getIds, getUnique, load, remove, sync, update })
 
-  return { add, count, getIds, getUnique, load, remove, socket, sync, update }
+  const api = { add, count, getIds, getUnique, load, remove, socket, sync, update }
+  for (const module of config.files) {
+    module.bind?.({ api, config, mongo: config.mongo, socket })
+    socket.onRawMessage((client, raw) => module.handleRawMessage?.(client, raw))
+    socket.onClientClose((client) => module.handleClose?.(client))
+  }
+
+  return api
 }
 
 async function appendLog(config, change) {
@@ -353,6 +364,11 @@ async function getPermissionRules(config, cache, table) {
 }
 
 function normalizeOptions(options) {
+  const files = normalizeModules(options.files)
+  const fileTables = files.flatMap((module) => module.tables ?? [module.table]).filter(Boolean)
+  const access = mergeConfigs(options.access ?? {}, ...files.map((module) => module.access ?? {}))
+  const hooks = mergeConfigs(options.hooks ?? {}, ...files.map((module) => module.hooks ?? {}))
+
   return {
     access: {},
     authRateLimit: undefined,
@@ -371,9 +387,21 @@ function normalizeOptions(options) {
     syncLimit: 1000,
     userTable: "_user",
     ...options,
+    access,
     authLoginFields: normalizeAuthLoginFields(options.authLoginFields),
-    tables: new Set(normalizeTables(options.tables))
+    files,
+    hooks,
+    tables: new Set(normalizeTables([...(options.tables ?? []), ...fileTables]))
   }
+}
+
+function normalizeModules(input) {
+  if (!input) return []
+  return Array.isArray(input) ? input : [input]
+}
+
+function mergeConfigs(...items) {
+  return Object.assign({}, ...items)
 }
 
 function normalizeAuthLoginFields(fields) {

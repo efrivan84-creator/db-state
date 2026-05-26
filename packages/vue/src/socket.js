@@ -2,6 +2,7 @@ import { DB_STATE_MESSAGES, isDbStateEvent } from "@db-state/core"
 
 export function createSocketFacade(options) {
   const listeners = new Map()
+  const rawListeners = new Set()
   const pending = new Map()
   const openWaiters = new Set()
   let ws
@@ -16,6 +17,7 @@ export function createSocketFacade(options) {
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
 
       ws = new WebSocket(options.wsUrl)
+      ws.binaryType = "arraybuffer"
 
       ws.addEventListener("open", () => {
         for (const resolve of openWaiters) resolve()
@@ -24,6 +26,11 @@ export function createSocketFacade(options) {
       })
 
       ws.addEventListener("message", (event) => {
+        if (typeof event.data !== "string") {
+          emitRaw(rawListeners, event.data)
+          return
+        }
+
         const message = safeJson(event.data)
         if (!message) return
         if (message.type === DB_STATE_MESSAGES.rpcResult || message.type === DB_STATE_MESSAGES.rpcError) {
@@ -45,9 +52,20 @@ export function createSocketFacade(options) {
       return () => listeners.get(type)?.delete(handler)
     },
 
+    onRaw(handler) {
+      rawListeners.add(handler)
+      return () => rawListeners.delete(handler)
+    },
+
     send(type, payload) {
       if (isDbStateEvent(type)) throw new Error("dbstate:* events are reserved")
       ws?.send(JSON.stringify({ type, payload }))
+    },
+
+    async sendRaw(raw) {
+      if (!ws) this.connect()
+      await waitForOpen(() => ws, openWaiters, options.rpcTimeout)
+      ws.send(raw)
     },
 
     async rpc(method, payload) {
@@ -142,6 +160,12 @@ function safeJson(value) {
 
 function emit(listeners, type, payload) {
   for (const handler of listeners.get(type) ?? []) {
+    handler(payload)
+  }
+}
+
+function emitRaw(listeners, payload) {
+  for (const handler of listeners) {
     handler(payload)
   }
 }

@@ -2,12 +2,15 @@ import { DB_STATE_MESSAGES } from "@db-state/core"
 
 export function createSocketHub(adapter, onMessage) {
   const clients = new Set()
+  const rawHandlers = new Set()
+  const closeHandlers = new Set()
 
   return {
     addClient(client, meta = {}) {
       Object.assign(client, meta)
       clients.add(client)
       client.on?.("message", (message) => this.handleMessage(client, message))
+      client.on?.("close", () => this.handleClose(client))
       client.send?.(JSON.stringify({ type: DB_STATE_MESSAGES.hello }))
       return () => clients.delete(client)
     },
@@ -37,13 +40,38 @@ export function createSocketHub(adapter, onMessage) {
       Object.assign(client, meta)
       clients.add(client)
       client.on?.("message", (message) => this.handleMessage(client, message))
+      client.on?.("close", () => this.handleClose(client))
       this._onConnection?.(client, meta)
       return () => clients.delete(client)
     },
 
     async handleMessage(client, raw) {
       const message = parseMessage(raw)
-      if (message) await onMessage?.(client, message)
+      if (message) {
+        await onMessage?.(client, message)
+        return
+      }
+
+      for (const handler of rawHandlers) {
+        await handler(client, raw)
+      }
+    },
+
+    async handleClose(client) {
+      clients.delete(client)
+      for (const handler of closeHandlers) {
+        await handler(client)
+      }
+    },
+
+    onRawMessage(handler) {
+      rawHandlers.add(handler)
+      return () => rawHandlers.delete(handler)
+    },
+
+    onClientClose(handler) {
+      closeHandlers.add(handler)
+      return () => closeHandlers.delete(handler)
     },
 
     sendToUser(userId, type, payload) {

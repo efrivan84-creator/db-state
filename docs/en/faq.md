@@ -10,7 +10,7 @@ db-state is the boilerplate, extracted into a library that fits in ~5.4 KB brotl
 
 ### Is it production-ready?
 
-`0.0.x`. The shape of the API is stable and 65 tests cover the core behavior, but you should expect minor breaking changes until `1.0`. Audit trail and time-travel work by design; the lack of optimistic concurrency control is intentional (see [next question](#what-about-conflicts-between-concurrent-edits)).
+`0.0.x`. The shape of the API is stable and the test suite covers the core behavior, but you should expect minor breaking changes until `1.0`. Audit trail and time-travel work by design; the lack of optimistic concurrency control is intentional (see [next question](#what-about-conflicts-between-concurrent-edits)).
 
 ### What about conflicts between concurrent edits?
 

@@ -31,11 +31,17 @@ export interface DbStateSocketFacade {
    */
   on(type: string, handler: SocketMessageHandler): SocketUnsubscribe
 
+  /** Subscribes to non-JSON raw frames such as binary file chunks. */
+  onRaw(handler: (raw: unknown) => void): SocketUnsubscribe
+
   /**
    * Sends a custom event over the same socket. Throws if `type` is in the
    * reserved `dbstate:*` namespace.
    */
   send(type: string, payload?: unknown): void
+
+  /** Sends a raw WebSocket frame after the socket is open. */
+  sendRaw(raw: string | ArrayBuffer | Blob | Uint8Array): Promise<void>
 
   /** Issues a library RPC call and resolves with `result` from the server. */
   rpc<T = unknown>(method: string, payload?: unknown): Promise<T>

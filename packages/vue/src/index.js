@@ -64,6 +64,15 @@ export function createDbState(input) {
       return subscribe(changeHooks.global, callback)
     },
 
+    registerTable(table) {
+      if (state[table]) return state[table]
+      options.tables.push(table)
+      tables[table] = {}
+      changeHooks.tables.set(table, new Set())
+      state[table] = createTableApi({ options, state, table, tables, loadingByKey, keyRefs, countRefs, idsRefs, changeHooks })
+      return state[table]
+    },
+
     async syncNow() {
       if (state.auth.status !== "authorized") return
       if (syncPromise) return syncPromise

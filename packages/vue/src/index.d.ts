@@ -177,6 +177,9 @@ export type DbState<TSchema extends DbStateSchema = DbStateSchema> =
     /** Registers a callback for every applied change from any table. */
     onChange(callback: (change: Change) => void): ChangeUnsubscribe
 
+    /** Registers an extension table at runtime. Used by optional modules such as @db-state/vue-files. */
+    registerTable<K extends string>(table: K): TableApi<BaseDoc>
+
     /** Pulls the next batch of log changes from the server and applies them. */
     syncNow(): Promise<void>
 

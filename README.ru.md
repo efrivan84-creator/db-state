@@ -288,6 +288,37 @@ await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
 await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 ```
 
+## Файлы
+
+Файлы вынесены в optional официальные модули поверх того же WebSocket:
+
+```js
+import { createFileModule } from "@db-state/server-files"
+import { createFileClient } from "@db-state/vue-files"
+
+const files = createFileModule({
+  storage: "./uploads",
+  maxSize: 50 * 1024 * 1024,
+  defaultPolicy: { mode: "registered" }
+})
+
+const dbState = createDbStateServer({
+  mongo,
+  tables: ["message"],
+  files
+})
+
+const fileClient = createFileClient(state)
+const uploaded = await fileClient.upload(file, { key: "message-form" })
+
+await state.message.add({
+  text,
+  file: [uploaded.token]
+}, "message-form")
+```
+
+Файловые пакеты используют `dbfile:*` control-сообщения и binary WebSocket frames. Таблица `file` регистрируется автоматически для metadata и личной истории владельца, а доступ к бинарю идет через `token + downloadPolicy` (`public`, `registered`, `verified` или `groups`). Прямой `state.file.add/update/remove` запрещен; upload/download идут только через file API.
+
 ## Пакеты
 
 | Пакет | Размер | Для чего |
@@ -295,11 +326,14 @@ await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 | [`@db-state/core`](packages/core) | ~1.2 KB min+gz / ~1.1 KB brotli | Общий протокол, `Change`, dot-path helpers, sync-window helpers. Без runtime-зависимостей. |
 | [`@db-state/vue`](packages/vue) | ~6.0 KB min+gz / ~5.4 KB brotli | Vue 3 reactive client: документы, списки, счетчики, auth, cache, WebSocket sync. |
 | [`@db-state/server-mongo`](packages/server-mongo) | ~5.5 KB min+gz / ~5.0 KB brotli | MongoDB WebSocket server: CRUD, auth, log, sync, permissions, audit. |
+| [`@db-state/vue-files`](packages/vue-files) | ~1.5 KB min+gz / ~1.3 KB brotli | Vue file client: upload/download чанками, progress callbacks, регистрация `state.file`. |
+| [`@db-state/server-files`](packages/server-files) | ~2.8 KB min+gz / ~2.5 KB brotli | Server file module: local storage, metadata table, token policies, binary chunk protocol. |
 
 ## Установка
 
 ```sh
 npm install @db-state/vue @db-state/server-mongo
+npm install @db-state/vue-files @db-state/server-files   # optional file module
 ```
 
 `@db-state/core` установится автоматически как зависимость.

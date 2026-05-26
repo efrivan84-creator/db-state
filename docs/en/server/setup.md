@@ -199,7 +199,7 @@ For production, keep a tiny local client registry next to your WebSocket setup o
 
 ## Adding HTTP endpoints
 
-The library only does WebSocket RPC. If you need HTTP (e.g. for OAuth callbacks, file uploads, or curl-friendly health checks), add a separate HTTP server:
+The core library only does WebSocket RPC. Official file transfer is handled by `@db-state/server-files` over the same WebSocket using `dbfile:*` control messages plus binary frames. If you need HTTP for other concerns (OAuth callbacks, public REST endpoints, curl-friendly health checks), add a separate HTTP server:
 
 ```js
 import { createServer } from "http"

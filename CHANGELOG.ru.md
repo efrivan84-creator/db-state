@@ -2,6 +2,14 @@
 
 Описание изменений и статус проекта db-state.
 
+## 0.0.9
+
+- Добавлены optional пакеты `@db-state/server-files` и `@db-state/vue-files` для upload/download файлов через тот же db-state WebSocket.
+- В server socket добавлены extension points для raw binary frames и async cleanup при закрытии клиента.
+- `createDbStateServer({ files })` умеет монтировать файловые модули, автоматически добавлять их служебные таблицы и объединять их access/hooks с конфигом сервера.
+- Metadata файла хранится в таблице `file`; скачивание бинаря проверяется через `token + downloadPolicy` (`public`, `registered`, `verified`, `groups`), а `storageKey` никогда не отдается клиенту.
+- `createFileClient(state)` регистрирует `state.file`, поддерживает progress callbacks для upload/download и позволяет файловым операциям участвовать в `state.getKeyRef(key)`.
+
 ## 0.0.8
 
 - Vue mutation methods `add`, `update` и `remove` теперь принимают optional loading `key`, чтобы записи участвовали в счетчиках `state.getKeyRef(key)` для страницы/блока.
@@ -71,7 +79,7 @@
 
 ## Текущий статус
 
-- Realtime CRUD с правами, offline cache, login и sync реализован и покрыт 65 тестами.
+- Realtime CRUD с правами, offline cache, login, sync и optional file transfer реализован и покрыт 71 тестом.
 - TypeScript declarations есть во всех пакетах.
 - Append-only log поддерживает audit trail, восстановление удалений и time-travel reconstruction patterns.
 - Поддерживаемый стек: Vue + MongoDB + WebSocket.
@@ -82,7 +90,9 @@
 - Фильтрация прав для list/count запросов сейчас выполняется после чтения подходящих документов из Mongo. Для больших таблиц пока добавляй узкие app-level фильтры; server-side access prefilter hook планируется.
 - Мультидокументные записи пока не атомарны. Для сценариев, где нужно менять несколько таблиц вместе, используй application/server-side код; `batch()`/transaction API планируется.
 - Доменные server actions пока не являются отдельным first-class слоем. Custom socket events уже есть, но request/response action layer планируется для операций вроде отправки сообщения в чат.
-- Binary upload/chunk helpers пока не входят в пакет. Для больших медиа используй отдельный upload path или custom WebSocket protocol.
+- File transfer v1 не умеет resumable upload после reconnect; прерванный upload получает `failed`, а временный файл удаляется.
+- Встроенный file storage adapter - local filesystem. Для S3-compatible/object storage нужен custom `FileStorage` adapter.
+- File module сейчас разрешает один active upload и один active download на socket, чтобы backpressure оставался простым.
 - Wake-up сигналы изменений уже идут через debounce/rate-limit, но для больших инсталляций может понадобиться per-table/per-client filtering или custom broadcast layer.
 - `syncLimit` должен вмещать одно sync-окно. Для очень большого числа записей нужен cursor continuation по `{ createdAt, logId }`.
 - Offline writes намеренно не ставятся в очередь. Клиент поддерживает offline read, а записи требуют онлайн-сокет.

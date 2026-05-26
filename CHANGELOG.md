@@ -2,6 +2,14 @@
 
 Release notes and project status for db-state.
 
+## 0.0.9
+
+- Added optional `@db-state/server-files` and `@db-state/vue-files` packages for file upload/download over the same db-state WebSocket.
+- Added server socket extension points for raw binary frames and async client-close cleanup handlers.
+- `createDbStateServer({ files })` can mount file modules, auto-register their service tables, and merge their access/hooks into the server config.
+- File metadata lives in the `file` table; binary download is gated by `token + downloadPolicy` (`public`, `registered`, `verified`, `groups`), and `storageKey` is never exposed to clients.
+- `createFileClient(state)` registers `state.file`, supports upload/download progress callbacks, and lets file operations participate in `state.getKeyRef(key)`.
+
 ## 0.0.8
 
 - Vue mutation methods `add`, `update`, and `remove` now accept an optional loading `key`, so writes can participate in `state.getKeyRef(key)` page/block loading counters.
@@ -71,7 +79,7 @@ Initial public release:
 
 ## Current status
 
-- Realtime CRUD with permissions, offline cache, login, and sync is implemented and covered by 65 tests.
+- Realtime CRUD with permissions, offline cache, login, sync, and optional file transfer is implemented and covered by 71 tests.
 - TypeScript declarations are included for all packages.
 - Append-only log supports audit trail, delete recovery, and time-travel reconstruction patterns.
 - Vue + MongoDB + WebSocket are the supported stack.
@@ -82,7 +90,9 @@ Initial public release:
 - Permission filtering for list/count queries currently happens after Mongo reads the matching documents. Large datasets should add narrow app-level filters today; a server-side access prefilter hook is planned.
 - Multi-document writes are not atomic yet. Use application/server-side code for workflows that must update several tables together; a `batch()`/transaction API is planned.
 - Domain-specific server actions are not first-class yet. Custom socket events exist, but a request/response action layer is planned for operations such as chat message sending.
-- Binary upload/chunk helpers are not included yet. Use a separate upload path or a custom WebSocket protocol for large media.
+- File transfer v1 is not resumable after reconnect; an interrupted upload is marked `failed` and its temporary file is removed.
+- The built-in file storage adapter is local filesystem storage. Use a custom `FileStorage` adapter for S3-compatible/object storage.
+- The file module currently allows one active upload and one active download per socket to keep backpressure simple.
 - Change wake-ups are debounced and rate-limited globally, but large deployments may still want per-table/per-client filtering or a custom broadcast layer.
 - `syncLimit` should be high enough to fit one sync window. For very high write volume, add cursor continuation by `{ createdAt, logId }`.
 - Offline writes are intentionally not queued. The client supports offline read, while writes require an online socket.

@@ -7,6 +7,8 @@ export interface AccessUser {
   _id: string
   login?: string
   groups?: string[]
+  emailVerified?: boolean
+  phoneVerified?: boolean
 }
 
 /** Context object passed into every code-level access rule. */

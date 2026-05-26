@@ -288,6 +288,37 @@ await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
 await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 ```
 
+## Files
+
+Files are optional official modules on top of the same WebSocket:
+
+```js
+import { createFileModule } from "@db-state/server-files"
+import { createFileClient } from "@db-state/vue-files"
+
+const files = createFileModule({
+  storage: "./uploads",
+  maxSize: 50 * 1024 * 1024,
+  defaultPolicy: { mode: "registered" }
+})
+
+const dbState = createDbStateServer({
+  mongo,
+  tables: ["message"],
+  files
+})
+
+const fileClient = createFileClient(state)
+const uploaded = await fileClient.upload(file, { key: "message-form" })
+
+await state.message.add({
+  text,
+  file: [uploaded.token]
+}, "message-form")
+```
+
+The file packages use `dbfile:*` control messages and binary WebSocket frames. The `file` table is registered automatically for metadata and owner history, while binary access is controlled by `token + downloadPolicy` (`public`, `registered`, `verified`, or `groups`). Direct `state.file.add/update/remove` is denied; upload/download go through the file API.
+
 ## Packages
 
 | Package | Size | Purpose |
@@ -295,11 +326,14 @@ await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 | [`@db-state/core`](packages/core) | ~1.2 KB min+gz / ~1.1 KB brotli | Shared protocol, `Change`, dot-path helpers, sync-window helpers. Zero runtime deps. |
 | [`@db-state/vue`](packages/vue) | ~6.0 KB min+gz / ~5.4 KB brotli | Vue 3 reactive client: documents, lists, counters, auth, cache, WebSocket sync. |
 | [`@db-state/server-mongo`](packages/server-mongo) | ~5.5 KB min+gz / ~5.0 KB brotli | MongoDB WebSocket server: CRUD, auth, log, sync, permissions, audit. |
+| [`@db-state/vue-files`](packages/vue-files) | ~1.5 KB min+gz / ~1.3 KB brotli | Vue file client: upload/download chunks, progress callbacks, `state.file` registration. |
+| [`@db-state/server-files`](packages/server-files) | ~2.8 KB min+gz / ~2.5 KB brotli | Server file module: local storage, metadata table, token policies, binary chunk protocol. |
 
 ## Install
 
 ```sh
 npm install @db-state/vue @db-state/server-mongo
+npm install @db-state/vue-files @db-state/server-files   # optional file module
 ```
 
 `@db-state/core` is installed automatically as a dependency.

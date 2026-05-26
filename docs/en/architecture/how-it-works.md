@@ -174,7 +174,7 @@ Three reasons:
 
 3. **Lower latency than HTTP**. A request/response over an established WebSocket is one round-trip; HTTP+TCP+TLS for each call is several.
 
-The drawback: no caching of GETs by CDN, no native HTTP semantics. For apps that need both, run a separate HTTP server for non-realtime endpoints (file uploads, public APIs, OAuth callbacks) — see [server/setup.md](../server/setup.md#adding-http-endpoints).
+The drawback: no caching of GETs by CDN, no native HTTP semantics. File transfer is covered by the optional `@db-state/server-files` / `@db-state/vue-files` modules over the same socket. For public APIs, OAuth callbacks, or curl-friendly health checks, run a separate HTTP server — see [server/setup.md](../server/setup.md#adding-http-endpoints).
 
 ## Why no optimistic concurrency control?
 

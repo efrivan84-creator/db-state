@@ -133,7 +133,9 @@ function attachUser(client, user) {
   client.user = {
     _id: user._id,
     login: user.login,
-    groups: user.groups ?? []
+    groups: user.groups ?? [],
+    emailVerified: user.emailVerified,
+    phoneVerified: user.phoneVerified
   }
   client.userId = user._id
 }

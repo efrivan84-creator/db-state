@@ -65,6 +65,9 @@ export interface DbStateServerConfig {
   /** Optional lifecycle hooks around server reads and writes. */
   hooks?: ServerHooks
 
+  /** Optional extension modules mounted on the same db-state server/socket. */
+  files?: DbStateServerModule | ReadonlyArray<DbStateServerModule>
+
   /** Password hashing primitive. Default: PBKDF2-SHA256. */
   password?: PasswordHasher
 
@@ -157,6 +160,25 @@ export interface ServerHookSet<T extends BaseDoc = BaseDoc> {
 
 export type ServerHooks =
   ServerHookSet & Record<string, ServerHookSet | ServerHook | undefined>
+
+export interface DbStateServerModule {
+  table?: string
+  tables?: ReadonlyArray<string>
+  access?: AccessConfig
+  hooks?: ServerHooks
+  bind?(context: {
+    api: DbStateServer
+    config: unknown
+    mongo: MongoDatabaseLike
+    socket: SocketHub
+  }): void
+  handleMessage?(
+    client: unknown,
+    message: { type?: string; [key: string]: unknown }
+  ): Promise<boolean> | boolean
+  handleRawMessage?(client: unknown, raw: unknown): Promise<void> | void
+  handleClose?(client: unknown): Promise<void> | void
+}
 
 // ---------------------------------------------------------------------------
 // API

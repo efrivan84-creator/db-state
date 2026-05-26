@@ -4,10 +4,10 @@
  * works — `ws.WebSocket`, custom adapters, mock clients in tests.
  */
 export interface SocketClient {
-  send?(raw: string): void
-  on?(event: "message", listener: (raw: unknown) => void): void
+  send?(raw: string | ArrayBuffer | Uint8Array): void
+  on?(event: "message" | "close", listener: (raw: unknown) => void): void
   userId?: string
-  user?: { _id: string; login?: string; groups?: string[] }
+  user?: { _id: string; login?: string; groups?: string[]; emailVerified?: boolean; phoneVerified?: boolean }
   sessionId?: string
 }
 
@@ -28,7 +28,7 @@ export interface BroadcastOptions {
 
 /** Connection metadata supplied when registering a client. */
 export interface ClientMeta {
-  user?: { _id: string; login?: string; groups?: string[] }
+  user?: { _id: string; login?: string; groups?: string[]; emailVerified?: boolean; phoneVerified?: boolean }
   userId?: string
   sessionId?: string
 }
@@ -55,6 +55,15 @@ export interface SocketHub {
 
   /** Parses a raw socket frame and dispatches into the message handler. */
   handleMessage(client: SocketClient, raw: unknown): Promise<void>
+
+  /** Dispatches a socket close event into registered module handlers. */
+  handleClose(client: SocketClient): Promise<void>
+
+  /** Registers a handler for non-JSON raw frames such as binary file chunks. */
+  onRawMessage(handler: (client: SocketClient, raw: unknown) => Promise<void> | void): DetachClient
+
+  /** Registers a handler called when a client disconnects. */
+  onClientClose(handler: (client: SocketClient) => Promise<void> | void): DetachClient
 
   /** Sends a single payload to every socket whose `userId` matches. */
   sendToUser(userId: string, type: string, payload?: unknown): void
