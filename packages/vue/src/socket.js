@@ -35,6 +35,7 @@ export function createSocketFacade(options) {
         if (!message) return
         if (message.type === DB_STATE_MESSAGES.rpcResult || message.type === DB_STATE_MESSAGES.rpcError) {
           settleRpc(pending, message)
+          emit(listeners, message.type, message)
           return
         }
         emit(listeners, message.type, message)

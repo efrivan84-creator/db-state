@@ -16,10 +16,11 @@ What happens:
 
 1. RPC `dbstate:login` over the same WebSocket.
 2. Server verifies password (PBKDF2 by default), looks up `_user.hash`, creates it if missing, and assigns it to the socket.
-3. Client saves `userId` + `hash` to `localStorage` (configurable storage).
-4. All `countRef` / `idsRef` are refreshed.
-5. Reactive documents that missed cache/auth are retried.
-6. State transitions: `state.auth.status` becomes `"authorized"`.
+3. Client clears the local document/query cache and in-memory tables so data from the previous user cannot leak.
+4. Client sets `time1` to the current time. Login does **not** run `syncNow()`.
+5. Client saves `userId` + `hash` to `localStorage` (configurable storage).
+6. Active reactive reads that missed cache/auth are retried through normal table RPCs.
+7. State transitions: `state.auth.status` becomes `"authorized"`.
 
 ## Hash reconnect
 
@@ -30,7 +31,7 @@ const ok = await state.authByHash()
 // ok = true if the saved hash is still valid
 ```
 
-Server flow: `dbstate:auth` RPC with `{ userId, hash }`. If valid, the socket is authorized. If the hash has been rotated server-side, the call returns an error — the client clears saved credentials and falls back to anonymous.
+Server flow: `dbstate:auth` RPC with `{ userId, hash }`. If valid, the socket is authorized and sync runs. Cached `countRef` / `idsRef` values are refreshed only for tables that receive synced changes; refs that missed cache/auth are retried. If the hash has been rotated server-side, the call returns an error — the client clears saved credentials and falls back to anonymous.
 
 ## Auto-auth
 
@@ -38,8 +39,9 @@ Enabled by default. On socket connect (initial or reconnect), the client:
 
 1. Reads saved `userId` / `hash`.
 2. If present, runs `authByHash`.
-3. On success, retries reactive reads that missed cache/auth.
-4. Then runs `syncNow`.
+3. On success, runs `syncNow`.
+4. Refreshes `countRef` / `idsRef` only for tables changed by sync.
+5. Retries reactive reads that missed cache/auth.
 
 ```js
 export const state = createDbState({
@@ -118,14 +120,9 @@ if (state.auth.status !== "anonymous") {
   await state.logout()
 }
 
-// 2. Wipe all locally cached data so role A's documents don't leak to role B.
-await state.clearLocalDB()
-
-// 3. Authenticate as the new user.
+// 2. Authenticate as the new user.
+// login clears local cache and moves time1 to the new login moment.
 await state.login("manager", "...")
-
-// 4. Force initial sync.
-await state.syncNow()
 ```
 
 Don't `clearLocalDB` **before** `login` succeeds — if login fails, you've wiped the cache for nothing.

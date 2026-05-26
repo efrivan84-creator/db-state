@@ -6,6 +6,19 @@ export interface RpcRequest<TBody = Record<string, unknown>> {
   client: SocketClient
   userId?: string
   sessionId?: string
+  /** Optional metadata appended to the `dbstate:rpc_result` envelope. */
+  dbStateMeta?: RpcMeta
+}
+
+/** Optional metadata sent next to an RPC result without changing the result shape. */
+export interface RpcMeta {
+  /** True when rows/changes were hidden by read permissions. */
+  accessFiltered?: boolean
+  /** True when object fields/change fields were hidden by read field whitelists. */
+  fieldsFiltered?: boolean
+  /** Number of rows/changes hidden by read permissions in this response window. */
+  denied?: number
+  [key: string]: unknown
 }
 
 /** Handler signature: receives the request, returns the result that will be sent back. */

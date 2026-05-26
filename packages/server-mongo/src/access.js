@@ -61,6 +61,14 @@ export function projectFields(obj, fields) {
   return out
 }
 
+export function hasHiddenFields(obj, fields) {
+  if (!obj || !fields) return false
+
+  return objectPaths(obj)
+    .filter((path) => path !== "_id" && path !== "id")
+    .some((path) => !isAllowedField(path, fields))
+}
+
 export function changeWritePaths({ set, unset, obj }) {
   return [
     ...Object.keys(set ?? {}),
@@ -95,6 +103,21 @@ export function filterChangeFields(change, fields) {
   }
 
   return change
+}
+
+export function hasHiddenChangeFields(change, fields) {
+  if (!fields) return false
+
+  if (change.action === "insert") return hasHiddenFields(change.obj, fields)
+  if (change.action === "delete") return hasHiddenFields(change.old, fields)
+  if (change.action === "update") {
+    return [
+      ...Object.keys(change.set ?? {}),
+      ...(change.unset ?? [])
+    ].some((path) => !isAllowedField(path, fields))
+  }
+
+  return false
 }
 
 export function resolveUser(config, ctx) {
@@ -155,7 +178,7 @@ function normalizeDecision(decision) {
   return { allowed: true, fields: decision.fields }
 }
 
-function isAllowedField(path, fields) {
+export function isAllowedField(path, fields) {
   return fields.some((field) => path === field || path.startsWith(`${field}.`))
 }
 

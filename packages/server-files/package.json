@@ -1,6 +1,6 @@
 {
   "name": "@db-state/server-files",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "File upload/download module for db-state over the same WebSocket.",
   "keywords": [
     "db-state",
@@ -40,6 +40,6 @@
     "access": "public"
   },
   "peerDependencies": {
-    "@db-state/server-mongo": "^0.0.9"
+    "@db-state/server-mongo": "^0.0.10"
   }
 }

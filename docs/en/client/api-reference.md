@@ -60,7 +60,7 @@ createDbState<Schema>(["order", "product"])
 | `reconnectDelay` | `number` | `1000` | ms before WebSocket reconnect. |
 | `rpcTimeout` | `number` | `15000` | ms for RPC waits. |
 | `safetySyncInterval` | `number` | `0` | Optional background sync interval. Disabled by default. |
-| `syncOnAuth` | `boolean` | `true` | Run `syncNow()` after successful login/hash auth. |
+| `syncOnAuth` | `boolean` | `true` | Run `syncNow()` after successful hash auth/reconnect. `login()` starts from a fresh cursor and does not sync. |
 | `waitTimeout` | `number` | `15000` | `getAsync` timeout. |
 | `writeAuthTimeout` | `number` | `3000` | How long writes wait for restored auth before failing. |
 | `countRefreshDelay` | `number` | `50` | Debounce for `countRef` refresh. |
@@ -316,6 +316,8 @@ interface DbStateSocketFacade {
 | `send(type, payload)` | Send a custom event. Throws on `dbstate:*`. |
 | `rpc(method, payload)` | Library RPC (not for app code). |
 | `system(type, payload)` | Library system round-trip (login, auth, logout). |
+
+`rpc()` resolves with `result`, but `dbstate:rpc_result` / `dbstate:rpc_error` envelopes are also observable through `on(...)`. Use this for diagnostics such as server `meta.accessFiltered` or `meta.fieldsFiltered`.
 
 See [socket.md](socket.md) for usage.
 

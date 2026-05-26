@@ -6,7 +6,7 @@ import type { SocketHub } from "./socket"
 export type { AccessConfig, AccessContext, AccessDecision, AccessRule, AccessUser, ServerPermissionRule, PermissionPart } from "./access"
 export type { PasswordHasher, AuthHandlers, LoginMessage, AuthMessage, LogoutMessage, AuthRateLimitContext, AuthWarning } from "./auth"
 export type { BroadcastOptions, ClientMeta, DetachClient, SocketAdapter, SocketClient, SocketHub } from "./socket"
-export type { RpcHandler, RpcRequest, RpcRouter } from "./rpc"
+export type { RpcHandler, RpcMeta, RpcRequest, RpcRouter } from "./rpc"
 export type { BaseDoc, Change, ChangeAction, Filter, ListQuery, SortSpec, UpdatePatch } from "@db-state/core"
 
 // ---------------------------------------------------------------------------
@@ -88,6 +88,9 @@ export interface DbStateServerConfig {
 
   /** Name of the users table. Default `"_user"`. */
   userTable?: string
+
+  /** Actor id used for server/internal writes when no authenticated user id exists. Default `"system"`. */
+  systemUserId?: string
 
   /** User fields accepted by `dbstate:login`. Default `["login"]`. */
   authLoginFields?: ReadonlyArray<string>

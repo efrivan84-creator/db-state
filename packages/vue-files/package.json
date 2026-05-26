@@ -1,6 +1,6 @@
 {
   "name": "@db-state/vue-files",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Vue client file upload/download module for db-state over the same WebSocket.",
   "keywords": [
     "db-state",
@@ -41,7 +41,7 @@
     "access": "public"
   },
   "peerDependencies": {
-    "@db-state/vue": "^0.0.9",
+    "@db-state/vue": "^0.0.10",
     "vue": ">=3.0.0"
   }
 }

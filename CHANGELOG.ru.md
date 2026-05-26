@@ -2,6 +2,17 @@
 
 Описание изменений и статус проекта db-state.
 
+## 0.0.10
+
+- Vue `login()` теперь начинает с чистого клиентского состояния: очищает локальный кэш документов/query и in-memory таблицы, переносит `time1` на текущий момент логина и не запускает `syncNow()`.
+- Hash-auth / reconnect остается sync-путем восстановления: `authByHash()` запускает sync от сохраненного cursor и после авторизации перезапрашивает реактивные чтения, которые не загрузились из кэша.
+- `syncNow()` теперь сначала применяет весь batch изменений, собирает уникальные измененные таблицы и обновляет `countRef` / `idsRef` один раз на измененную таблицу, а не один раз на каждое изменение.
+- Серверные записи без авторизованного пользователя теперь используют `systemUserId` (по умолчанию `"system"`) для `info.makeid`, `info.editid` и `change.userId`, вместо пустого actor.
+- Серверные RPC-ответы теперь могут содержать `meta.accessFiltered` / `meta.fieldsFiltered` / `meta.denied`, если права чтения скрыли строки, sync-изменения или отдельные свойства, при этом форма `result` не меняется.
+- Vue socket RPC по-прежнему возвращает `result`, но теперь также отдает envelope `dbstate:rpc_result` / `dbstate:rpc_error` через `state.socket.on(...)` для диагностики.
+- Документация теперь разделяет поток логина и поток восстановления авторизации, а также описывает batch-refresh query-ref'ов.
+- Добавлены regression-тесты для очистки кэша/no-sync поведения при логине и batch-refresh query-ref'ов по измененным таблицам.
+
 ## 0.0.9
 
 - Добавлены optional пакеты `@db-state/server-files` и `@db-state/vue-files` для upload/download файлов через тот же db-state WebSocket.
@@ -79,7 +90,7 @@
 
 ## Текущий статус
 
-- Realtime CRUD с правами, offline cache, login, sync и optional file transfer реализован и покрыт 71 тестом.
+- Realtime CRUD с правами, offline cache, login, sync и optional file transfer реализован и покрыт 77 тестами.
 - TypeScript declarations есть во всех пакетах.
 - Append-only log поддерживает audit trail, восстановление удалений и time-travel reconstruction patterns.
 - Поддерживаемый стек: Vue + MongoDB + WebSocket.

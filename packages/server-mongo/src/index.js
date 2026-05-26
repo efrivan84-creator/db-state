@@ -5,6 +5,9 @@ import {
   changeWritePaths,
   filterChangeFields,
   filterReadable,
+  hasHiddenChangeFields,
+  hasHiddenFields,
+  isAllowedField,
   projectFields,
   resolveAccess,
   resolveUser
@@ -40,13 +43,14 @@ export function createDbStateServer(options) {
 
     try {
       ctx.user = await resolveUser(config, { req })
+      ctx.actorId = actorId(ctx.user, config)
       ctx.now = config.now()
       ctx.old = await getDoc(config, table, id)
       ctx.clientSet = stripInfoSet(set)
       ctx.clientUnset = stripInfoUnset(unset)
       ctx.set = {
         ...ctx.clientSet,
-        "info.editid": ctx.user?._id,
+        "info.editid": ctx.actorId,
         "info.editdata": ctx.now
       }
       ctx.unset = ctx.clientUnset
@@ -71,7 +75,7 @@ export function createDbStateServer(options) {
         set: ctx.set,
         unset: ctx.unset?.length ? ctx.unset : undefined,
         sessionId,
-        userId: ctx.user?._id,
+        userId: ctx.actorId,
         createdAt: ctx.now
       })
 
@@ -92,6 +96,7 @@ export function createDbStateServer(options) {
 
     try {
       ctx.user = await resolveUser(config, { req })
+      ctx.actorId = actorId(ctx.user, config)
       ctx.now = config.now()
       ctx.id = obj._id ?? obj.id ?? config.createLogId()
       ctx.clientObj = stripInfoObject(obj)
@@ -99,7 +104,7 @@ export function createDbStateServer(options) {
         ...ctx.clientObj,
         _id: ctx.id,
         info: {
-          makeid: ctx.user?._id,
+          makeid: ctx.actorId,
           makedata: ctx.now
         }
       }
@@ -116,7 +121,7 @@ export function createDbStateServer(options) {
         action: "insert",
         obj: ctx.obj,
         sessionId,
-        userId: ctx.user?._id,
+        userId: ctx.actorId,
         createdAt: ctx.now
       })
 
@@ -137,6 +142,7 @@ export function createDbStateServer(options) {
 
     try {
       ctx.user = await resolveUser(config, { req })
+      ctx.actorId = actorId(ctx.user, config)
       ctx.old = await getDoc(config, table, id)
       ctx.obj = ctx.old
       await runHooks(config, table, "beforeWrite", ctx)
@@ -149,7 +155,7 @@ export function createDbStateServer(options) {
         action: "delete",
         old: ctx.old,
         sessionId,
-        userId: ctx.user?._id
+        userId: ctx.actorId
       })
 
       changesBroadcaster.schedule()
@@ -172,6 +178,7 @@ export function createDbStateServer(options) {
       await runHooks(config, table, "beforeRead", ctx)
       ctx.obj = await getDoc(config, table, id)
       const access = await assertAccess(config, "read", ctx)
+      if (hasHiddenFields(ctx.obj, access.fields)) markFieldsFiltered(req)
       ctx.result = projectFields(ctx.obj, access.fields)
       await runHooks(config, table, "afterRead", ctx)
       return ctx.result
@@ -193,7 +200,9 @@ export function createDbStateServer(options) {
       if (ctx.sort) cursor = cursor.sort(ctx.sort)
       if (ctx.skip) cursor = cursor.skip(ctx.skip)
       if (ctx.limit) cursor = cursor.limit(ctx.limit)
-      ctx.rows = await filterReadable(config, req, table, await cursor.toArray())
+      const rawRows = await cursor.toArray()
+      ctx.rows = await filterReadable(config, req, table, rawRows)
+      markAccessFiltered(req, rawRows.length - ctx.rows.length)
       ctx.result = ctx.rows.map((row) => row._id ?? row.id)
       await runHooks(config, table, "afterRead", ctx)
       return ctx.result
@@ -212,11 +221,17 @@ export function createDbStateServer(options) {
       ctx.user = await resolveUser(config, { req })
       await runHooks(config, table, "beforeRead", ctx)
       const values = []
+      let denied = 0
       for (const row of await config.mongo.collection(table).find(ctx.filter).toArray()) {
         const access = await resolveAccess(config, "read", { req, table, id: row._id ?? row.id, obj: row })
-        if (!access.allowed) continue
+        if (!access.allowed) {
+          denied += 1
+          continue
+        }
+        if (access.fields && !isAllowedField(field, access.fields)) markFieldsFiltered(req)
         values.push(getByPath(projectFields(row, access.fields), field))
       }
+      markAccessFiltered(req, denied)
       ctx.result = [...new Set(values.filter((value) => value != null))]
       await runHooks(config, table, "afterRead", ctx)
       return ctx.result
@@ -234,7 +249,9 @@ export function createDbStateServer(options) {
     try {
       ctx.user = await resolveUser(config, { req })
       await runHooks(config, table, "beforeRead", ctx)
-      ctx.rows = await filterReadable(config, req, table, await config.mongo.collection(table).find(ctx.filter).toArray())
+      const rawRows = await config.mongo.collection(table).find(ctx.filter).toArray()
+      ctx.rows = await filterReadable(config, req, table, rawRows)
+      markAccessFiltered(req, rawRows.length - ctx.rows.length)
       ctx.result = ctx.rows.length
       await runHooks(config, table, "afterRead", ctx)
       return ctx.result
@@ -264,6 +281,7 @@ export function createDbStateServer(options) {
         .toArray()
 
       const allowed = []
+      let denied = 0
       for (const row of changes) {
         const change = publicChange(row)
         const permissionRules = await getPermissionRules(config, permissionRulesByTable, change.table)
@@ -291,10 +309,17 @@ export function createDbStateServer(options) {
         }
 
         const access = await resolveAccess(config, "read", ctx)
-        const filtered = access.allowed ? filterChangeFields(change, access.fields) : undefined
+        if (!access.allowed) {
+          denied += 1
+          continue
+        }
+
+        if (hasHiddenChangeFields(change, access.fields)) markFieldsFiltered(req)
+        const filtered = filterChangeFields(change, access.fields)
         if (filtered) allowed.push(filtered)
       }
 
+      markAccessFiltered(req, denied)
       readCtx.result = { to: readCtx.to, changes: allowed }
       await runHooks(config, undefined, "afterRead", readCtx)
       return readCtx.result
@@ -390,6 +415,7 @@ function normalizeOptions(options) {
     onAuthWarning: undefined,
     password: defaultPassword,
     permissionTable: "_permission",
+    systemUserId: "system",
     syncLimit: 1000,
     userTable: "_user",
     ...options,
@@ -417,6 +443,23 @@ function normalizeAuthLoginFields(fields) {
 
 function defaultNormalizeAuthLogin(value) {
   return String(value ?? "").trim()
+}
+
+function actorId(user, config) {
+  return user?._id ?? config.systemUserId
+}
+
+function markAccessFiltered(req, denied) {
+  if (!req || denied <= 0) return
+  req.dbStateMeta ??= {}
+  req.dbStateMeta.accessFiltered = true
+  req.dbStateMeta.denied = (req.dbStateMeta.denied ?? 0) + denied
+}
+
+function markFieldsFiltered(req) {
+  if (!req) return
+  req.dbStateMeta ??= {}
+  req.dbStateMeta.fieldsFiltered = true
 }
 
 function assertTable(config, table) {

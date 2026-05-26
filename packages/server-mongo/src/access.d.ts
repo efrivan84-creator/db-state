@@ -111,11 +111,20 @@ export function assertFieldsAccess(
 /** Projects an object to the supplied field whitelist (always keeps `_id` / `id`). */
 export function projectFields<T extends BaseDoc>(obj: T | null | undefined, fields?: string[]): T | null | undefined
 
+/** Returns true when a field whitelist would hide at least one object field. */
+export function hasHiddenFields<T extends BaseDoc>(obj: T | null | undefined, fields?: string[]): boolean
+
 /** Extracts every dot-path that a change touches. Used for field-level write checks. */
 export function changeWritePaths(change: Pick<Change, "set" | "unset" | "obj">): string[]
 
 /** Returns the change with `set`/`unset`/`obj`/`old` filtered to the supplied field whitelist. */
 export function filterChangeFields<T extends BaseDoc>(change: Change<T>, fields?: string[]): Change<T> | undefined
+
+/** Returns true when a field whitelist would hide at least one changed field. */
+export function hasHiddenChangeFields<T extends BaseDoc>(change: Change<T>, fields?: string[]): boolean
+
+/** Returns true when a dot-path is inside a field whitelist. */
+export function isAllowedField(path: string, fields: string[]): boolean
 
 /** Resolves the calling user via the configured `getUser` hook. */
 export function resolveUser(config: unknown, ctx: AccessContext): Promise<AccessUser | undefined>

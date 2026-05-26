@@ -12,7 +12,7 @@ It creates a global reactive state object backed by WebSocket RPC, local cache, 
 - Direct page API: `state.order.load(id).status`, `state.order.update(...)`, `state.order.listRef(...)`.
 - Reactive query refs: `idsRef`, `listRef`, and `countRef` with `filter`, `sort`, `skip`, and `limit`.
 - Query deduplication: the same query returns the same ref instead of creating another refresh loop.
-- Cache-first query refs: cached ids/counts render immediately from IndexedDB, then refresh after login or table changes.
+- Cache-first query refs: cached ids/counts render immediately from IndexedDB, then refresh after login or synced changes for their table.
 - Offline-read behavior for documents, ids, counts, auth hash, and `time1`.
 - Loading groups via `getKeyRef(key)` for page-level skeletons/progress.
 - WebSocket RPC, reconnect, `login`, `authByHash`, `logout`, and custom app events on the same socket.
@@ -186,7 +186,7 @@ offOrderEdit()
 const openCount = state.order.countRef({ status: "open" })
 ```
 
-When the ref is created, it first reads the last cached value from IndexedDB/cache and does not immediately call the server. The count is refreshed after manual login, after table changes, and after hash auth only when this ref did not have a cached value yet. The refreshed value is saved back to cache. If the same `countRef` is requested again for the same table and filter, the existing ref is returned.
+When the ref is created, it first reads the last cached value from IndexedDB/cache and does not immediately call the server. The count is refreshed after manual login, after local writes, and when sync applies changes for the same table. Hash auth itself does not refresh every cached count. The refreshed value is saved back to cache. If the same `countRef` is requested again for the same table and filter, the existing ref is returned.
 
 `idsRef(query)` returns a Vue `ref` with ids matching a server query:
 
@@ -199,7 +199,7 @@ const orderIds = state.order.idsRef({
 })
 ```
 
-The query object is passed to the server as `{ table, ...query }`, so `filter`, `sort`, `skip`, and `limit` are supported by the same API. When the ref is created, it first reads the last cached ids from IndexedDB/cache and does not immediately call the server. The ids ref is refreshed after manual login, after table changes, and after hash auth only when this ref did not have a cached value yet. The refreshed value is saved back to cache. If the same query is requested again for the same table, the existing ref is returned.
+The query object is passed to the server as `{ table, ...query }`, so `filter`, `sort`, `skip`, and `limit` are supported by the same API. When the ref is created, it first reads the last cached ids from IndexedDB/cache and does not immediately call the server. The ids ref is refreshed after manual login, after local writes, and when sync applies changes for the same table. Hash auth itself does not refresh every cached ids ref. The refreshed value is saved back to cache. If the same query is requested again for the same table, the existing ref is returned.
 
 `listRef(query, key)` is the page-level helper for lists:
 
@@ -223,7 +223,7 @@ It does not keep a second object cache. The id list, document loading, sync upda
 Creation is cache-first:
 
 ```text
-countRef/idsRef created -> read cached value -> wait for authorized + missing cache or table change -> refresh from server -> save cache
+countRef/idsRef created -> read cached value -> wait for login, missing cache, or table change -> refresh from server -> save cache
 ```
 
 `countRef` and `idsRef` use a stable key built from the settings object. Object key order does not matter:
@@ -255,7 +255,7 @@ Login:
 await state.login("ivan", "password")
 ```
 
-The server returns `userId` and `hash`. The client stores them in `localStorage`.
+The server returns `userId` and `hash`. The client clears local cache/in-memory tables, sets `time1` to the current login moment, stores credentials in `localStorage`, and retries active reactive reads. `login()` does not run `syncNow()`.
 
 Reconnect with saved credentials:
 
@@ -272,7 +272,7 @@ export const state = createDbState({
 })
 ```
 
-When the socket opens after a page refresh, the client reads saved `userId/hash`, calls `authByHash`, retries reactive reads that missed cache/auth, then runs sync. Cached `countRef`/`idsRef` values are not refreshed just because the page restored auth; they refresh when sync returns table changes. If the server rejects the saved hash, the client clears saved auth data and switches back to anonymous state.
+When the socket opens after a page refresh, the client reads saved `userId/hash`, calls `authByHash`, runs sync, and retries reactive documents or query refs that missed cache/auth. Cached query refs still render immediately from IndexedDB. They are refreshed only when sync applies changes for their table. If the server rejects the saved hash, the client clears saved auth data and switches back to anonymous state.
 
 You can call the same flow manually:
 

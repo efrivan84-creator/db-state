@@ -279,7 +279,7 @@ For very large migrations, prefer:
 
 1. bump a cache version in your app;
 2. call `state.clearLocalDB()` on next load;
-3. login/sync from a clean cache.
+3. login from a clean cache; reconnect sync will continue from the new cursor.
 
 ## Scaling broadcasts
 

@@ -79,7 +79,7 @@ The Node server.
    6. Schedules a debounced/rate-limited `{ type: "dbstate:changes_available" }` broadcast to all sockets, including the writer.
    7. Sends `{ type: "dbstate:rpc_result", id: "rpc1", result: { ok: true, change } }` back to the originator.
 4. **Client (originator)**: receives `rpc_result`, runs `applyChange(change)` locally → reactive store and IndexedDB updated → `countRef`/`idsRef` for the table are debounce-scheduled for refresh.
-5. **Other clients**: receive `dbstate:changes_available` → trigger `state.syncNow()` → server runs `sync(from=time1, sessionId=mine)` → returns the new change (permission-filtered) → applies → reactive store and IndexedDB updated → query refs refresh.
+5. **Other clients**: receive `dbstate:changes_available` → trigger `state.syncNow()` → server runs `sync(from=time1, sessionId=mine)` → returns changes (permission-filtered) → applies the whole batch → reactive store and IndexedDB updated → query refs refresh once per changed table.
 
 Within ~50 ms of the originator's button click, every connected and authorized tab sees the new value in its `listRef`.
 

@@ -2,6 +2,17 @@
 
 Release notes and project status for db-state.
 
+## 0.0.10
+
+- Vue `login()` now starts from a clean client state: it clears local document/query cache and in-memory tables, moves `time1` to the current login moment, and does not run `syncNow()`.
+- Hash auth / reconnect remains the sync path: `authByHash()` runs sync from the saved cursor and retries cache-missed reactive reads after authorization.
+- `syncNow()` now applies the whole change batch first, collects unique changed tables, and refreshes `countRef` / `idsRef` once per changed table instead of once per change.
+- Server writes without an authenticated user now use `systemUserId` (default `"system"`) for `info.makeid`, `info.editid`, and `change.userId` instead of writing an empty actor.
+- Server RPC responses now include optional `meta.accessFiltered` / `meta.fieldsFiltered` / `meta.denied` when read permissions hide rows, sync changes, or object/change fields without changing the `result` shape.
+- Vue socket RPC still resolves with `result`, but now also emits `dbstate:rpc_result` / `dbstate:rpc_error` envelopes to `state.socket.on(...)` for diagnostics.
+- Documentation now describes the separate login-vs-restore flows and the batched query-ref refresh model.
+- Added regression tests for login cache reset/no-sync behavior and batched query-ref refresh by changed table.
+
 ## 0.0.9
 
 - Added optional `@db-state/server-files` and `@db-state/vue-files` packages for file upload/download over the same db-state WebSocket.
@@ -79,7 +90,7 @@ Initial public release:
 
 ## Current status
 
-- Realtime CRUD with permissions, offline cache, login, sync, and optional file transfer is implemented and covered by 71 tests.
+- Realtime CRUD with permissions, offline cache, login, sync, and optional file transfer is implemented and covered by 77 tests.
 - TypeScript declarations are included for all packages.
 - Append-only log supports audit trail, delete recovery, and time-travel reconstruction patterns.
 - Vue + MongoDB + WebSocket are the supported stack.

@@ -44,7 +44,7 @@ Custom events go over the wire as:
 { "type": "chat:message", "payload": { "text": "hello", "room": "general" } }
 ```
 
-System events use different shapes (e.g. RPC has `id`, `method`, `payload` fields). The client routes `dbstate:rpc_result` / `dbstate:rpc_error` internally — your handler will never see them.
+System events use different shapes (e.g. RPC has `id`, `method`, `payload` fields). The client routes `dbstate:rpc_result` / `dbstate:rpc_error` internally, but also emits those envelopes to `state.socket.on(...)` for diagnostics. This is useful when the server sends metadata such as `meta.accessFiltered` or `meta.fieldsFiltered`.
 
 ## Server side
 

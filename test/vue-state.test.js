@@ -1,7 +1,9 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { DB_STATE_MESSAGES } from "../packages/core/src/index.js"
 import { createDbState, createMemoryCache } from "../packages/vue/src/index.js"
+import { createSocketFacade } from "../packages/vue/src/socket.js"
 
 test("sync update does not cache partial unloaded records", async () => {
   const cache = createMemoryCache()
@@ -202,7 +204,61 @@ test("countRef refreshes from server after creation and table changes", async ()
   ])
 })
 
-test("countRef refreshes after login but not after hash auth restore", async () => {
+test("sync refreshes query refs once per changed table after applying the batch", async () => {
+  const cache = delayedSetCache()
+  const state = createDbState({
+    autoConnect: false,
+    cache,
+    countRefreshDelay: 0,
+    idsRefreshDelay: 0,
+    safetySyncInterval: 0,
+    ...testStorage(),
+    tables: ["order", "product"]
+  })
+  const calls = []
+  state.socket.rpc = async (method, payload) => {
+    calls.push({ method, payload })
+    if (method === "sync") {
+      return {
+        to: "2026-05-21T10:00:00.000Z",
+        changes: [
+          { table: "order", id: "o1", action: "insert", obj: { _id: "o1" } },
+          { table: "order", id: "o2", action: "insert", obj: { _id: "o2" } },
+          { table: "product", id: "p1", action: "insert", obj: { _id: "p1" } }
+        ]
+      }
+    }
+    if (method === "count") return Object.keys(state[payload.table].items).length
+    if (method === "getIds") return Object.keys(state[payload.table].items).sort()
+    return undefined
+  }
+  state.auth.status = "authorized"
+
+  const orderCount = state.order.countRef({})
+  const orderIds = state.order.idsRef({})
+  const productCount = state.product.countRef({})
+  const productIds = state.product.idsRef({})
+  await waitFor(() => calls.length === 4)
+  calls.length = 0
+
+  await state.syncNow()
+  await waitFor(() => (
+    orderCount.value === 2 &&
+    orderIds.value.length === 2 &&
+    productCount.value === 1 &&
+    productIds.value.length === 1
+  ))
+
+  assert.deepEqual(calls.map((call) => `${call.method}:${call.payload?.table ?? ""}`), [
+    "sync:",
+    "count:order",
+    "getIds:order",
+    "count:product",
+    "getIds:product"
+  ])
+})
+
+test("countRef refreshes after login but hash auth without table changes keeps cached value", async () => {
   const cache = createMemoryCache()
   const state = createDbState({
     autoConnect: false,
@@ -234,11 +290,12 @@ test("countRef refreshes after login but not after hash auth restore", async () 
   await state.authByHash()
   assert.equal(count.value, 4)
 
-  assert.deepEqual(calls, [
-    { method: "sync", payload: { from: "1970-01-01T00:00:00.000Z", sessionId: state.sync.sessionId } },
-    { method: "count", payload: { table: "order", filter: {} } },
-    { method: "sync", payload: { from: "2026-05-21T10:00:00.000Z", sessionId: state.sync.sessionId } }
-  ])
+  assert.equal(calls[0].method, "count")
+  assert.deepEqual(calls[0].payload, { table: "order", filter: {} })
+  assert.equal(calls[1].method, "sync")
+  assert.notEqual(calls[1].payload.from, "1970-01-01T00:00:00.000Z")
+  assert.equal(calls[1].payload.sessionId, state.sync.sessionId)
+  assert.equal(calls.length, 2)
 })
 
 test("client does not start safety sync interval by default", () => {
@@ -263,25 +320,35 @@ test("client does not start safety sync interval by default", () => {
   }
 })
 
-test("login runs sync after authorization", async () => {
+test("login clears local data, moves sync cursor to now, and does not run sync", async () => {
+  const cache = createMemoryCache()
+  await cache.set("order", "old", { _id: "old", status: "cached" })
+  const storage = testStorage()
+  storage.metaStorage.setItem("db-state.time1", "2020-01-01T00:00:00.000Z")
   const state = createDbState({
     autoConnect: false,
-    cache: createMemoryCache(),
-    ...testStorage(),
+    cache,
+    ...storage,
     tables: ["order"]
   })
+  state.order.items.old = { _id: "old", status: "memory", __loaded: true }
   const calls = []
   state.socket.system = async () => ({ userId: "u1", hash: "h1", ok: true })
   state.socket.rpc = async (method, payload) => {
     calls.push({ method, payload })
-    return { to: "2026-05-21T10:00:00.000Z", changes: [] }
+    throw new Error("login should not run sync RPC")
   }
 
+  const before = Date.now()
   await state.login("ivan", "secret")
+  const cursor = state.sync.time1
 
-  assert.deepEqual(calls, [
-    { method: "sync", payload: { from: "1970-01-01T00:00:00.000Z", sessionId: state.sync.sessionId } }
-  ])
+  assert.deepEqual(calls, [])
+  assert.equal(await cache.get("order", "old"), undefined)
+  assert.equal(state.order.items.old, undefined)
+  assert.equal(storage.metaStorage.getItem("db-state.time1"), cursor)
+  assert.ok(Date.parse(cursor) >= before)
+  assert.ok(Date.parse(cursor) <= Date.now())
 })
 
 test("autoAuth refreshes uncached reactive refs after authorization", async () => {
@@ -327,27 +394,34 @@ test("autoAuth refreshes uncached reactive refs after authorization", async () =
   ])
 })
 
-test("autoAuth does not refresh cached reactive refs", async () => {
+test("autoAuth refreshes cached query refs only for synced changed tables", async () => {
   const cache = createMemoryCache()
   const firstState = createDbState({
     autoConnect: false,
     cache,
     safetySyncInterval: 0,
     ...testStorage(),
-    tables: ["order"]
+    tables: ["order", "product"]
   })
-  firstState.socket.rpc = async (method) => {
+  firstState.socket.rpc = async (method, payload) => {
     if (method === "sync") return { to: "2026-05-21T10:00:00.000Z", changes: [] }
-    if (method === "count") return 8
-    if (method === "getIds") return ["o7", "o8"]
+    if (method === "count") return payload.table === "order" ? 8 : 3
+    if (method === "getIds") return payload.table === "order" ? ["o7", "o8"] : ["p1"]
     return undefined
   }
   firstState.socket.system = async () => ({ userId: "u1", hash: "h1", ok: true })
 
   const firstCount = firstState.order.countRef({ status: "open" })
   const firstIds = firstState.order.idsRef({ filter: { status: "open" }, sort: { _id: 1 } })
+  const firstProductCount = firstState.product.countRef({})
+  const firstProductIds = firstState.product.idsRef({ sort: { _id: 1 } })
   await firstState.login("ivan", "secret")
-  await waitFor(() => firstCount.value === 8 && firstIds.value.length === 2)
+  await waitFor(() => (
+    firstCount.value === 8 &&
+    firstIds.value.length === 2 &&
+    firstProductCount.value === 3 &&
+    firstProductIds.value.length === 1
+  ))
 
   const storage = testStorage()
   storage.authStorage.setItem("db-state.userId", "u1")
@@ -355,15 +429,30 @@ test("autoAuth does not refresh cached reactive refs", async () => {
   const secondState = createDbState({
     autoConnect: false,
     cache,
+    countRefreshDelay: 0,
+    idsRefreshDelay: 0,
     safetySyncInterval: 0,
     ...storage,
-    tables: ["order"]
+    tables: ["order", "product"]
   })
   const calls = []
   secondState.socket.rpc = async (method, payload) => {
     calls.push({ method, payload })
-    if (method === "sync") return { to: "2026-05-21T10:00:00.000Z", changes: [] }
-    throw new Error("cached refs should not refresh")
+    if (method === "sync") {
+      return {
+        to: "2026-05-21T10:00:00.000Z",
+        changes: [{
+          table: "order",
+          id: "o9",
+          action: "insert",
+          obj: { _id: "o9", status: "open" }
+        }]
+      }
+    }
+    if (payload.table === "product") throw new Error("unchanged table query refs should not refresh")
+    if (method === "count") return 9
+    if (method === "getIds") return ["o9"]
+    return undefined
   }
   secondState.socket.system = async (type, payload) => {
     calls.push({ method: type, payload })
@@ -372,15 +461,28 @@ test("autoAuth does not refresh cached reactive refs", async () => {
 
   const cachedCount = secondState.order.countRef({ status: "open" })
   const cachedIds = secondState.order.idsRef({ sort: { _id: 1 }, filter: { status: "open" } })
-  await waitFor(() => cachedCount.value === 8 && cachedIds.value.length === 2)
+  const cachedProductCount = secondState.product.countRef({})
+  const cachedProductIds = secondState.product.idsRef({ sort: { _id: 1 } })
+  await waitFor(() => (
+    cachedCount.value === 8 &&
+    cachedIds.value.length === 2 &&
+    cachedProductCount.value === 3 &&
+    cachedProductIds.value.length === 1
+  ))
 
   assert.equal(await secondState.autoAuth(), true)
 
-  assert.equal(cachedCount.value, 8)
-  assert.deepEqual(cachedIds.value, ["o7", "o8"])
+  await waitFor(() => cachedCount.value === 9 && cachedIds.value.length === 1)
+
+  assert.equal(cachedCount.value, 9)
+  assert.deepEqual(cachedIds.value, ["o9"])
+  assert.equal(cachedProductCount.value, 3)
+  assert.deepEqual(cachedProductIds.value, ["p1"])
   assert.deepEqual(calls, [
     { method: "dbstate:auth", payload: { userId: "u1", hash: "h1" } },
-    { method: "sync", payload: { from: "1970-01-01T00:00:00.000Z", sessionId: secondState.sync.sessionId } }
+    { method: "sync", payload: { from: "1970-01-01T00:00:00.000Z", sessionId: secondState.sync.sessionId } },
+    { method: "count", payload: { table: "order", filter: { status: "open" } } },
+    { method: "getIds", payload: { table: "order", sort: { _id: 1 }, filter: { status: "open" } } }
   ])
 })
 
@@ -458,13 +560,54 @@ test("socket close downgrades current authorization to restored when credentials
   }
 })
 
-test("load before authorization uses cache only and retries unloaded documents after authorization", async () => {
+test("socket rpc emits the result envelope for diagnostics", async () => {
+  const OriginalWebSocket = globalThis.WebSocket
+  globalThis.WebSocket = FakeWebSocket
+
+  try {
+    const socket = createSocketFacade({
+      reconnectDelay: 0,
+      rpcTimeout: 50,
+      wsUrl: "ws://example.test/db-state/ws"
+    })
+    const envelopes = []
+    socket.on(DB_STATE_MESSAGES.rpcResult, (message) => envelopes.push(message))
+
+    const rpc = socket.rpc("getIds", { table: "order" })
+    await Promise.resolve()
+
+    const request = JSON.parse(socket.raw.sent[0])
+    socket.raw.emit("message", {
+      data: JSON.stringify({
+        type: DB_STATE_MESSAGES.rpcResult,
+        id: request.id,
+        result: ["o1"],
+        meta: { accessFiltered: true, denied: 1 }
+      })
+    })
+
+    assert.deepEqual(await rpc, ["o1"])
+    assert.deepEqual(envelopes, [{
+      type: DB_STATE_MESSAGES.rpcResult,
+      id: request.id,
+      result: ["o1"],
+      meta: { accessFiltered: true, denied: 1 }
+    }])
+  } finally {
+    globalThis.WebSocket = OriginalWebSocket
+  }
+})
+
+test("load before restored authorization uses cache only and retries unloaded documents after authorization", async () => {
   const cache = createMemoryCache()
+  const storage = testStorage()
+  storage.authStorage.setItem("db-state.userId", "u1")
+  storage.authStorage.setItem("db-state.authHash", "h1")
   const state = createDbState({
     autoConnect: false,
     cache,
     safetySyncInterval: 0,
-    ...testStorage(),
+    ...storage,
     tables: ["order"]
   })
   const calls = []
@@ -481,7 +624,7 @@ test("load before authorization uses cache only and retries unloaded documents a
   assert.equal(doc.__loaded, false)
   assert.deepEqual(calls, [])
 
-  await state.login("ivan", "secret")
+  await state.authByHash()
   await waitFor(() => doc.__loaded)
 
   assert.equal(doc.status, "open")
@@ -520,7 +663,6 @@ test("one-off read methods wait for authorization before RPC", async () => {
   assert.deepEqual(await idsPromise, ["o1"])
   assert.deepEqual(await uniquePromise, ["open"])
   assert.deepEqual(calls, [
-    { method: "sync", payload: { from: "1970-01-01T00:00:00.000Z", sessionId: state.sync.sessionId } },
     { method: "getIds", payload: { table: "order", sort: { _id: 1 } } },
     { method: "getUnique", payload: { table: "order", field: "status" } }
   ])
@@ -874,12 +1016,26 @@ function memoryStorage() {
   }
 }
 
+function delayedSetCache(delay = 5) {
+  const cache = createMemoryCache()
+  return {
+    get: cache.get,
+    delete: cache.delete,
+    clear: cache.clear,
+    async set(...args) {
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      return cache.set(...args)
+    }
+  }
+}
+
 class FakeWebSocket {
   static OPEN = 1
   static CONNECTING = 0
 
   readyState = FakeWebSocket.OPEN
   listeners = new Map()
+  sent = []
 
   addEventListener(type, handler) {
     if (!this.listeners.has(type)) this.listeners.set(type, new Set())
@@ -893,7 +1049,15 @@ class FakeWebSocket {
     }
   }
 
-  send() {}
+  emit(type, event) {
+    for (const handler of this.listeners.get(type) ?? []) {
+      handler(event)
+    }
+  }
+
+  send(message) {
+    this.sent.push(message)
+  }
 }
 
 async function waitFor(check) {

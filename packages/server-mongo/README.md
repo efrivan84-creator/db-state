@@ -95,9 +95,12 @@ Server response:
 {
   type: "dbstate:rpc_result",
   id: "rpc1",
-  result: { ok: true, change }
+  result: { ok: true, change },
+  meta: { accessFiltered: true, fieldsFiltered: true, denied: 2 } // optional
 }
 ```
+
+`meta` is only present when the server has extra response information. `accessFiltered: true` means read permissions hid whole rows or log changes. `fieldsFiltered: true` means read field whitelists hid individual object/change fields. The normal `result` shape stays unchanged.
 
 Supported methods:
 
@@ -126,6 +129,8 @@ RPC is denied until the socket is authorized.
 | `add` | Inserts a document after `write` and `write.fields` checks. |
 | `update` | Applies `set` / `unset` after `write` and `write.fields` checks. |
 | `remove` | Deletes after document-level `write`; stores deleted object in `change.old`. |
+
+For read RPCs, the WebSocket `dbstate:rpc_result` envelope may include diagnostic metadata without changing `result`: `meta.accessFiltered = true` / `meta.denied = N` when whole rows or log changes were hidden, and `meta.fieldsFiltered = true` when field-level read rules removed properties from returned documents or changes.
 
 ## Auth
 

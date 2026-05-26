@@ -60,6 +60,7 @@ createDbStateServer(config: DbStateServerConfig): DbStateServer
 | `logCollection` | `string` | `"log"` | Log collection name. |
 | `permissionTable` | `string` | `"_permission"` | Permissions collection. |
 | `userTable` | `string` | `"_user"` | Users collection. |
+| `systemUserId` | `string` | `"system"` | Actor id written to `info.makeid` / `info.editid` and `change.userId` for internal writes without an authenticated user. |
 | `now` | `() => string` | `new Date().toISOString()` | Server clock. |
 | `syncLimit` | `number` | `1000` | Max changes per sync call. |
 | `changesBroadcastDelay` | `number` | `3000` | Debounce delay before waking clients after writes, ms. |
@@ -538,6 +539,8 @@ function handleRpc(
   message: { id: string; method: string; payload?: unknown }
 ): Promise<void>
 ```
+
+Default read handlers keep their normal `result` shape, but the `dbstate:rpc_result` envelope can include diagnostics: `meta.accessFiltered = true` and `meta.denied = N` when read permissions hide whole rows or log changes, plus `meta.fieldsFiltered = true` when read field whitelists remove object/change fields.
 
 Wrap or extend for tracing, rate limiting, custom methods:
 

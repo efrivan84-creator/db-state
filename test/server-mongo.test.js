@@ -234,6 +234,51 @@ test("update strips client info and writes server edit info", async () => {
   assert.equal(result.change.unset, undefined)
 })
 
+test("internal writes without a user use system actor metadata", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    now: () => "2026-05-21T10:00:01.000Z",
+    createLogId: () => "log1",
+    access: {
+      order: {
+        write: ({ req }) => req?.__internal === true ? true : undefined
+      }
+    }
+  })
+
+  const add = await server.add({
+    table: "order",
+    obj: { _id: "o1", status: "open" },
+    sessionId: "s1",
+    req: { __internal: true }
+  })
+
+  const update = await server.update({
+    table: "order",
+    id: "o1",
+    set: { status: "done" },
+    sessionId: "s1",
+    req: { __internal: true }
+  })
+
+  assert.deepEqual(await mongo.collection("order").findOne({ _id: "o1" }), {
+    _id: "o1",
+    status: "done",
+    info: {
+      makeid: "system",
+      makedata: "2026-05-21T10:00:01.000Z",
+      editid: "system",
+      editdata: "2026-05-21T10:00:01.000Z"
+    }
+  })
+  assert.equal(add.change.userId, "system")
+  assert.equal(add.change.obj.info.makeid, "system")
+  assert.equal(update.change.userId, "system")
+  assert.equal(update.change.set["info.editid"], "system")
+})
+
 test("socket hub exposes custom events without sending reserved dbstate messages from users", () => {
   const sent = []
   const server = createDbStateServer({
@@ -362,6 +407,119 @@ test("socket login returns user hash and auth enables RPC", async () => {
 
   const rpcResult = sent.find((message) => message.type === "dbstate:rpc_result")
   assert.equal(rpcResult.result.ok, true)
+})
+
+test("socket RPC marks list and count responses filtered by read access", async () => {
+  const sent = []
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    access: {
+      order: {
+        read: ({ obj }) => obj?.status === "open"
+      }
+    }
+  })
+  await mongo.collection("order").insertOne({ _id: "o1", status: "open" })
+  await mongo.collection("order").insertOne({ _id: "o2", status: "closed" })
+  const client = {
+    send(message) {
+      sent.push(JSON.parse(message))
+    }
+  }
+
+  server.socket.addClient(client, { user: { _id: "u1", groups: [] }, userId: "u1", sessionId: "s1" })
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:rpc",
+    id: "ids1",
+    method: "getIds",
+    payload: { table: "order", sort: { _id: 1 } }
+  }))
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:rpc",
+    id: "count1",
+    method: "count",
+    payload: { table: "order" }
+  }))
+
+  const ids = sent.find((message) => message.id === "ids1")
+  const count = sent.find((message) => message.id === "count1")
+  assert.deepEqual(ids.result, ["o1"])
+  assert.deepEqual(ids.meta, { accessFiltered: true, denied: 1 })
+  assert.equal(count.result, 1)
+  assert.deepEqual(count.meta, { accessFiltered: true, denied: 1 })
+})
+
+test("socket RPC marks load responses with fields filtered by read fields", async () => {
+  const sent = []
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    access: {
+      order: {
+        read: () => ({ allowed: true, fields: ["status"] })
+      }
+    }
+  })
+  await mongo.collection("order").insertOne({ _id: "o1", status: "open", margin: 120 })
+  const client = {
+    send(message) {
+      sent.push(JSON.parse(message))
+    }
+  }
+
+  server.socket.addClient(client, { user: { _id: "u1", groups: [] }, userId: "u1", sessionId: "s1" })
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:rpc",
+    id: "load1",
+    method: "load",
+    payload: { table: "order", id: "o1" }
+  }))
+
+  const load = sent.find((message) => message.id === "load1")
+  assert.deepEqual(load.result, { _id: "o1", status: "open" })
+  assert.deepEqual(load.meta, { fieldsFiltered: true })
+})
+
+test("socket RPC marks sync responses with fields filtered by read fields", async () => {
+  const sent = []
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    access: {
+      order: {
+        read: () => ({ allowed: true, fields: ["status"] }),
+        write: () => true
+      }
+    }
+  })
+  await mongo.collection("order").insertOne({ _id: "o1", status: "open", margin: 120 })
+  await server.update({
+    table: "order",
+    id: "o1",
+    set: { status: "done", margin: 180 },
+    sessionId: "writer"
+  })
+  const client = {
+    send(message) {
+      sent.push(JSON.parse(message))
+    }
+  }
+
+  server.socket.addClient(client, { user: { _id: "u1", groups: [] }, userId: "u1", sessionId: "reader" })
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:rpc",
+    id: "sync1",
+    method: "sync",
+    payload: { from: "1970-01-01T00:00:00.000Z", sessionId: "reader" }
+  }))
+
+  const sync = sent.find((message) => message.id === "sync1")
+  assert.deepEqual(sync.result.changes.map((change) => change.set), [{ status: "done" }])
+  assert.deepEqual(sync.meta, { fieldsFiltered: true })
 })
 
 test("socket login reuses existing user hash across tabs", async () => {

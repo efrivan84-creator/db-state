@@ -10,8 +10,6 @@ import {
   clearAllCountRefs,
   clearAllIdsRefs,
   createTableApi,
-  refreshAllCountRefs,
-  refreshAllIdsRefs,
   scheduleCountRefresh,
   scheduleIdsRefresh
 } from "./table.js"
@@ -84,8 +82,15 @@ export function createDbState(input) {
           sessionId: state.sync.sessionId
         })
 
+        const changedTables = new Set()
         for (const change of response.changes ?? []) {
-          await state.applyChange(change)
+          changedTables.add(change.table)
+          await state.applyChange(change, { refreshQueries: false })
+        }
+
+        for (const table of changedTables) {
+          scheduleCountRefresh(countRefs, table, options)
+          scheduleIdsRefresh(idsRefs, table, options)
         }
 
         state.sync.time1 = response.to
@@ -103,7 +108,7 @@ export function createDbState(input) {
       }
     },
 
-    async applyChange(change) {
+    async applyChange(change, { refreshQueries = true } = {}) {
       const wasLoaded = Boolean(tables[change.table]?.[change.id]?.__loaded)
       const oldObj = change.action === "delete" ? (change.old ?? tables[change.table]?.[change.id]) : undefined
       applyReactiveChange(tables, change)
@@ -112,36 +117,42 @@ export function createDbState(input) {
         tables[change.table][change.id].__loaded = true
       }
       await writeCache(options.cache, change, tables[change.table]?.[change.id], wasLoaded)
-      scheduleCountRefresh(countRefs, change.table, options)
-      scheduleIdsRefresh(idsRefs, change.table, options)
+      if (refreshQueries) {
+        scheduleCountRefresh(countRefs, change.table, options)
+        scheduleIdsRefresh(idsRefs, change.table, options)
+      }
       notifyChangeHooks(changeHooks, options, change, obj, oldObj)
     },
 
     async clearLocalDB() {
-      options.metaStorage.removeItem(options.syncKey)
-      options.sessionStorage.removeItem(options.sessionKey)
-      await options.cache.clear()
-      state.sync.time1 = "1970-01-01T00:00:00.000Z"
-
-      for (const table of options.tables) {
-        for (const id of Object.keys(tables[table])) {
-          delete tables[table][id]
-        }
-      }
-
-      clearAllCountRefs(countRefs)
-      clearAllIdsRefs(idsRefs)
+      await resetLocalState({
+        clearSession: true,
+        countRefs,
+        idsRefs,
+        options,
+        persistTime: false,
+        state,
+        tables,
+        time1: "1970-01-01T00:00:00.000Z"
+      })
     },
 
     async login(login, password) {
       const result = await state.socket.system(DB_STATE_MESSAGES.login, { login, password })
+      await resetLocalState({
+        clearSession: false,
+        countRefs,
+        idsRefs,
+        options,
+        persistTime: true,
+        state,
+        tables,
+        time1: new Date().toISOString()
+      })
       saveAuth(options, result)
       state.auth.userId = result.userId
       state.auth.hash = result.hash
       state.auth.status = "authorized"
-      await syncAfterAuth(state, options)
-      await refreshAllCountRefs(countRefs)
-      await refreshAllIdsRefs(idsRefs)
       await retryUnloadedTables(state, options)
       return result
     },
@@ -282,6 +293,28 @@ async function syncWhenReady(state, options) {
 
 async function syncAfterAuth(state, options) {
   if (options.syncOnAuth) await state.syncNow()
+}
+
+async function resetLocalState(input) {
+  const { clearSession, countRefs, idsRefs, options, persistTime, state, tables, time1 } = input
+  if (persistTime) {
+    options.metaStorage.setItem(options.syncKey, time1)
+  } else {
+    options.metaStorage.removeItem(options.syncKey)
+  }
+  if (clearSession) options.sessionStorage.removeItem(options.sessionKey)
+
+  await options.cache.clear()
+  state.sync.time1 = time1
+
+  for (const table of options.tables) {
+    for (const id of Object.keys(tables[table])) {
+      delete tables[table][id]
+    }
+  }
+
+  clearAllCountRefs(countRefs)
+  clearAllIdsRefs(idsRefs)
 }
 
 function saveAuth(options, result) {

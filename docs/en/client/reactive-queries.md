@@ -254,11 +254,11 @@ A `countRef` / `idsRef` server refresh happens in exactly these cases:
 | Trigger | Refreshed? |
 |---|:---:|
 | First explicit `login()` | ✅ |
-| `authByHash` with a ref that missed cache | ✅ |
+| `authByHash` / `autoAuth` where sync applies changes for the ref table | ✅ |
+| `authByHash` / `autoAuth` with cached refs and no table changes | ❌ cached value stays |
 | Local `update`/`add`/`remove` succeeds | ✅ (debounced) |
 | Server pushes `changes_available` for this table | ✅ (debounced) |
-| `authByHash` with a cached ref | ❌ unless sync brings changes |
-| Page refresh / `restored` auth | ❌ |
+| Page refresh / `restored` auth before socket auth completes | ❌, cached value only |
 | Optional background safety-sync interval | ✅ if enabled and sync brings changes |
 
 The debounce window is `countRefreshDelay` / `idsRefreshDelay` (default 50 ms). This lets bulk imports coalesce into a single server call instead of N.

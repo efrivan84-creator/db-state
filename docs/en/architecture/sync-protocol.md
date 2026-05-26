@@ -59,9 +59,16 @@ Server → client:
     "changes": [
       { "logId": "...", "createdAt": "...", "table": "order", "id": "o1", "action": "update", "set": { ... }, ... }
     ]
+  },
+  "meta": {
+    "accessFiltered": true,
+    "fieldsFiltered": true,
+    "denied": 3
   }
 }
 ```
+
+`meta` is optional. `accessFiltered: true` means some whole rows or log changes in the response window were hidden by read permissions. `fieldsFiltered: true` means field-level read rules removed individual object/change fields. The `result` shape stays unchanged.
 
 The client applies changes in order to the reactive store, persists each affected document to cache, and writes `to` as the new `time1` only after the whole response has been processed. The UI can observe intermediate reactive updates while a large batch is being applied, but the stored cursor only advances after the batch is done.
 
@@ -269,5 +276,5 @@ To reset and resync everything (useful in debugging):
 
 ```js
 await state.clearLocalDB()  // wipes cache + time1
-await state.login(...)      // forces fresh sync
+await state.login(...)      // clears local cache and starts from a fresh cursor
 ```

@@ -178,7 +178,7 @@ Important behavior:
 - `listRef(query)` is `idsRef(query)` plus `load(id)`, so tables and detail panels stay connected.
 - `idsRef` and `countRef` are deduplicated. The same query returns the same ref.
 - `idsRef` and `countRef` are persisted in IndexedDB, so lists and counters render before the socket reconnects.
-- Query refs refresh after login, local writes, and synced table changes.
+- Query refs refresh after login, local writes, and synced changes for their table.
 
 ## Permissions
 

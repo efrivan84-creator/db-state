@@ -92,9 +92,12 @@ await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 {
   type: "dbstate:rpc_result",
   id: "rpc1",
-  result: { ok: true, change }
+  result: { ok: true, change },
+  meta: { accessFiltered: true, fieldsFiltered: true, denied: 2 } // optional
 }
 ```
+
+`meta` присутствует только когда серверу нужно передать дополнительную информацию об ответе. `accessFiltered: true` означает, что права чтения скрыли целые строки или изменения лога. `fieldsFiltered: true` означает, что field-level правила чтения скрыли отдельные свойства объекта или изменения. Обычная форма `result` не меняется.
 
 Поддерживаемые методы:
 
@@ -123,6 +126,8 @@ RPC отклоняется, пока сокет не авторизован.
 | `add` | Вставляет документ после проверки `write` и `write.fields`. |
 | `update` | Применяет `set` / `unset` после проверки `write` и `write.fields`. |
 | `remove` | Удаляет после document-level `write`; сохраняет удалённый объект в `change.old`. |
+
+Для read RPC WebSocket envelope `dbstate:rpc_result` может содержать диагностический `meta` без изменения `result`: `meta.accessFiltered = true` / `meta.denied = N`, если были скрыты целые строки или изменения лога, и `meta.fieldsFiltered = true`, если field-level правила чтения удалили свойства из возвращаемых документов или изменений.
 
 ## Аутентификация
 

@@ -114,7 +114,7 @@ export interface DbStateOptions<TSchema extends DbStateSchema = DbStateSchema> {
   rpcTimeout?: number
   /** Background safety-sync interval, ms. Default `0` (disabled). */
   safetySyncInterval?: number
-  /** Run `syncNow()` after successful login/hash auth. Default `true`. */
+  /** Run `syncNow()` after successful hash auth/reconnect. `login()` does not sync. Default `true`. */
   syncOnAuth?: boolean
   /** Default wait timeout for `getAsync`, ms. Default `15000`. */
   waitTimeout?: number
@@ -184,7 +184,7 @@ export type DbState<TSchema extends DbStateSchema = DbStateSchema> =
     syncNow(): Promise<void>
 
     /** Applies a single change locally (used internally by RPCs and sync). */
-    applyChange(change: Change): Promise<void>
+    applyChange(change: Change, options?: { refreshQueries?: boolean }): Promise<void>
 
     /**
      * Wipes the IndexedDB cache, the in-memory reactive tables, the

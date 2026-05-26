@@ -103,6 +103,7 @@ createDbStateServer({
   logCollection:    "log",       // log collection name
   permissionTable:  "_permission",
   userTable:        "_user",
+  systemUserId:     "system",    // actor for internal writes without a user
   now:              () => new Date().toISOString(),  // server clock
   syncLimit:        1000,        // max changes per sync call
   socket:           adapter      // out-of-process broadcast adapter
