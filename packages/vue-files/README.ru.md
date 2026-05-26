@@ -30,3 +30,5 @@ files.url(uploaded.token) // /f/<token>
 
 Optional `key` участвует в `state.getKeyRef(key)`, поэтому одна форма может
 показывать общий progress для передачи файла и следующей записи через db-state.
+
+Полная документация: [docs/ru/files.md](https://github.com/efrivan84-creator/db-state/blob/main/docs/ru/files.md).

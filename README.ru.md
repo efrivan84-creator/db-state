@@ -367,6 +367,7 @@ viewer / viewer    // demo2
 
 - [Полная документация](docs/en/README.md)
 - [Реактивные запросы](docs/en/client/reactive-queries.md)
+- [Файлы](docs/ru/files.md)
 - [Права доступа](docs/en/server/permissions.md)
 - [Sync protocol](docs/en/architecture/sync-protocol.md)
 - [Cookbook админки](docs/en/cookbook/admin-panel.md)

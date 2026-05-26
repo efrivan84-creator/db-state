@@ -33,8 +33,8 @@ uploads/
 
 The module automatically adds the `file` table. Owners can read their file
 metadata through `state.file`, but `storageKey` is never exposed to clients.
-Direct `file` table writes are denied; upload, download, policy changes and
-deletes should go through the file API.
+Direct `file` table writes are denied; the public v1 API exposes upload and
+download, while delete/policy helpers are reserved for a later file API.
 
 Download access is `token + downloadPolicy`:
 
@@ -42,3 +42,5 @@ Download access is `token + downloadPolicy`:
 - `registered`: token plus authenticated user;
 - `verified`: token plus email/phone verification flags on the authenticated user;
 - `groups`: token plus membership in one of the configured groups.
+
+Full documentation: [docs/en/files.md](https://github.com/efrivan84-creator/db-state/blob/main/docs/en/files.md).

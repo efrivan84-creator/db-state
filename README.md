@@ -367,6 +367,7 @@ viewer / viewer    // demo2
 
 - [Full documentation](docs/en/README.md)
 - [Reactive queries](docs/en/client/reactive-queries.md)
+- [Files](docs/en/files.md)
 - [Permissions](docs/en/server/permissions.md)
 - [Sync protocol](docs/en/architecture/sync-protocol.md)
 - [Admin panel cookbook](docs/en/cookbook/admin-panel.md)

@@ -33,8 +33,8 @@ uploads/
 
 Модуль автоматически добавляет таблицу `file`. Владелец видит metadata через
 `state.file`, но `storageKey` никогда не отдается клиенту. Прямые записи в
-таблицу `file` запрещены; upload, download, изменение policy и удаление должны
-идти через file API.
+таблицу `file` запрещены; public v1 API дает upload и download, а delete/policy
+helpers зарезервированы для следующего file API.
 
 Доступ к скачиванию проверяется как `token + downloadPolicy`:
 
@@ -42,3 +42,5 @@ uploads/
 - `registered`: token плюс авторизованный пользователь;
 - `verified`: token плюс verified email/phone на пользователе;
 - `groups`: token плюс участие в одной из групп.
+
+Полная документация: [docs/ru/files.md](https://github.com/efrivan84-creator/db-state/blob/main/docs/ru/files.md).

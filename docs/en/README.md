@@ -8,6 +8,12 @@ Full documentation for the [db-state](https://github.com/efrivan84-creator/db-st
 - [Scope and use cases](scope-and-use-cases.md) — what kinds of projects db-state covers, how it layers under custom ultra-low-latency code, where the line is.
 - [FAQ](faq.md) — quick answers to the most common questions.
 
+## Files
+
+How to use `@db-state/server-files` and `@db-state/vue-files`.
+
+- [Files](files.md) - setup, metadata model, upload/download API, `dbfile:*` protocol, token policies, storage adapters, recipes and limitations.
+
 ## Client (Vue 3)
 
 How to use `@db-state/vue` in a Vue 3 app.
