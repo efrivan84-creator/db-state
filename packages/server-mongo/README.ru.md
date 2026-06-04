@@ -414,10 +414,10 @@ beforeWrite  afterWrite  errorWrite
 
 ## Полезные ссылки
 
-- Полная документация: [docs/en](../../docs/en/README.md)
-- Настройка сервера: [docs/en/server/setup.md](../../docs/en/server/setup.md)
-- Права доступа: [docs/en/server/permissions.md](../../docs/en/server/permissions.md)
-- Sync protocol: [docs/en/architecture/sync-protocol.md](../../docs/en/architecture/sync-protocol.md)
+- Полная документация: [docs/ru](../../docs/ru/README.md)
+- Настройка сервера: [docs/ru/server/setup.md](../../docs/ru/server/setup.md)
+- Права доступа: [docs/ru/server/permissions.md](../../docs/ru/server/permissions.md)
+- Sync protocol: [docs/ru/architecture/sync-protocol.md](../../docs/ru/architecture/sync-protocol.md)
 
 ## Внутренние файлы
 

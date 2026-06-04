@@ -320,7 +320,7 @@ test("client does not start safety sync interval by default", () => {
   }
 })
 
-test("login clears local data, moves sync cursor to now, and does not run sync", async () => {
+test("login clears stale local data, moves sync cursor to now, and retries active reads without sync", async () => {
   const cache = createMemoryCache()
   await cache.set("order", "old", { _id: "old", status: "cached" })
   const storage = testStorage()
@@ -331,24 +331,109 @@ test("login clears local data, moves sync cursor to now, and does not run sync",
     ...storage,
     tables: ["order"]
   })
-  state.order.items.old = { _id: "old", status: "memory", __loaded: true }
   const calls = []
   state.socket.system = async () => ({ userId: "u1", hash: "h1", ok: true })
   state.socket.rpc = async (method, payload) => {
     calls.push({ method, payload })
+    if (method === "load") return { _id: payload.id, status: "fresh" }
     throw new Error("login should not run sync RPC")
   }
+
+  const oldDoc = state.order.load("old")
+  await waitFor(() => oldDoc.__loaded)
+  assert.equal(oldDoc.status, "cached")
 
   const before = Date.now()
   await state.login("ivan", "secret")
   const cursor = state.sync.time1
 
-  assert.deepEqual(calls, [])
-  assert.equal(await cache.get("order", "old"), undefined)
-  assert.equal(state.order.items.old, undefined)
+  assert.deepEqual(calls, [{ method: "load", payload: { table: "order", id: "old" } }])
+  assert.deepEqual(await cache.get("order", "old"), { _id: "old", status: "fresh" })
+  assert.equal(state.order.items.old, oldDoc)
+  assert.equal(oldDoc.status, "fresh")
   assert.equal(storage.metaStorage.getItem("db-state.time1"), cursor)
   assert.ok(Date.parse(cursor) >= before)
   assert.ok(Date.parse(cursor) <= Date.now())
+})
+
+test("load before manual login retries the same reactive object after authorization", async () => {
+  const cache = createMemoryCache()
+  const state = createDbState({
+    autoConnect: false,
+    cache,
+    safetySyncInterval: 0,
+    ...testStorage(),
+    tables: ["order"]
+  })
+  const calls = []
+  state.socket.system = async (type, payload) => {
+    calls.push({ method: type, payload })
+    return { userId: "u1", hash: "h1", ok: true }
+  }
+  state.socket.rpc = async (method, payload) => {
+    calls.push({ method, payload })
+    if (method === "load") return { _id: payload.id, status: "fresh" }
+    throw new Error("manual login should only retry the pre-auth load")
+  }
+
+  const doc = state.order.load("o1")
+  await waitFor(() => doc.__cacheChecked)
+
+  assert.equal(doc.__loaded, false)
+  assert.deepEqual(calls, [])
+
+  await state.login("ivan", "secret")
+  await waitFor(() => doc.__loaded)
+
+  assert.equal(state.order.load("o1"), doc)
+  assert.equal(doc.status, "fresh")
+  assert.deepEqual(calls, [
+    { method: "dbstate:login", payload: { login: "ivan", password: "secret" } },
+    { method: "load", payload: { table: "order", id: "o1" } }
+  ])
+})
+
+test("login clears stale cached load in place before retrying it", async () => {
+  const cache = createMemoryCache()
+  await cache.set("order", "o1", { _id: "o1", status: "cached-from-previous-session" })
+  const state = createDbState({
+    autoConnect: false,
+    cache,
+    safetySyncInterval: 0,
+    ...testStorage(),
+    tables: ["order"]
+  })
+  let resolveLoad
+  const calls = []
+  state.socket.system = async (type, payload) => {
+    calls.push({ method: type, payload })
+    return { userId: "u1", hash: "h1", ok: true }
+  }
+  state.socket.rpc = async (method, payload) => {
+    calls.push({ method, payload })
+    if (method !== "load") throw new Error("manual login should only retry the pre-auth load")
+    await new Promise((resolve) => {
+      resolveLoad = resolve
+    })
+    return { _id: payload.id, status: "fresh-after-login" }
+  }
+
+  const doc = state.order.load("o1")
+  await waitFor(() => doc.__loaded)
+  assert.equal(doc.status, "cached-from-previous-session")
+
+  const loginPromise = state.login("ivan", "secret")
+  await waitFor(() => calls.some((call) => call.method === "load"))
+
+  assert.equal(doc.__loaded, false)
+  assert.equal("status" in doc, false)
+
+  resolveLoad()
+  await loginPromise
+
+  assert.equal(state.order.load("o1"), doc)
+  assert.equal(doc.__loaded, true)
+  assert.equal(doc.status, "fresh-after-login")
 })
 
 test("autoAuth refreshes uncached reactive refs after authorization", async () => {

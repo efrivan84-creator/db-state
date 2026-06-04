@@ -369,12 +369,12 @@ viewer / viewer    // demo2
 
 ## Документация
 
-- [Полная документация](docs/en/README.md)
-- [Реактивные запросы](docs/en/client/reactive-queries.md)
+- [Полная документация](docs/ru/README.md)
+- [Реактивные запросы](docs/ru/client/reactive-queries.md)
 - [Файлы](docs/ru/files.md)
-- [Права доступа](docs/en/server/permissions.md)
-- [Sync protocol](docs/en/architecture/sync-protocol.md)
-- [Cookbook админки](docs/en/cookbook/admin-panel.md)
+- [Права доступа](docs/ru/server/permissions.md)
+- [Sync protocol](docs/ru/architecture/sync-protocol.md)
+- [Cookbook админки](docs/ru/cookbook/admin-panel.md)
 - [Changelog](CHANGELOG.ru.md)
 
 ## Статус проекта

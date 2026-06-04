@@ -2,6 +2,10 @@
 
 Release notes and project status for db-state.
 
+## Unreleased
+
+- Vue `login()` now resets already-returned reactive documents in place instead of deleting them from the table registry, so `load()` calls made before manual authorization keep their object identity, clear stale cached fields, and retry through `load` RPC after authorization.
+
 ## 0.0.10
 
 - Vue `login()` now starts from a clean client state: it clears local document/query cache and in-memory tables, moves `time1` to the current login moment, and does not run `syncNow()`.

@@ -321,10 +321,10 @@ import {
 
 ## Полезные ссылки
 
-- Полная документация: [docs/en](../../docs/en/README.md)
-- Реактивные запросы: [docs/en/client/reactive-queries.md](../../docs/en/client/reactive-queries.md)
-- Кэш и офлайн: [docs/en/client/cache-and-offline.md](../../docs/en/client/cache-and-offline.md)
-- Cookbook админки: [docs/en/cookbook/admin-panel.md](../../docs/en/cookbook/admin-panel.md)
+- Полная документация: [docs/ru](../../docs/ru/README.md)
+- Реактивные запросы: [docs/ru/client/reactive-queries.md](../../docs/ru/client/reactive-queries.md)
+- Кэш и офлайн: [docs/ru/client/cache-and-offline.md](../../docs/ru/client/cache-and-offline.md)
+- Cookbook админки: [docs/ru/cookbook/admin-panel.md](../../docs/ru/cookbook/admin-panel.md)
 
 ## Внутренние файлы
 

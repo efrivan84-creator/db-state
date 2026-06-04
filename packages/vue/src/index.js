@@ -309,12 +309,25 @@ async function resetLocalState(input) {
 
   for (const table of options.tables) {
     for (const id of Object.keys(tables[table])) {
-      delete tables[table][id]
+      resetRecord(tables[table][id], id)
     }
   }
 
   clearAllCountRefs(countRefs)
   clearAllIdsRefs(idsRefs)
+}
+
+function resetRecord(target, id) {
+  for (const key of Object.keys(target)) {
+    delete target[key]
+  }
+
+  Object.assign(target, {
+    id,
+    _id: id,
+    __cacheChecked: false,
+    __loaded: false
+  })
 }
 
 function saveAuth(options, result) {

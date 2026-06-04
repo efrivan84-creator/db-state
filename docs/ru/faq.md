@@ -1,0 +1,83 @@
+# FAQ
+
+> [English](../en/faq.md) · **Русский**
+
+## Общее
+
+### Зачем еще одна state-библиотека?
+
+db-state не заменяет Pinia или локальный Vue state. Он закрывает повторяющуюся цепочку `MongoDB -> server API -> WebSocket -> cache -> Vue state`, чтобы документы базы можно было читать как reactive objects и синхронизировать между пользователями.
+
+### Готово ли это к production?
+
+Проект в ранней версии `0.0.x`: ядро, Vue-клиент, Mongo-сервер, permissions, auth, sync, файлы и тесты уже есть, но API еще pre-1.0. Для внутренней админки или контролируемого B2B-проекта это уже практично; для публичной платформы стоит внимательно пройти ограничения из changelog.
+
+### Что с конфликтами одновременного редактирования?
+
+Автоматического optimistic locking нет. Последняя запись в одно поле побеждает, но append-only log хранит все изменения. Для форм рекомендуется отправлять diff, а не весь документ: тогда два пользователя, меняющие разные поля, не конфликтуют.
+
+### Почему только Vue и MongoDB?
+
+Текущий официальный клиент использует Vue reactivity, а серверный пакет реализован поверх MongoDB. `@db-state/core` не зависит от фреймворка, поэтому другие клиенты и backend adapters возможны, но не входят в текущий релиз.
+
+### Какой реальный bundle size?
+
+Размеры указаны в README и package descriptions: `@db-state/vue` около 6 KB min+gzip / 5.4 KB brotli, `@db-state/core` около 1.2 KB min+gzip. Это небольшой runtime, потому что библиотека не включает schema/migration слой и не тянет крупные state managers.
+
+## Клиент
+
+### `listRef` отписывается при unmount?
+
+`listRef` возвращает deduplicated ref на уровне state object, а не subscription на компонент. Он живет, пока живет `state`. Это осознанная модель: повторный заход на страницу получает тот же ref и кэшированное значение.
+
+### Обязательно ли передавать `key` в `load(id, key)`?
+
+Нет. `key` нужен только если UI хочет общий loading/progress объект через `state.getKeyRef(key)`. Сам reactive document и кэш работают без key.
+
+### Можно ли без TypeScript?
+
+Да. Все runtime API работают из JavaScript. TypeScript generic нужен только для типизации table names, filters, sort и update payloads.
+
+### Где хранится entity cache?
+
+По умолчанию документы и query refs хранятся в IndexedDB, `time1` и auth hash - в `localStorage`, `sessionId` - в `sessionStorage`. Можно подключить `createStorageCache`, `createMemoryCache` или свой backend.
+
+### Как сбросить устаревший кэш после изменения схемы?
+
+Вызови `await state.clearLocalDB()` или смени `cacheName`/storage keys при деплое. После сброса `time1` возвращается к началу, и следующий sync перечитает log.
+
+## Сервер
+
+### Права проверяются на сервере или только на клиенте?
+
+Только серверное решение имеет значение. Каждый RPC проходит через code access rules и `_permission`; field-level правила применяются к `load`, `getUnique`, `sync`, `add` и `update`.
+
+### Как хранятся пароли?
+
+В `_user.passwordHash`. Дефолтный адаптер использует PBKDF2 из Node `crypto`. Для production можно подключить bcrypt, Argon2 или корпоративный password service.
+
+### Может ли пользователь быть залогинен на нескольких устройствах?
+
+Да. `_user.hash` общий для пользователя и переиспользуется при логине. Новая вкладка не сбрасывает старую. Чтобы разлогинить все устройства, ротируй `_user.hash`.
+
+### Что будет при 1000 подключенных клиентах?
+
+Сервер рассылает только wake-up сигнал `dbstate:changes_available`; сами изменения клиенты забирают через `sync`. Broadcast можно debounce/rate-limit, а для multi-process добавить adapter через Redis/NATS.
+
+### Насколько большим может быть log?
+
+Миллионы записей нормальны при индексе `{ createdAt: 1, logId: 1 }`. Для очень высокого write volume нужны retention, snapshots или continuation cursor по `{ createdAt, logId }`.
+
+## Roadmap и вклад
+
+### Будет ли поддержка операторов в `_permission.if`?
+
+Сейчас `if` поддерживает equality-style matching. В roadmap есть операторы вроде `$in`, `$ne`, `$gte` и сравнения с полями пользователя.
+
+### Будет ли React?
+
+Возможен отдельный клиент поверх `@db-state/core`, но текущий официальный frontend package - Vue 3.
+
+### Как предлагать изменения?
+
+Открывай issue или PR. Хороший PR включает тесты, обновление английской и русской документации и не меняет публичный API без записи в changelog.
