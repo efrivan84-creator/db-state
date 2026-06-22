@@ -118,7 +118,7 @@ type Schema = {
   }
 }
 
-const state = createDbState<Schema>({ tables: ["order"] })
+const state = createDbState<Schema>({ tables: ["order", "_user"] })
 state._user.load("u1").fullName    // ✅ typed
 ```
 

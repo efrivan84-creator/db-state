@@ -64,6 +64,22 @@ new WebSocketServer({ port: 8788, path: "/db-state/ws" })
 - forwards non-JSON raw frames to the file module;
 - runs file cleanup when a socket closes.
 
+If the server uses `servicePrefix: "cfg"` and the file module does not set an explicit `table`,
+the metadata table becomes `cfg_file`. You can also set it directly:
+
+```js
+const files = createFileModule({
+  servicePrefix: "cfg",
+  storage: "./uploads"
+})
+```
+
+Use the same prefix or explicit table name on the client:
+
+```js
+export const files = createFileClient(state, { servicePrefix: "cfg" })
+```
+
 ## Client Setup
 
 ```js

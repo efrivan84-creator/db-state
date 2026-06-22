@@ -77,7 +77,7 @@ export type AuthStatus = "anonymous" | "authorizing" | "authorized" | "restored"
 
 /** Options accepted by {@link createDbState}. */
 export interface DbStateOptions<TSchema extends DbStateSchema = DbStateSchema> {
-  /** Application tables. Service tables are added automatically. */
+  /** Tables exposed on the client. Service tables must be listed explicitly when needed. */
   tables: ReadonlyArray<keyof TSchema & string>
 
   /** WebSocket URL. Defaults to `${ws-mapped origin}/db-state/ws`. */

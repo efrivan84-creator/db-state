@@ -12,7 +12,7 @@ This package has no Vue or MongoDB dependency. It defines the common language us
 - The normalized `Change` shape used by CRUD, sync, cache updates, and audit.
 - Dot-path helpers for nested update fields like `"profile.city"`.
 - Patch helpers that apply `set` / `unset` updates without replacing the whole object.
-- Service-table normalization: `_user`, `_group`, and `_permission` are always included.
+- Table-name normalization keeps only explicitly supplied names; service tables are opt-in.
 - Session id creation and sync-window filtering for echo suppression.
 - No runtime dependencies and no browser/server assumptions.
 
@@ -73,13 +73,13 @@ import {
 | `createChange` | Builds a compact normalized change record. |
 | `applyChange`, `applyPatch` | Applies insert/update/delete changes to local objects. |
 | `getByPath`, `setByPath`, `unsetByPath` | Reads and writes nested fields by dot path. |
-| `normalizeTables` | Adds service tables to an app table list. |
+| `normalizeTables` | Deduplicates an explicit table list. |
 | `createSessionId` | Creates a per-tab/session id for echo suppression. |
 | `filterSyncChanges` | Filters log entries by `(from, to]` and skips the caller session. |
 
 ## Rules
 
-- `normalizeTables(tables)` adds `_user`, `_group`, and `_permission`.
+- `normalizeTables(tables)` deduplicates the names you pass. Add `_user`, `_group`, and `_permission` explicitly when you want to expose them.
 - `createdAt > time1 && createdAt <= time2` is the sync window.
 - `sessionId` is used to avoid sending a client its own confirmed changes.
 - `set` supports dot-path fields like `"profile.city"`.

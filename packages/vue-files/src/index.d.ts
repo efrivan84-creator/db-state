@@ -50,5 +50,5 @@ export interface FileClient {
 
 export function createFileClient<TState extends DbState>(
   state: TState & { file?: TableApi<FileRecord> },
-  options?: { table?: string; urlPrefix?: string }
+  options?: { table?: string; servicePrefix?: string; prefix?: string; urlPrefix?: string }
 ): FileClient

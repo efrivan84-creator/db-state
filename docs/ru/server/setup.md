@@ -22,7 +22,36 @@ new WebSocketServer({ port: 8788, path: "/db-state/ws" })
   .on("connection", (ws) => dbState.socket.addClient(ws))
 ```
 
-`tables` содержит только прикладные таблицы. `_user`, `_group` и `_permission` добавляются автоматически.
+Порт и path относятся к твоему WebSocket server, а не к Mongo/server config. Их можно
+вынести в env:
+
+```js
+const wsPort = Number(process.env.DB_STATE_WS_PORT ?? 8788)
+const wsPath = process.env.DB_STATE_WS_PATH ?? "/db-state/ws"
+
+new WebSocketServer({ port: wsPort, path: wsPath })
+  .on("connection", (ws) => dbState.socket.addClient(ws))
+```
+
+`tables` содержит только таблицы, которые нужно открыть через CRUD/RPC API. Служебные таблицы
+`_user`, `_group` и `_permission` не добавляются автоматически: укажи их явно, если админке
+нужно читать или редактировать их через db-state.
+
+Если нужно поднять несколько независимых db-state серверов в одной MongoDB database,
+задай `servicePrefix`/`prefix`:
+
+```js
+const dbState = createDbStateServer({
+  mongo,
+  tables: ["order"],
+  servicePrefix: "cfg"
+})
+```
+
+Тогда служебные коллекции будут `cfg_user`, `cfg_group`, `cfg_permission`, а log — `cfg_log`.
+Без prefix сохраняются старые имена: `_user`, `_group`, `_permission`, `log`.
+Если эти таблицы нужно открыть клиенту, добавь prefixed имена в `tables`, например
+`["order", "cfg_user", "cfg_group", "cfg_permission", "cfg_log"]`.
 
 ## Обязательные индексы MongoDB
 
@@ -30,6 +59,8 @@ new WebSocketServer({ port: 8788, path: "/db-state/ws" })
 await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
 await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
 ```
+
+С `servicePrefix: "cfg"` используй соответственно `cfg_log` и `cfg_permission`.
 
 Для прикладных запросов добавляй обычные Mongo indexes под свои filters/sorts:
 
@@ -81,6 +112,11 @@ await mongo.collection("_permission").updateOne(
 | `hooks` | `{}` | Lifecycle hooks. |
 | `socket` | `{}` | Socket hub options. |
 | `password` | PBKDF2 adapter | Password hasher/verifier. |
+| `servicePrefix` / `prefix` | unset | Prefix для служебных коллекций: `cfg_user`, `cfg_group`, `cfg_permission`, `cfg_log`. |
+| `logCollection` | `"log"` | Имя log-коллекции; переопределяет prefix для log. |
+| `userTable` | `"_user"` | Имя таблицы пользователей; переопределяет prefix для users. |
+| `groupTable` | `"_group"` | Имя таблицы групп; переопределяет prefix для groups. |
+| `permissionTable` | `"_permission"` | Имя таблицы permissions; переопределяет prefix для permissions. |
 | `now` | `new Date().toISOString()` | Server clock. |
 | `id` | random id | Generator для log/doc ids. |
 | `syncLimit` | `1000` | Максимум changes за sync. |

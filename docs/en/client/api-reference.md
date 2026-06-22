@@ -44,7 +44,7 @@ createDbState<Schema>(["order", "product"])
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
-| `tables` | `string[]` | required | App tables. `_user`, `_group`, `_permission` added automatically. |
+| `tables` | `string[]` | required | Tables exposed on the client. Add `_user`, `_group`, `_permission` explicitly when needed. |
 | `wsUrl` | `string` | `${ws-mapped origin}/db-state/ws` | WebSocket URL. |
 | `autoConnect` | `boolean` | `true` | Open the socket immediately. |
 | `autoAuth` | `boolean` | `true` | Try `authByHash` on socket open. |

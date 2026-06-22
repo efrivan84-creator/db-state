@@ -25,9 +25,29 @@ export const DB_STATE_MESSAGES = Object.freeze({
 })
 
 export const SERVICE_TABLES = Object.freeze(["_user", "_group", "_permission"])
+export const SERVICE_TABLE_BASE_NAMES = Object.freeze(["user", "group", "permission"])
 
-export function normalizeTables(tables) {
-  return [...new Set([...tables, ...SERVICE_TABLES])]
+export function normalizeServicePrefix(input) {
+  const prefix = input && typeof input === "object"
+    ? input.servicePrefix ?? input.prefix
+    : input
+  const value = String(prefix ?? "").trim().replace(/_+$/g, "")
+  return value || undefined
+}
+
+export function createPrefixedTableName(prefix, name, fallback = name) {
+  const normalized = normalizeServicePrefix(prefix)
+  return normalized ? `${normalized}_${name}` : fallback
+}
+
+export function createServiceTableNames(prefix) {
+  const normalized = normalizeServicePrefix(prefix)
+  if (!normalized) return [...SERVICE_TABLES]
+  return SERVICE_TABLE_BASE_NAMES.map((name) => `${normalized}_${name}`)
+}
+
+export function normalizeTables(tables, extraTables = []) {
+  return [...new Set([...(tables ?? []), ...extraTables])]
 }
 
 export function createSessionId(userId = "user", random = defaultRandom) {

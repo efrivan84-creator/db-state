@@ -24,7 +24,7 @@ Create one state object and use it across the app:
 import { createDbState } from "@db-state/vue"
 
 export const state = createDbState({
-  tables: ["order"],
+  tables: ["order", "_user", "_group", "_permission"],
   wsUrl: "ws://127.0.0.1:8788/db-state/ws",
   sessionKey: "admin.sessionId",
   syncKey: "admin.time1",
@@ -33,7 +33,7 @@ export const state = createDbState({
 })
 ```
 
-Service tables are added automatically, so this also exposes:
+Service tables are listed explicitly to expose them in the admin UI:
 
 ```js
 state._user

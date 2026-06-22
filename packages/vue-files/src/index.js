@@ -1,7 +1,9 @@
+import { createPrefixedTableName } from "@db-state/core"
+
 const DEFAULT_CHUNK_SIZE = 512 * 1024
 
 export function createFileClient(state, options = {}) {
-  const table = options.table ?? "file"
+  const table = options.table ?? createPrefixedTableName(options.servicePrefix ?? options.prefix, "file", "file")
   const uploads = new Map()
   const downloads = new Map()
   let activeDownload

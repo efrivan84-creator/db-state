@@ -62,9 +62,11 @@ await state.order.update({ id: "o1", set: { status: "closed" } })
 
 Служебные таблицы (`_user`, `_group`, `_permission`) типизированы автоматически с разумными дефолтами и могут быть переопределены в схеме.
 
-`_user`, `_group` и `_permission` добавляются автоматически:
+Укажи служебные таблицы явно, если они нужны UI:
 
 ```js
+createDbState({ tables: ["order", "_user", "_group", "_permission"] })
+
 state._user.load(userId)
 state._group.getIds()
 state._permission.getIds()

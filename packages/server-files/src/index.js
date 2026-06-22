@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto"
 import { appendFile, mkdir, readFile, rename, rm, stat } from "node:fs/promises"
 import path from "node:path"
 
+import { createPrefixedTableName, normalizeServicePrefix } from "@db-state/core"
+
 const DEFAULT_CHUNK_SIZE = 512 * 1024
 const DEFAULT_MAX_SIZE = 50 * 1024 * 1024
 const FILE_FIELDS = ["ownerId", "token", "name", "mime", "size", "status", "downloadPolicy", "info"]
@@ -64,6 +66,13 @@ export function createFileModule(input = {}) {
       const upload = uploads.get(client)
       downloads.delete(client)
       if (upload) await failUpload(client, upload)
+    },
+
+    withServicePrefix(prefix) {
+      if (input.table || input.servicePrefix != null || input.prefix != null) return module
+      const servicePrefix = normalizeServicePrefix({ servicePrefix: prefix })
+      if (!servicePrefix) return module
+      return createFileModule({ ...input, servicePrefix })
     }
   }
 
@@ -289,13 +298,15 @@ export function localFileStorage(root) {
 function normalizeOptions(input) {
   const storage = typeof input.storage === "string" ? localFileStorage(input.storage) : input.storage
   if (!storage) throw new Error("@db-state/server-files requires a storage path or FileStorage adapter")
+  const servicePrefix = normalizeServicePrefix(input)
 
   return {
     chunkSize: DEFAULT_CHUNK_SIZE,
     defaultPolicy: { mode: "registered" },
     maxSize: DEFAULT_MAX_SIZE,
-    table: "file",
+    table: input.table ?? createPrefixedTableName(servicePrefix, "file", "file"),
     ...input,
+    servicePrefix,
     storage
   }
 }

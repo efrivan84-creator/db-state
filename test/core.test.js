@@ -101,9 +101,14 @@ test("createChange keeps compact audit fields", () => {
   assert.equal("user" in change, false)
 })
 
-test("normalizeTables always includes service tables", () => {
-  assert.deepEqual(normalizeTables(["order"]), ["order", "_user", "_group", "_permission"])
-  assert.deepEqual(normalizeTables(["_user", "order"]), ["_user", "order", "_group", "_permission"])
+test("normalizeTables deduplicates explicit tables without adding service tables implicitly", () => {
+  assert.deepEqual(normalizeTables(["order", "order"]), ["order"])
+  assert.deepEqual(normalizeTables(["order"], ["_user", "_group", "_permission"]), [
+    "order",
+    "_user",
+    "_group",
+    "_permission"
+  ])
 })
 
 test("DB_STATE_MESSAGES contains every reserved protocol message name", () => {

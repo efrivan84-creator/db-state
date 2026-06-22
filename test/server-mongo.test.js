@@ -114,7 +114,7 @@ test("delete log stores old document and compact actor id", async () => {
   const mongo = createMemoryMongo()
   const server = createDbStateServer({
     mongo,
-    tables: ["order"],
+    tables: ["order", "_user", "_group", "_permission"],
     now: () => "2026-05-21T10:00:01.000Z",
     createLogId: () => "log1"
   })
@@ -808,11 +808,11 @@ test("permissions default to deny when no code rule or _permission rule decides"
   )
 })
 
-test("service tables are available through normal permissions", async () => {
+test("service tables are available through normal permissions when listed explicitly", async () => {
   const mongo = createMemoryMongo()
   const server = createDbStateServer({
     mongo,
-    tables: ["order"]
+    tables: ["order", "_group"]
   })
 
   await allowTable(mongo, "_group", "admins")

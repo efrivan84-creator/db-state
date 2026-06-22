@@ -38,7 +38,7 @@ const dbState = createDbStateServer({
 })
 ```
 
-`_user`, `_group`, and `_permission` are added automatically. They are only known to the API; access is still denied unless code rules or `_permission` rules allow it.
+`_user`, `_group`, and `_permission` are not exposed through CRUD/RPC automatically. Add them to `tables` explicitly when an admin UI needs them; access is still denied unless code rules or `_permission` rules allow it.
 
 Attach WebSocket clients from your own `ws` server:
 

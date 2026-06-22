@@ -4,7 +4,13 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.0.11
+
 - Vue `login()` now resets already-returned reactive documents in place instead of deleting them from the table registry, so `load()` calls made before manual authorization keep their object identity, clear stale cached fields, and retry through `load` RPC after authorization.
+- Added service collection prefix support: `createDbStateServer({ servicePrefix: "cfg" })` / `prefix` maps service collections to `cfg_user`, `cfg_group`, `cfg_permission`, and `cfg_log`; explicit `userTable`, `groupTable`, `permissionTable`, and `logCollection` options still override the derived names.
+- Service tables are now exposed through CRUD/RPC only when explicitly listed in `tables`; server auth/permissions still use the configured service collections internally.
+- `@db-state/server-files` and `@db-state/vue-files` now accept the same prefix for the default file metadata table (`cfg_file`), and file modules mounted through `createDbStateServer({ prefix, files })` inherit the server prefix unless they set an explicit `table`.
+- Documentation now covers prefixed Mongo indices and the existing WebSocket port/path env pattern.
 
 ## 0.0.10
 

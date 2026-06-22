@@ -45,8 +45,16 @@ export const DB_STATE_MESSAGES: Readonly<{
   socketClose: "dbstate:socket_close"
 }>
 
-/** Names of the service tables added automatically by both the client and the server. */
-export const SERVICE_TABLES: ReadonlyArray<"_user" | "_group" | "_permission">
+/** Default service table names. Add them to `tables` explicitly when you want to expose them. */
+export const SERVICE_TABLES: readonly ["_user", "_group", "_permission"]
+
+/** Base service table names used with a prefix (`cfg` -> `cfg_user`, etc.). */
+export const SERVICE_TABLE_BASE_NAMES: readonly ["user", "group", "permission"]
+
+/** Normalizes `servicePrefix` / `prefix` input by trimming whitespace and trailing underscores. */
+export function normalizeServicePrefix(
+  input?: string | null | { servicePrefix?: string | null; prefix?: string | null }
+): string | undefined
 
 // ---------------------------------------------------------------------------
 // Document and change shape
@@ -171,10 +179,21 @@ export type AnyChange = Change<BaseDoc>
 // Public functions
 // ---------------------------------------------------------------------------
 
-/** Adds service tables (`_user`, `_group`, `_permission`) to the supplied list and dedups. */
+/** Builds a service or metadata table name (`cfg`, `user` -> `cfg_user`; no prefix -> fallback). */
+export function createPrefixedTableName(
+  prefix: string | null | undefined,
+  name: string,
+  fallback?: string
+): string
+
+/** Returns service tables for a prefix (`cfg` -> `cfg_user`, `cfg_group`, `cfg_permission`). */
+export function createServiceTableNames(prefix?: string | null): string[]
+
+/** Deduplicates table names. Pass extra tables explicitly when you want to append them. */
 export function normalizeTables<T extends readonly string[]>(
-  tables: T
-): Array<T[number] | (typeof SERVICE_TABLES)[number]>
+  tables: T,
+  extraTables?: readonly string[]
+): Array<T[number] | string>
 
 /** Generates a session id of the form `${userId}_${random10}`. */
 export function createSessionId(

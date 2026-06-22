@@ -4,7 +4,13 @@
 
 ## Unreleased
 
+## 0.0.11
+
 - Vue `login()` теперь сбрасывает уже отданные reactive-документы на месте, а не удаляет их из registry таблицы: `load()` до ручной авторизации сохраняет identity объекта, очищает stale cached поля и после авторизации повторяет `load` RPC.
+- Добавлена поддержка prefix для служебных коллекций: `createDbStateServer({ servicePrefix: "cfg" })` / `prefix` переводит служебные коллекции в `cfg_user`, `cfg_group`, `cfg_permission` и `cfg_log`; явные `userTable`, `groupTable`, `permissionTable` и `logCollection` по-прежнему имеют приоритет.
+- Служебные таблицы теперь открываются через CRUD/RPC только если явно перечислены в `tables`; auth/permissions сервера по-прежнему используют настроенные служебные коллекции внутренне.
+- `@db-state/server-files` и `@db-state/vue-files` принимают тот же prefix для default metadata-таблицы файлов (`cfg_file`), а файловые модули в `createDbStateServer({ prefix, files })` наследуют prefix сервера, если не задан явный `table`.
+- Документация описывает prefixed Mongo indices и существующий env-паттерн для WebSocket port/path.
 
 ## 0.0.10
 

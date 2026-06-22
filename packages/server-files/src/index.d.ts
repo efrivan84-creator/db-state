@@ -30,6 +30,10 @@ export interface FileStorage {
 
 export interface FileModuleOptions {
   table?: string
+  /** Prefix for the default file table (`"cfg"` -> `cfg_file`). Ignored when `table` is set. */
+  servicePrefix?: string
+  /** Alias for `servicePrefix`. */
+  prefix?: string
   storage: string | FileStorage
   maxSize?: number
   chunkSize?: number
@@ -45,6 +49,7 @@ export interface FileModule {
   handleMessage(client: unknown, message: { type?: string; [key: string]: unknown }): Promise<boolean>
   handleRawMessage(client: unknown, raw: unknown): Promise<void>
   handleClose(client: unknown): Promise<void>
+  withServicePrefix(prefix?: string | null): FileModule
 }
 
 export function createFileModule(options: FileModuleOptions): FileModule

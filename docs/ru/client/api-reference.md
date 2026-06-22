@@ -36,7 +36,7 @@ const state = createDbState(["user", "order"])
 
 | Option | Default | Значение |
 |---|---:|---|
-| `tables` | required | Таблицы приложения. Service tables добавляются автоматически. |
+| `tables` | required | Таблицы, открытые на клиенте. Service tables указываются явно при необходимости. |
 | `wsUrl` | текущий host | WebSocket URL. |
 | `cache` | IndexedDB | Cache backend. |
 | `autoAuth` | `true` | Пробовать hash auth при старте. |
@@ -224,7 +224,7 @@ T & {
 
 ## Service table types
 
-Service tables добавляются автоматически:
+Service tables указываются явно, если нужны клиенту:
 
 ```text
 _user

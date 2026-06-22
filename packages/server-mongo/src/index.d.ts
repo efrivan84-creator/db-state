@@ -56,7 +56,7 @@ export interface DbStateServerConfig {
   /** Mongo database the server reads and writes through. */
   mongo: MongoDatabaseLike
 
-  /** Application tables. Service tables are added automatically. */
+  /** Tables exposed through CRUD/RPC. Service tables must be listed explicitly when you want to expose them. */
   tables: ReadonlyArray<string>
 
   /** Optional code-level access rules; checked before `_permission` rows. */
@@ -83,11 +83,20 @@ export interface DbStateServerConfig {
   /** Name of the log collection. Default `"log"`. */
   logCollection?: string
 
+  /** Prefix for service collections (`"cfg"` -> `cfg_user`, `cfg_group`, `cfg_permission`, `cfg_log`). */
+  servicePrefix?: string
+
+  /** Alias for `servicePrefix`. */
+  prefix?: string
+
   /** Name of the permissions table. Default `"_permission"`. */
   permissionTable?: string
 
   /** Name of the users table. Default `"_user"`. */
   userTable?: string
+
+  /** Name of the groups table. Default `"_group"`. */
+  groupTable?: string
 
   /** Actor id used for server/internal writes when no authenticated user id exists. Default `"system"`. */
   systemUserId?: string
@@ -181,6 +190,7 @@ export interface DbStateServerModule {
   ): Promise<boolean> | boolean
   handleRawMessage?(client: unknown, raw: unknown): Promise<void> | void
   handleClose?(client: unknown): Promise<void> | void
+  withServicePrefix?(prefix?: string | null): DbStateServerModule
 }
 
 // ---------------------------------------------------------------------------

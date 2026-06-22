@@ -1,4 +1,12 @@
-import { DB_STATE_MESSAGES, applyPatch, createChange, getByPath, normalizeTables } from "@db-state/core"
+import {
+  DB_STATE_MESSAGES,
+  applyPatch,
+  createChange,
+  createPrefixedTableName,
+  getByPath,
+  normalizeServicePrefix,
+  normalizeTables
+} from "@db-state/core"
 import {
   assertAccess,
   assertFieldsAccess,
@@ -395,7 +403,12 @@ async function getPermissionRules(config, cache, table) {
 }
 
 function normalizeOptions(options) {
-  const files = normalizeModules(options.files)
+  const servicePrefix = normalizeServicePrefix(options)
+  const userTable = options.userTable ?? createPrefixedTableName(servicePrefix, "user", "_user")
+  const groupTable = options.groupTable ?? createPrefixedTableName(servicePrefix, "group", "_group")
+  const permissionTable = options.permissionTable ?? createPrefixedTableName(servicePrefix, "permission", "_permission")
+  const logCollection = options.logCollection ?? createPrefixedTableName(servicePrefix, "log", "log")
+  const files = normalizeModules(options.files, servicePrefix)
   const fileTables = files.flatMap((module) => module.tables ?? [module.table]).filter(Boolean)
   const access = mergeConfigs(options.access ?? {}, ...files.map((module) => module.access ?? {}))
   const hooks = mergeConfigs(options.hooks ?? {}, ...files.map((module) => module.hooks ?? {}))
@@ -409,28 +422,32 @@ function normalizeOptions(options) {
     changesBroadcastRate: 100,
     getUser: async ({ req, client }) => req?.user ?? req?.client?.user ?? client?.user ?? makeUser(req?.client ?? req ?? client),
     hooks: {},
-    logCollection: "log",
     now: () => new Date().toISOString(),
     normalizeAuthLogin: defaultNormalizeAuthLogin,
     onAuthWarning: undefined,
     password: defaultPassword,
-    permissionTable: "_permission",
     systemUserId: "system",
     syncLimit: 1000,
-    userTable: "_user",
     ...options,
     access,
     authLoginFields: normalizeAuthLoginFields(options.authLoginFields),
     files,
+    groupTable,
     hooks,
-    tables: new Set(normalizeTables([...(options.tables ?? []), ...fileTables]))
+    logCollection,
+    permissionTable,
+    servicePrefix,
+    tables: new Set(normalizeTables([...(options.tables ?? []), ...fileTables])),
+    userTable
   }
 }
 
-function normalizeModules(input) {
+function normalizeModules(input, servicePrefix) {
   if (!input) return []
-  return Array.isArray(input) ? input : [input]
+  const modules = Array.isArray(input) ? input : [input]
+  return modules.map((module) => module.withServicePrefix?.(servicePrefix) ?? module)
 }
+
 
 function mergeConfigs(...items) {
   return Object.assign({}, ...items)

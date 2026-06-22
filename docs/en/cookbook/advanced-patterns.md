@@ -155,6 +155,7 @@ read: async ({ user }) => {
 ```js
 const loading = state.getKeyRef("orders-page")
 const orders = state.order.listRef({ sort: { createdAt: -1 } }, "orders-page")
+// Include "_user" in createDbState({ tables }) if this page loads user metadata.
 const user = state._user.load(state.auth.userId, "orders-page")
 ```
 

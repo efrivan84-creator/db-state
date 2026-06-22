@@ -20,12 +20,42 @@ new WebSocketServer({ port: 8788, path: "/db-state/ws" })
   .on("connection", (ws) => dbState.socket.addClient(ws))
 ```
 
+The port and path belong to your WebSocket server, not to the Mongo/server config. You can
+move them into env:
+
+```js
+const wsPort = Number(process.env.DB_STATE_WS_PORT ?? 8788)
+const wsPath = process.env.DB_STATE_WS_PATH ?? "/db-state/ws"
+
+new WebSocketServer({ port: wsPort, path: wsPath })
+  .on("connection", (ws) => dbState.socket.addClient(ws))
+```
+
 This gives you:
 - WebSocket RPC at `ws://host:8788/db-state/ws`
 - CRUD methods: `load`, `getIds`, `getUnique`, `count`, `sync`, `update`, `add`, `remove`
 - Auth via `dbstate:login` / `dbstate:auth` messages
 - Append-only log in `log` collection
 - Permission checks against `_permission` collection
+
+`tables` lists only tables exposed through the CRUD/RPC API. Service tables such as
+`_user`, `_group`, and `_permission` are not exposed automatically; list them explicitly
+when an admin UI needs to read or edit them through db-state.
+
+Set `servicePrefix`/`prefix` when you need several isolated db-state servers in one MongoDB database:
+
+```js
+const dbState = createDbStateServer({
+  mongo,
+  tables: ["order"],
+  servicePrefix: "cfg"
+})
+```
+
+With this prefix the service collections are `cfg_user`, `cfg_group`, `cfg_permission`, and `cfg_log`.
+Without a prefix the old defaults stay unchanged: `_user`, `_group`, `_permission`, `log`.
+If clients need access to these tables, include the prefixed names in `tables`, for example
+`["order", "cfg_user", "cfg_group", "cfg_permission", "cfg_log"]`.
 
 It does **not** give you any seeded data — you must add a user and at least one permission before clients can do anything (see below).
 
@@ -37,6 +67,8 @@ The library doesn't create indices automatically. For a healthy production serve
 await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
 await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
 ```
+
+With `servicePrefix: "cfg"`, create the same indices on `cfg_log` and `cfg_permission`.
 
 The first index is critical — `sync` reads slices of the log ordered by these fields. Without it, sync becomes O(N) per call.
 
@@ -100,8 +132,10 @@ createDbStateServer({
   createAuthHash:   () => string,      // default: 32 random bytes hex
   createLogId:      () => string,      // default: crypto.randomUUID()
   getUser:          async (ctx) => user, // resolve user from request
+  servicePrefix:    "cfg",       // optional: cfg_user/cfg_group/cfg_permission/cfg_log
   logCollection:    "log",       // log collection name
   permissionTable:  "_permission",
+  groupTable:       "_group",
   userTable:        "_user",
   systemUserId:     "system",    // actor for internal writes without a user
   now:              () => new Date().toISOString(),  // server clock

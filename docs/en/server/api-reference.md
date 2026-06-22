@@ -46,7 +46,7 @@ createDbStateServer(config: DbStateServerConfig): DbStateServer
 | Option | Type | Default | Notes |
 |---|---|---|---|
 | `mongo` | `MongoDatabaseLike` | required | Mongo database handle. |
-| `tables` | `string[]` | required | App tables. `_user`, `_group`, `_permission` added automatically. |
+| `tables` | `string[]` | required | Tables exposed through CRUD/RPC. Add `_user`, `_group`, `_permission` explicitly when needed. |
 | `access` | `AccessConfig` | `{}` | Code access rules. |
 | `hooks` | `ServerHooks` | `{}` | Lifecycle hooks around read/write operations. |
 | `password` | `PasswordHasher` | PBKDF2 | Password hash adapter. |
