@@ -1,4 +1,7 @@
 import assert from "node:assert/strict"
+import { mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import test from "node:test"
 
 import { setByPath, unsetByPath } from "../packages/core/src/index.js"
@@ -1300,6 +1303,145 @@ test("code access rules decide before _permission table", async () => {
     }),
     /Write denied/
   )
+})
+
+test("server exposes custom RPC methods through options.methods", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["zad"],
+    methods: {
+      "zad.next-number": async ({ body, userId }) => ({ num: (body.from ?? 0) + 1, userId })
+    }
+  })
+  const sent = []
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { user: { _id: "u-admin", groups: ["admins"] }, userId: "u-admin", sessionId: "s1" })
+
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:rpc",
+    id: "r1",
+    method: "zad.next-number",
+    payload: { from: 41 }
+  }))
+
+  const result = sent.find((message) => message.type === "dbstate:rpc_result" && message.id === "r1")
+  assert.deepEqual(result.result, { num: 42, userId: "u-admin" })
+})
+
+test("server merges custom RPC methods from modules", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: [],
+    files: [{ methods: { "module.ping": async () => "pong" } }]
+  })
+  const sent = []
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { user: { _id: "u1", groups: [] }, userId: "u1", sessionId: "s1" })
+
+  await server.socket.handleMessage(client, JSON.stringify({ type: "dbstate:rpc", id: "r1", method: "module.ping", payload: {} }))
+
+  const result = sent.find((message) => message.type === "dbstate:rpc_result" && message.id === "r1")
+  assert.equal(result.result, "pong")
+})
+
+test("server rejects custom methods that collide with built-in RPC", () => {
+  assert.throws(
+    () => createDbStateServer({
+      mongo: createMemoryMongo(),
+      tables: ["zad"],
+      methods: { load: async () => null }
+    }),
+    /already exists: load/
+  )
+})
+
+test("methodsDir serves file-based methods and hot-reloads on mtime change", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dbstate-methods-"))
+  await mkdir(join(dir, "zad"))
+  const file = join(dir, "zad", "get-num.js")
+  await writeFile(file, "export default async ({ body, db, user }) => ({ num: body.from + 1, db, userId: user._id })\n")
+
+  const server = createDbStateServer({
+    mongo: createMemoryMongo(),
+    tables: [],
+    methodsDir: dir,
+    methodsContext: { db: "DB" }
+  })
+  const sent = []
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { user: { _id: "u1", groups: [] }, userId: "u1", sessionId: "s1" })
+
+  await server.socket.handleMessage(client, JSON.stringify({ type: "dbstate:rpc", id: "r1", method: "zad.get-num", payload: { from: 41 } }))
+  const first = sent.find((message) => message.type === "dbstate:rpc_result" && message.id === "r1")
+  assert.deepEqual(first.result, { num: 42, db: "DB", userId: "u1" })
+
+  // Правка файла применяется без перезапуска: mtime изменился — файл перечитан.
+  await writeFile(file, "export default async ({ body }) => ({ num: body.from + 100 })\n")
+  await utimes(file, new Date(), new Date(Date.now() + 5000))
+
+  await server.socket.handleMessage(client, JSON.stringify({ type: "dbstate:rpc", id: "r2", method: "zad.get-num", payload: { from: 41 } }))
+  const second = sent.find((message) => message.type === "dbstate:rpc_result" && message.id === "r2")
+  assert.deepEqual(second.result, { num: 141 })
+})
+
+test("methodsDir file methods receive db and api by default", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dbstate-methods-"))
+  await writeFile(
+    join(dir, "check.js"),
+    "export default async ({ db, api }) => ({ hasDb: typeof db.collection === \"function\", hasApi: typeof api.load === \"function\" })\n"
+  )
+
+  const server = createDbStateServer({ mongo: createMemoryMongo(), tables: [], methodsDir: dir })
+  const sent = []
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { user: { _id: "u1", groups: [] }, userId: "u1", sessionId: "s1" })
+
+  await server.socket.handleMessage(client, JSON.stringify({ type: "dbstate:rpc", id: "r1", method: "check", payload: {} }))
+
+  const reply = sent.find((message) => message.type === "dbstate:rpc_result" && message.id === "r1")
+  assert.deepEqual(reply.result, { hasDb: true, hasApi: true })
+})
+
+test("methodsDir rejects method names that could leave the directory", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dbstate-methods-"))
+  await writeFile(join(dir, "ping.js"), "export default async () => \"pong\"\n")
+
+  const server = createDbStateServer({
+    mongo: createMemoryMongo(),
+    tables: [],
+    methodsDir: dir
+  })
+  const sent = []
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { user: { _id: "u1", groups: [] }, userId: "u1", sessionId: "s1" })
+
+  for (const [id, method] of [["r1", "..ping"], ["r2", "../ping"], ["r3", "zad..get"], ["r4", "PING"]]) {
+    await server.socket.handleMessage(client, JSON.stringify({ type: "dbstate:rpc", id, method, payload: {} }))
+    const reply = sent.find((message) => message.type === "dbstate:rpc_error" && message.id === id)
+    assert.match(reply.error, /Unknown db-state RPC method/)
+  }
+
+  await server.socket.handleMessage(client, JSON.stringify({ type: "dbstate:rpc", id: "r5", method: "ping", payload: {} }))
+  const ok = sent.find((message) => message.type === "dbstate:rpc_result" && message.id === "r5")
+  assert.equal(ok.result, "pong")
+})
+
+test("custom RPC methods require an authenticated client", async () => {
+  const server = createDbStateServer({
+    mongo: createMemoryMongo(),
+    tables: [],
+    methods: { ping: async () => "pong" }
+  })
+  const sent = []
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { sessionId: "s1" })
+
+  await server.socket.handleMessage(client, JSON.stringify({ type: "dbstate:rpc", id: "r1", method: "ping", payload: {} }))
+
+  const error = sent.find((message) => message.type === "dbstate:rpc_error" && message.id === "r1")
+  assert.equal(error.error, "Unauthorized")
 })
 
 function createMemoryMongo() {

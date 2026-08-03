@@ -132,6 +132,62 @@ RPC is denied until the socket is authorized.
 
 For read RPCs, the WebSocket `dbstate:rpc_result` envelope may include diagnostic metadata without changing `result`: `meta.accessFiltered = true` / `meta.denied = N` when whole rows or log changes were hidden, and `meta.fieldsFiltered = true` when field-level read rules removed properties from returned documents or changes.
 
+## Custom RPC methods
+
+Besides the standard CRUD/sync you can register named server methods via `methods`:
+
+```js
+const dbState = createDbStateServer({
+  mongo,
+  tables: ["zad"],
+  methods: {
+    "zad.next-number": async ({ body, client, userId, sessionId }) => {
+      const [last] = await mongo.collection("zad").find({}).sort({ num: -1 }).limit(1).toArray()
+      return { num: (last?.num ?? 0) + 1 }
+    }
+  }
+})
+```
+
+Clients call them with the same RPC envelope: `{ type: "dbstate:rpc", method: "zad.next-number", payload: {...} }`.
+
+- A handler receives `{ body, client, userId, sessionId }` and decides what to read and write itself.
+- RPC is rejected until the socket is authorized, same as the built-in methods.
+- Names that collide with built-ins (`load`, `sync`, ...) are forbidden — the server throws at startup.
+- Modules (`files`) can contribute methods through a `methods` field, like `access` and `hooks`.
+- `access`/`_permission` checks and the change log only apply to the standard CRUD: if a named method writes to the database directly, permissions, audit log and broadcast are its own responsibility (or call `api.add`/`api.update` from inside the method).
+
+### File-based methods: `methodsDir`
+
+Instead of registering handlers you can point the server at a directory — the method name becomes the file path:
+
+```js
+const dbState = createDbStateServer({
+  mongo,
+  tables: ["zad"],
+  methodsDir: import.meta.dirname + "/rpc"
+})
+```
+
+`methodsDir` accepts a path string or a file URL. A relative path like `"./rpc"`
+resolves from the process cwd — anchoring to the module via `import.meta.dirname` is safer.
+
+`"zad.get-num"` → `rpc/zad/get-num.js`, the file default-exports the handler:
+
+```js
+// rpc/zad/get-num.js
+export default async ({ body, user, db }) => {
+  const [last] = await db.collection("zad").find({}).sort({ num: -1 }).limit(1).toArray()
+  return { num: (last?.num ?? 0) + 1 }
+}
+```
+
+- The file is imported lazily on the first call and **re-imported when its mtime changes** — edits apply without a server restart.
+- Every file method receives `db` (this server's Mongo), `api` (the db-state server: `api.add`/`api.update` write with log and broadcast) and `user` (from `client.user`) by default. Need more — `methodsContext: {...}` spreads on top (same-named keys override the defaults).
+- Name segments are validated (`[a-z0-9_-]`, dot-separated): a client-supplied name can never leave the directory.
+- Built-ins and `methods` take precedence; the file is checked last.
+- Reload uses `import` with `?v=mtime`: old module copies stay in memory (ESM cannot be evicted). Production files do not change, development reloads are negligible; handlers must not keep module-level state.
+
 ## Auth
 
 Users live in `_user`:

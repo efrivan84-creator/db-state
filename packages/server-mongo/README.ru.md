@@ -129,6 +129,62 @@ RPC отклоняется, пока сокет не авторизован.
 
 Для read RPC WebSocket envelope `dbstate:rpc_result` может содержать диагностический `meta` без изменения `result`: `meta.accessFiltered = true` / `meta.denied = N`, если были скрыты целые строки или изменения лога, и `meta.fieldsFiltered = true`, если field-level правила чтения удалили свойства из возвращаемых документов или изменений.
 
+## Свои RPC-методы
+
+Кроме стандартных CRUD/sync можно зарегистрировать именованные серверные методы через `methods`:
+
+```js
+const dbState = createDbStateServer({
+  mongo,
+  tables: ["zad"],
+  methods: {
+    "zad.next-number": async ({ body, client, userId, sessionId }) => {
+      const [last] = await mongo.collection("zad").find({}).sort({ num: -1 }).limit(1).toArray()
+      return { num: (last?.num ?? 0) + 1 }
+    }
+  }
+})
+```
+
+Клиент вызывает их тем же RPC envelope: `{ type: "dbstate:rpc", method: "zad.next-number", payload: {...} }`.
+
+- Обработчик получает `{ body, client, userId, sessionId }` и сам решает, что читать и писать.
+- RPC отклоняется до авторизации сокета, как и стандартные методы.
+- Имена, совпадающие со встроенными (`load`, `sync`, ...), запрещены — сервер бросит ошибку при старте.
+- Модули (`files`) могут добавлять свои методы через поле `methods`, как `access` и `hooks`.
+- Проверки `access`/`_permission` и лог изменений применяются только к стандартным CRUD: если именованный метод пишет в базу напрямую, права, audit log и broadcast — его собственная ответственность (или вызывайте `api.add`/`api.update` изнутри метода).
+
+### Методы-файлы: `methodsDir`
+
+Вместо регистрации можно отдать папку — имя метода само превращается в путь к файлу:
+
+```js
+const dbState = createDbStateServer({
+  mongo,
+  tables: ["zad"],
+  methodsDir: import.meta.dirname + "/rpc"
+})
+```
+
+`methodsDir` принимает путь-строку или file-URL. Относительный путь вида `"./rpc"`
+резолвится от cwd процесса — надёжнее привязываться к модулю через `import.meta.dirname`.
+
+`"zad.get-num"` → `rpc/zad/get-num.js`, файл экспортирует обработчик по умолчанию:
+
+```js
+// rpc/zad/get-num.js
+export default async ({ body, user, db }) => {
+  const [last] = await db.collection("zad").find({}).sort({ num: -1 }).limit(1).toArray()
+  return { num: (last?.num ?? 0) + 1 }
+}
+```
+
+- Файл читается лениво при первом вызове и **перечитывается, если изменился mtime** — правки применяются без перезапуска сервера.
+- Каждый файловый метод по умолчанию получает `db` (Mongo этого сервера), `api` (сам db-state сервер: `api.add`/`api.update` пишут с логом и broadcast) и `user` (из `client.user`). Нужно больше — `methodsContext: {...}` добавляет своё поверх (одноимённые ключи переопределяют дефолты).
+- Сегменты имени валидируются (`[a-z0-9_-]`, разделитель — точка): имя от клиента не может выйти за пределы папки.
+- Встроенные методы и `methods` имеют приоритет; файл проверяется последним.
+- Перезагрузка использует `import` с `?v=mtime`: старые копии модуля остаются в памяти (ESM не выгружается). В бою файлы не меняются, в разработке это незаметно; обработчики не должны хранить состояние на уровне модуля.
+
 ## Аутентификация
 
 Пользователи живут в `_user`:

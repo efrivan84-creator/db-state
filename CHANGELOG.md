@@ -4,6 +4,11 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.0.12
+
+- `@db-state/server-mongo`: `createDbStateServer({ methods })` registers custom named RPC methods in the same WebSocket router as the built-in CRUD/sync; modules (`files`) can contribute methods via a `methods` field, like `access` and `hooks`; a collision with a built-in method name throws at startup. `access`/`_permission` checks and the change log still apply only to the standard CRUD — a custom method that writes directly is responsible for its own permissions and audit.
+- `@db-state/server-mongo`: `createDbStateServer({ methodsDir, methodsContext })` serves file-based RPC methods — `"zad.get-num"` maps to `<dir>/zad/get-num.js` (default export = handler). Files load lazily on first call and re-import when their mtime changes, so edits apply without a restart; name segments are validated so a client-supplied method name can never leave the directory; built-ins and `methods` take precedence. Every file method receives `db` and `api` by default; `methodsContext` spreads extras on top and can override them. `handleRpc` accepts an optional resolver as the 4th argument.
+
 ## 0.0.11
 
 - Vue `login()` now resets already-returned reactive documents in place instead of deleting them from the table registry, so `load()` calls made before manual authorization keep their object identity, clear stale cached fields, and retry through `load` RPC after authorization.

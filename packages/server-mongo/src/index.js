@@ -22,16 +22,25 @@ import {
 } from "./access.js"
 import { createAuth, defaultAuthHash, defaultPassword } from "./auth.js"
 import { runErrorHooks, runHooks } from "./hooks.js"
+import { createMethodsDirResolver } from "./methods-dir.js"
 import { createHandlers, handleRpc } from "./rpc.js"
 import { createSocketHub } from "./socket.js"
 
 export { createAuth, defaultAuthHash, defaultPassword, hashValue } from "./auth.js"
+export { createMethodsDirResolver } from "./methods-dir.js"
 export { createHandlers, handleRpc } from "./rpc.js"
 export { createSocketHub } from "./socket.js"
 
 export function createDbStateServer(options) {
   const config = normalizeOptions(options)
   const auth = createAuth(config)
+  // File methods get { db, api } by default; methodsContext adds or overrides.
+  // api does not exist yet — the context object is filled in below, the
+  // resolver spreads it at call time.
+  const fileMethodsContext = config.methodsDir ? { db: config.mongo } : undefined
+  const resolveFileMethod = config.methodsDir
+    ? createMethodsDirResolver(config.methodsDir, fileMethodsContext)
+    : undefined
   let router
   const socket = createSocketHub(config.socket, async (client, message) => {
     for (const module of config.files) {
@@ -41,7 +50,7 @@ export function createDbStateServer(options) {
     if (message.type === DB_STATE_MESSAGES.login) return auth.login(client, message)
     if (message.type === DB_STATE_MESSAGES.auth) return auth.auth(client, message)
     if (message.type === DB_STATE_MESSAGES.logout) return auth.logout(client, message)
-    if (message.type === DB_STATE_MESSAGES.rpc) return handleRpc(router, client, message)
+    if (message.type === DB_STATE_MESSAGES.rpc) return handleRpc(router, client, message, resolveFileMethod)
   })
   const changesBroadcaster = createChangesBroadcaster(socket, config)
 
@@ -339,8 +348,13 @@ export function createDbStateServer(options) {
   }
 
   router = createHandlers({ add, count, getIds, getUnique, load, remove, sync, update })
+  for (const [name, handler] of Object.entries(config.methods)) {
+    if (router[name]) throw new Error(`db-state RPC method already exists: ${name}`)
+    router[name] = handler
+  }
 
   const api = { add, count, getIds, getUnique, load, remove, socket, sync, update }
+  if (fileMethodsContext) Object.assign(fileMethodsContext, { api }, config.methodsContext)
   for (const module of config.files) {
     module.bind?.({ api, config, mongo: config.mongo, socket })
     socket.onRawMessage((client, raw) => module.handleRawMessage?.(client, raw))
@@ -412,6 +426,7 @@ function normalizeOptions(options) {
   const fileTables = files.flatMap((module) => module.tables ?? [module.table]).filter(Boolean)
   const access = mergeConfigs(options.access ?? {}, ...files.map((module) => module.access ?? {}))
   const hooks = mergeConfigs(options.hooks ?? {}, ...files.map((module) => module.hooks ?? {}))
+  const methods = mergeConfigs(options.methods ?? {}, ...files.map((module) => module.methods ?? {}))
 
   return {
     access: {},
@@ -434,6 +449,7 @@ function normalizeOptions(options) {
     files,
     groupTable,
     hooks,
+    methods,
     logCollection,
     permissionTable,
     servicePrefix,

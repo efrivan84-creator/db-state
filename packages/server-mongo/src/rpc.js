@@ -13,11 +13,11 @@ export function createHandlers(api) {
   }
 }
 
-export async function handleRpc(router, client, message) {
+export async function handleRpc(router, client, message, resolve) {
   try {
     if (!client.user) throw new Error("Unauthorized")
 
-    const handler = router[message.method]
+    const handler = router[message.method] ?? await resolve?.(message.method)
     if (!handler) throw new Error(`Unknown db-state RPC method: ${message.method}`)
 
     const response = unwrapRpcResponse(await handler({

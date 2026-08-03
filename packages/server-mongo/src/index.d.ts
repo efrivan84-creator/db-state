@@ -1,6 +1,7 @@
 import type { BaseDoc, Change, Filter, ListQuery, UpdatePatch } from "@db-state/core"
 import type { AccessConfig, AccessUser } from "./access"
 import type { AuthRateLimitContext, AuthWarning, PasswordHasher } from "./auth"
+import type { RpcHandler } from "./rpc"
 import type { SocketHub } from "./socket"
 
 export type { AccessConfig, AccessContext, AccessDecision, AccessRule, AccessUser, ServerPermissionRule, PermissionPart } from "./access"
@@ -64,6 +65,28 @@ export interface DbStateServerConfig {
 
   /** Optional lifecycle hooks around server reads and writes. */
   hooks?: ServerHooks
+
+  /**
+   * Custom named RPC methods registered in the same WebSocket router as the
+   * built-in CRUD/sync. Names that collide with built-ins throw at startup.
+   */
+  methods?: Record<string, RpcHandler>
+
+  /**
+   * Directory with file-based RPC methods: "zad.get-num" maps to
+   * `<dir>/zad/get-num.js`, whose default export is the handler. Files are
+   * imported lazily on first call and re-imported when their mtime changes,
+   * so edits apply without a restart. Checked after built-ins and `methods`.
+   * Every file method receives `db` (this server's Mongo) and `api`
+   * (the db-state server) by default.
+   */
+  methodsDir?: string | URL
+
+  /**
+   * Extra properties spread into every file-based method request on top of
+   * the defaults ({ db, api }); same-named keys override the defaults.
+   */
+  methodsContext?: Record<string, unknown>
 
   /** Optional extension modules mounted on the same db-state server/socket. */
   files?: DbStateServerModule | ReadonlyArray<DbStateServerModule>
@@ -178,6 +201,7 @@ export interface DbStateServerModule {
   tables?: ReadonlyArray<string>
   access?: AccessConfig
   hooks?: ServerHooks
+  methods?: Record<string, RpcHandler>
   bind?(context: {
     api: DbStateServer
     config: unknown
