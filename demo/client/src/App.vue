@@ -71,6 +71,23 @@ async function saveForbidden() {
     error.value = err.message
   }
 }
+
+// Заказ o2 архивный: запрет приходит из хука beforeWrite вместе с причиной,
+// а не из прав группы — у admin на order доступ полный.
+async function saveArchived() {
+  error.value = ""
+  info.value = ""
+
+  try {
+    await state.order.update({
+      id: "o2",
+      objedit: { status: "open" }
+    }, "order-card")
+    info.value = "Archived order saved"
+  } catch (err) {
+    error.value = err.message
+  }
+}
 </script>
 
 <template>
@@ -133,7 +150,14 @@ async function saveForbidden() {
               <button type="button" class="rounded border border-red-300 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50" @click="saveForbidden">
                 Try margin update
               </button>
+              <button type="button" class="rounded border border-amber-300 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50" @click="saveArchived">
+                Try archived order
+              </button>
             </div>
+            <p class="text-xs text-gray-500">
+              «Try margin update» — отказ по правам группы (write_fields).
+              «Try archived order» — отказ из хука beforeWrite со своей причиной.
+            </p>
           </div>
 
           <pre class="overflow-auto rounded bg-gray-950 p-3 text-xs text-gray-100">{{ orderJson }}</pre>

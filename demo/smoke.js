@@ -62,7 +62,65 @@ try {
   })
   assert.equal(sync.changes.some((change) => change.set?.margin), false)
 
+  // Хук beforeWrite запрещает архивные заказы — своей причиной, не общей.
+  await assert.rejects(
+    () => rpc(ws, messages, "update", {
+      table: "order",
+      id: "o2",
+      set: { status: "open" },
+      sessionId: "smoke_manager"
+    }),
+    /Архивный заказ изменять нельзя/
+  )
+
+  // Хук нормализует статус до записи.
+  await rpc(ws, messages, "update", {
+    table: "order",
+    id: "o1",
+    set: { status: "OPEN" },
+    sessionId: "smoke_manager"
+  })
+  const normalized = await rpc(ws, messages, "load", { table: "order", id: "o1" })
+  assert.equal(normalized.status, "open")
+
   ws.close()
+
+  // Админ: те же хуки, но полный доступ к полям.
+  const adminWs = new WebSocket(`ws://127.0.0.1:${port}/db-state/ws`)
+  const adminMessages = []
+  adminWs.on("message", (raw) => adminMessages.push(JSON.parse(String(raw))))
+  await onceOpen(adminWs)
+
+  const adminLogin = await system(adminWs, adminMessages, "dbstate:login", {
+    login: "admin",
+    password: "admin"
+  })
+  assert.equal(adminLogin.userId, "u_admin")
+  assert.deepEqual(adminLogin.access, { order: { read: {}, write: {} } })
+
+  const adminView = await rpc(adminWs, adminMessages, "load", { table: "order", id: "o1" })
+  assert.equal(adminView.margin, 340)
+
+  // Запрет из хука сильнее прав группы: у админа fullaccess на order.
+  await assert.rejects(
+    () => rpc(adminWs, adminMessages, "update", {
+      table: "order",
+      id: "o2",
+      set: { status: "open" },
+      sessionId: "smoke_admin"
+    }),
+    /Архивный заказ изменять нельзя/
+  )
+
+  // Хук ограничил limit сверху: просим 999, получаем не больше 50.
+  const ids = await rpc(adminWs, adminMessages, "getIds", {
+    table: "order",
+    filter: {},
+    limit: 999
+  })
+  assert.ok(ids.length <= 50 && ids.length === 2, `ids: ${JSON.stringify(ids)}`)
+
+  adminWs.close()
   console.log("demo smoke ok")
 } finally {
   server.kill()
