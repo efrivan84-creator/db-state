@@ -56,6 +56,31 @@ test("sync update caches records that were already fully loaded", async () => {
   })
 })
 
+test("inserted records expose id like loaded ones, without leaking it into cache", async () => {
+  const cache = createMemoryCache()
+  const state = createDbState({
+    autoConnect: false,
+    cache,
+    safetySyncInterval: 0,
+    waitTimeout: 50,
+    ...testStorage(),
+    tables: ["order"]
+  })
+  state.socket.rpc = async () => undefined
+
+  await state.applyChange({
+    table: "order",
+    id: "o9",
+    action: "insert",
+    obj: { _id: "o9", status: "новый" }
+  })
+
+  // Списки строятся по row.id — у созданной записи оно должно быть.
+  assert.equal(state.order.load("o9").id, "o9")
+  // А в кэше лежит ровно то, что отдаёт сервер: без клиентского id.
+  assert.deepEqual(await cache.get("order", "o9"), { _id: "o9", status: "новый" })
+})
+
 test("insert sync keeps the same reactive object when a page already loaded it", async () => {
   const state = createDbState({
     autoConnect: false,

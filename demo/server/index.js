@@ -1,6 +1,6 @@
 import { WebSocketServer } from "ws"
 
-import { createDbStateServer } from "@db-state/server-mongo"
+import { accessAllows, createDbStateServer } from "@db-state/server-mongo"
 import { createMemoryMongo } from "./memoryMongo.js"
 
 const port = Number(process.env.DB_STATE_DEMO_PORT ?? 8787)
@@ -23,15 +23,19 @@ const mongo = createMemoryMongo({
     }
   ],
   _group: [
-    { _id: "admin", name: "Admin", access: { order: { read: {}, write: {} } } },
+    {
+      _id: "admin",
+      name: "Руководитель",
+      access: { order: { read: {}, write: {} } }
+    },
     {
       _id: "manager",
-      name: "Manager",
-      // Те же строки, но не все поля: margin менеджеру не виден и не правится.
+      name: "Менеджер",
+      // Те же строки, но не все поля: маржу менеджер не видит и не правит.
       access: {
         order: {
           read: {},
-          read_fields: ["status", "total", "comment"],
+          read_fields: ["number", "status", "client", "total", "comment"],
           write: {},
           write_fields: ["status", "comment"]
         }
@@ -41,17 +45,39 @@ const mongo = createMemoryMongo({
   order: [
     {
       _id: "o1",
-      status: "open",
+      number: 1001,
+      status: "новый",
+      client: "ООО Ромашка",
       total: 1200,
-      comment: "Visible note",
+      comment: "Позвонить до обеда",
       margin: 340
     },
     {
       _id: "o2",
-      status: "archived",
+      number: 1002,
+      status: "в архиве",
+      client: "ИП Петров",
       total: 500,
-      comment: "Closed last year",
+      comment: "Закрыт в прошлом году",
       margin: 90
+    },
+    {
+      _id: "o3",
+      number: 1003,
+      status: "в работе",
+      client: "ООО Ромашка",
+      total: 8400,
+      comment: "Ждём предоплату",
+      margin: 1500
+    },
+    {
+      _id: "o4",
+      number: 1004,
+      status: "новый",
+      client: "АО Вектор",
+      total: 3100,
+      comment: "",
+      margin: 620
     }
   ]
 })
@@ -59,8 +85,9 @@ const mongo = createMemoryMongo({
 const dbState = createDbStateServer({
   mongo,
   tables: ["order"],
-  // Права целиком в access групп (см. seed _group): admin видит всё,
-  // manager — те же строки без поля margin.
+
+  // Права целиком в access групп (см. _group выше): руководитель видит всё,
+  // менеджер — те же строки, но без поля margin.
   //
   // Хуки — для того, что фильтром не выразить. Каждый объявляется один раз
   // на весь сервер, таблица разбирается внутри по ctx.table.
@@ -68,13 +95,13 @@ const dbState = createDbStateServer({
     beforeRead: (ctx) => {
       if (ctx.table !== "order") return
 
-      // Ограничиваем размер выборки для всех, включая админа.
+      // Потолок выборки для всех, включая руководителя.
       if (ctx.method === "getIds") ctx.limit = Math.min(ctx.limit || 50, 50)
 
       // Динамическое сужение полей: ctx.fields уходит в projection запроса.
       // Сузить можно, расширить сверх read_fields группы — нет.
       if (ctx.method === "load" && !ctx.user.groups.includes("admin")) {
-        ctx.fields = ["status", "total", "comment"]
+        ctx.fields = ["number", "status", "client", "total", "comment"]
       }
 
       // Ничего не вернули → дальше решает access группы.
@@ -83,26 +110,41 @@ const dbState = createDbStateServer({
     beforeWrite: (ctx) => {
       if (ctx.table !== "order") return
 
-      // Архивные заказы не правит никто, даже админ.
-      if (ctx.old?.status === "archived") {
+      // Архивный заказ не правит никто, даже руководитель: запрет из хука
+      // сильнее прав группы.
+      if (ctx.old?.status === "в архиве") {
         return { allowed: false, reason: "Архивный заказ изменять нельзя" }
       }
 
       // Нормализуем статус до записи.
       if (ctx.method === "update" && typeof ctx.set.status === "string") {
-        ctx.set.status = ctx.set.status.toLowerCase()
+        ctx.set.status = ctx.set.status.trim().toLowerCase()
       }
     },
 
     afterWrite: (ctx) => {
       // Точка для аудита: запись уже в базе и в журнале, запретить нельзя.
-      console.log(`[audit] ${ctx.actorId} ${ctx.method} ${ctx.table}/${ctx.id}`)
+      console.log(`[аудит] ${ctx.actorId} ${ctx.method} ${ctx.table}/${ctx.id}`)
     },
 
     errorWrite: (ctx) => {
-      console.warn(`[denied] ${ctx.method} ${ctx.table}: ${ctx.error.message}`)
+      console.warn(`[отказ] ${ctx.method} ${ctx.table}: ${ctx.error.message}`)
     }
   },
+
+  // Именованный RPC-метод: своя серверная команда рядом со стандартным CRUD.
+  // Права проверяет сам — встроенные проверки на него не распространяются.
+  methods: {
+    "order.next-number": async ({ client }) => {
+      if (!accessAllows(client?.user?.access, "order", "write")) {
+        throw new Error("Недостаточно прав для выдачи номера")
+      }
+
+      const [last] = await mongo.collection("order").find({}).sort({ number: -1 }).limit(1).toArray()
+      return { number: (last?.number ?? 1000) + 1 }
+    }
+  },
+
   password: {
     hash: async (password) => `demo:${password}`,
     verify: async (password, passwordHash) => passwordHash === `demo:${password}`
@@ -115,5 +157,5 @@ wss.on("connection", (ws) => {
   dbState.socket.addClient(ws)
 })
 
-console.log(`db-state demo server: ws://127.0.0.1:${port}/db-state/ws`)
-console.log("users: admin/admin, manager/manager")
+console.log(`сервер demo db-state: ws://127.0.0.1:${port}/db-state/ws`)
+console.log("пользователи: admin/admin, manager/manager")
