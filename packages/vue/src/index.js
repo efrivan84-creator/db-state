@@ -348,12 +348,16 @@ async function resetLocalState(input) {
 }
 
 function resetRecord(target, id) {
+  // Ключ объекта всегда строка, а _id мог быть числом (numericIds) —
+  // сохраняем исходное значение, иначе следующий load уйдёт строкой.
+  const originalId = target._id ?? id
+
   for (const key of Object.keys(target)) {
     delete target[key]
   }
 
   Object.assign(target, {
-    _id: id,
+    _id: originalId,
     __cacheChecked: false,
     __loaded: false
   })

@@ -9,20 +9,23 @@ export function createTableApi(ctx) {
   const errors = reactive({})
   const tableHooks = (changeHooks ?? createChangeHooks([table])).tables.get(table)
 
+  // id приводится к строке только как ключ: ключи объекта и кэша всё равно
+  // строки. На сервер и в сам документ уходит исходное значение — при
+  // числовых _id (numericIds) строка "1" не совпала бы с числом 1 в Mongo.
   function load(id, key) {
     if (id == null) return undefined
     const normalizedId = String(id)
 
     if (!tables[table][normalizedId]) {
       tables[table][normalizedId] = reactive({
-        _id: normalizedId,
+        _id: id,
         __cacheChecked: false,
         __loaded: false
       })
     }
 
     if (!loading.has(normalizedId) && !tables[table][normalizedId].__loaded) {
-      queueLoad({ options, state, table, id: normalizedId, target: tables[table][normalizedId], loading, errors, key, loadingByKey, keyRefs })
+      queueLoad({ options, state, table, id: normalizedId, rawId: id, target: tables[table][normalizedId], loading, errors, key, loadingByKey, keyRefs })
     } else if (key) {
       trackLoadedKey({ key, loadingByKey, keyRefs, token: `${table}:${normalizedId}` })
     }
@@ -222,7 +225,8 @@ export function createTableApi(ctx) {
 
       for (const [id, item] of Object.entries(tables[table])) {
         if (!item.__loaded && !loading.has(id)) {
-          refreshes.push(queueLoad({ options, state, table, id, target: item, loading, errors, loadingByKey, keyRefs }))
+          // Ключ объекта всегда строка — исходный id берём из самого документа.
+          refreshes.push(queueLoad({ options, state, table, id, rawId: item._id ?? id, target: item, loading, errors, loadingByKey, keyRefs }))
         }
       }
 
@@ -299,8 +303,10 @@ export function clearAllIdsRefs(idsRefs) {
   }
 }
 
+// id — строковый ключ (кэш, реактивная ячейка, отметки загрузки),
+// rawId — исходное значение для сервера.
 async function queueLoad(input) {
-  const { options, state, table, id, target, loading, errors, key, loadingByKey, keyRefs } = input
+  const { options, state, table, id, rawId = id, target, loading, errors, key, loadingByKey, keyRefs } = input
   const token = `${table}:${id}`
   loading.add(id)
   delete errors[id]
@@ -316,7 +322,7 @@ async function queueLoad(input) {
 
     if (state.auth.status !== "authorized") return
 
-    const obj = await state.socket.rpc("load", { table, id })
+    const obj = await state.socket.rpc("load", { table, id: rawId })
     if (obj) {
       Object.assign(target, obj, { __cacheChecked: true, __loaded: true })
       await options.cache.set(table, id, obj)

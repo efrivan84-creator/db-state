@@ -4,6 +4,10 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.1.2
+
+- Fixed: with `numericIds` the Vue client could not `load()` a document. The client normalizes an id to a string for its keys — reactive table, cache, loading marks — but the same string was also sent to the server, and Mongo does not match `"1"` against `_id: 1`, so the read silently returned nothing. The string is now used only as a key; the server and the document's own `_id` keep the original value. Same fix in `__retryUnloaded` and `resetRecord`, which rebuilt the id from the object key (always a string) and so lost the type on reconnect and on user switch.
+
 ## 0.1.1
 
 - `createDbStateServer({ numericIds })` gives new documents a sequential integer `_id` — 1, 2, 3 — instead of a uuid. `true` covers every table, an array (`["order", "bill"]`) limits it to the listed ones; the default stays `false`, so nothing changes unless you opt in. Numbers come from a counter collection (`_counter`, one document per table, renamed via `counterCollection` and prefixed like the other service collections) through an atomic `$inc`, so concurrent writes never share a number — across processes too. An `_id` sent by the client is still used as-is and does not consume a number. Gaps are expected: the number is taken before the insert, so a failed or deleted write leaves a hole. Seeding a database by hand means seeding the counter too.
