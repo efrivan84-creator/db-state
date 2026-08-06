@@ -44,7 +44,7 @@
     "@db-state/core": "^0.1.0"
   },
   "peerDependencies": {
-    "@db-state/vue": "^0.0.11",
+    "@db-state/vue": "^0.1.0",
     "vue": ">=3.0.0"
   }
 }
