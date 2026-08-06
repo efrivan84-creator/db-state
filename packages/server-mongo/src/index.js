@@ -22,6 +22,7 @@ import {
 import { createAuth, defaultAuthHash, defaultPassword } from "./auth.js"
 import { runErrorHooks, runHooks } from "./hooks.js"
 import { createMethodsDirResolver } from "./methods-dir.js"
+import { DEFAULT_COUNTER_COLLECTION, nextNumericId, useNumericId } from "./numeric-id.js"
 import { createHandlers, handleRpc } from "./rpc.js"
 import { createSocketHub } from "./socket.js"
 
@@ -56,6 +57,13 @@ export function createDbStateServer(options) {
     if (message.type === DB_STATE_MESSAGES.rpc) return handleRpc(router, client, message, resolveFileMethod)
   })
   const changesBroadcaster = createChangesBroadcaster(socket, config)
+
+  // Ключ нового документа, когда клиент не прислал свой.
+  // По умолчанию uuid; для таблиц из numericIds — номер по порядку от счётчика.
+  async function createDocId(table) {
+    if (!useNumericId(config.numericIds, table)) return config.createLogId()
+    return nextNumericId(config.mongo, config.counterCollection, table)
+  }
 
   // Общий проход записи: подготовка → beforeWrite → access группы → запись →
   // журнал → рассылка → afterWrite. afterWrite запретить уже не может.
@@ -139,7 +147,7 @@ export function createDbStateServer(options) {
 
     return runWrite(ctx, {
       prepare: async () => {
-        ctx.id = obj._id ?? obj.id ?? config.createLogId()
+        ctx.id = obj._id ?? obj.id ?? await createDocId(table)
         // id принимается как источник ключа, но в документ не попадает:
         // ключ документа — только _id.
         const { id, ...clientObj } = stripInfoObject(obj)
@@ -475,8 +483,10 @@ function normalizeOptions(options) {
 
   return {
     authRateLimit: undefined,
+    counterCollection: createPrefixedTableName(servicePrefix, "counter", DEFAULT_COUNTER_COLLECTION),
     createAuthHash: defaultAuthHash,
     createLogId: defaultId,
+    numericIds: false,
     changesBroadcastDelay: 3000,
     changesBroadcastRate: 100,
     getUser: async ({ req, client }) => req?.user ?? req?.client?.user ?? client?.user ?? makeUser(req?.client ?? req ?? client),

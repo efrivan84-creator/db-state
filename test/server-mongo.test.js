@@ -326,6 +326,92 @@ test("add strips client info and writes server create info", async () => {
   })
 })
 
+test("numericIds gives new documents sequential _id per table", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order", "bill"],
+    numericIds: true,
+    now: () => "2026-05-21T10:00:01.000Z",
+    createLogId: () => "log1"
+  })
+  await mongo.collection("_group").insertOne({
+    _id: "admins",
+    access: { order: { read: {}, write: {} }, bill: { read: {}, write: {} } }
+  })
+
+  const first = await server.add({ table: "order", obj: { status: "open" }, sessionId: "s1", req: adminReq() })
+  const second = await server.add({ table: "order", obj: { status: "open" }, sessionId: "s1", req: adminReq() })
+  // Счётчик отдельный на каждую таблицу — нумерация bill начинается заново.
+  const other = await server.add({ table: "bill", obj: { sum: 10 }, sessionId: "s1", req: adminReq() })
+
+  assert.equal(first.id, 1)
+  assert.equal(second.id, 2)
+  assert.equal(other.id, 1)
+  assert.equal((await mongo.collection("order").findOne({ _id: 2 })).status, "open")
+  // Ключ в журнале тот же, что у документа.
+  assert.equal(second.change.id, 2)
+})
+
+test("numericIds keeps an _id sent by the client and does not spend a number", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    numericIds: true,
+    now: () => "2026-05-21T10:00:01.000Z",
+    createLogId: () => "log1"
+  })
+  await allowTable(mongo, "order", "admins")
+
+  const own = await server.add({ table: "order", obj: { _id: 100, status: "open" }, sessionId: "s1", req: adminReq() })
+  const next = await server.add({ table: "order", obj: { status: "open" }, sessionId: "s1", req: adminReq() })
+
+  assert.equal(own.id, 100)
+  assert.equal(next.id, 1)
+})
+
+test("numericIds as a list numbers only the listed tables", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order", "bill"],
+    numericIds: ["order"],
+    now: () => "2026-05-21T10:00:01.000Z",
+    createLogId: () => "uuid-1"
+  })
+  await mongo.collection("_group").insertOne({
+    _id: "admins",
+    access: { order: { read: {}, write: {} }, bill: { read: {}, write: {} } }
+  })
+
+  const numbered = await server.add({ table: "order", obj: { status: "open" }, sessionId: "s1", req: adminReq() })
+  const plain = await server.add({ table: "bill", obj: { sum: 10 }, sessionId: "s1", req: adminReq() })
+
+  assert.equal(numbered.id, 1)
+  assert.equal(plain.id, "uuid-1")
+})
+
+test("counter collection follows the service prefix and can be overridden", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    prefix: "shop",
+    tables: ["order"],
+    numericIds: true,
+    now: () => "2026-05-21T10:00:01.000Z",
+    createLogId: () => "log1"
+  })
+  await mongo.collection("shop_group").insertOne({
+    _id: "admins",
+    access: { order: { read: {}, write: {} } }
+  })
+
+  await server.add({ table: "order", obj: { status: "open" }, sessionId: "s1", req: adminReq() })
+
+  assert.equal((await mongo.collection("shop_counter").findOne({ _id: "order" })).seq, 1)
+})
+
 test("update strips client info and writes server edit info", async () => {
   const mongo = createMemoryMongo()
   const server = createDbStateServer({
@@ -1764,6 +1850,22 @@ class MemoryCollection {
   async insertOne(item) {
     this.#items.push({ ...item })
     return { insertedId: item._id }
+  }
+
+  async findOneAndUpdate(filter, update, options = {}) {
+    let item = await this.findOne(filter)
+
+    if (!item && options.upsert) {
+      item = { _id: filter._id }
+      this.#items.push(item)
+    }
+    if (!item) return null
+
+    for (const [key, value] of Object.entries(update.$inc ?? {})) {
+      item[key] = (item[key] ?? 0) + value
+    }
+
+    return options.returnDocument === "after" ? { ...item } : null
   }
 
   async deleteOne(filter) {

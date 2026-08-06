@@ -103,6 +103,17 @@ export interface DbStateServerConfig {
   /** Log-id generator. Default: `crypto.randomUUID` or timestamp+random fallback. */
   createLogId?: () => string
 
+  /**
+   * Sequential integer `_id` for new documents instead of a uuid.
+   * `true` enables it for every table, an array limits it to the listed ones.
+   * Numbers come from the counter collection via an atomic `$inc`.
+   * An `_id` sent by the client is still used as-is. Default: `false`.
+   */
+  numericIds?: boolean | ReadonlyArray<string>
+
+  /** Name of the counter collection used by `numericIds`. Default `"_counter"`. */
+  counterCollection?: string
+
   /** Returns the user attached to an incoming RPC. Default: reads `req.client.user`. */
   getUser?: GetUserFn
 

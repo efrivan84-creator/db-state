@@ -55,6 +55,8 @@ createDbStateServer(config: DbStateServerConfig): DbStateServer
 | `onAuthWarning` | `(warning) => void` | undefined | Optional security warning hook, currently `ambiguous_auth_login`. |
 | `createAuthHash` | `() => string` | 32 random hex | Auth-hash generator. |
 | `createLogId` | `() => string` | `crypto.randomUUID()` | Log entry id generator. |
+| `numericIds` | `boolean \| string[]` | `false` | Sequential integer `_id` for new documents instead of a uuid. `true` covers every table, an array limits it to the listed ones. An `_id` sent by the client is used as-is. |
+| `counterCollection` | `string` | `"_counter"` | Counter collection used by `numericIds`; follows the service prefix. |
 | `getUser` | `GetUserFn` | reads `req.client.user` | Resolve calling user. |
 | `logCollection` | `string` | `"log"` | Log collection name. |
 | `userTable` | `string` | `"_user"` | Users collection. |

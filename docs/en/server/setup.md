@@ -117,11 +117,12 @@ createDbStateServer({
   tables: ["order", "product"],  // required: app table names
 
   // Optional:
-  hooks:            { ... },     // lifecycle hooks (see hooks.md)
   hooks:            { ... },     // before/after/error read/write lifecycle hooks
   password:         { hash, verify },  // password adapter (default: PBKDF2)
   createAuthHash:   () => string,      // default: 32 random bytes hex
   createLogId:      () => string,      // default: crypto.randomUUID()
+  numericIds:       true,        // sequential integer _id (true or ["order", "bill"])
+  counterCollection: "_counter", // counter collection used by numericIds
   getUser:          async (ctx) => user, // resolve user from request
   servicePrefix:    "cfg",       // optional: cfg_user/cfg_group/cfg_log
   logCollection:    "log",       // log collection name

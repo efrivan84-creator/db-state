@@ -4,6 +4,10 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.1.1
+
+- `createDbStateServer({ numericIds })` gives new documents a sequential integer `_id` — 1, 2, 3 — instead of a uuid. `true` covers every table, an array (`["order", "bill"]`) limits it to the listed ones; the default stays `false`, so nothing changes unless you opt in. Numbers come from a counter collection (`_counter`, one document per table, renamed via `counterCollection` and prefixed like the other service collections) through an atomic `$inc`, so concurrent writes never share a number — across processes too. An `_id` sent by the client is still used as-is and does not consume a number. Gaps are expected: the number is taken before the insert, so a failed or deleted write leaves a hole. Seeding a database by hand means seeding the counter too.
+
 ## 0.1.0
 
 - **Breaking sync change:** `syncLimit` and the client-provided change limit are removed. Each server response covers at most 12 hours, `hasMore` makes the Vue client catch up through consecutive windows, and cursors older than 20 days return `reset: true` so the client clears its cache and reloads current state.

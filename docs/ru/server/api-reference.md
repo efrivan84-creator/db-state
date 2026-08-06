@@ -39,6 +39,8 @@ const dbState = createDbStateServer({
 | `password` | Password adapter. |
 | `socket` | Socket hub config. |
 | `files` | File modules. |
+| `numericIds` | Числовые `_id` по порядку вместо uuid: `true` или список таблиц. |
+| `counterCollection` | Коллекция счётчиков для `numericIds`, по умолчанию `_counter`. |
 | `systemUserId` | Actor для внутренних writes. |
 
 ## `DbStateServer`
