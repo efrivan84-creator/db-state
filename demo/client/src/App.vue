@@ -257,7 +257,7 @@ const removeOrder = () => run(async () => {
                 <th class="py-2">Клиент</th>
                 <th class="py-2">Статус</th>
                 <th class="py-2 text-right">Сумма</th>
-                <th class="py-2 text-right">Маржа</th>
+                <th class="py-2 pr-6 text-right">Маржа</th>
                 <th class="py-2">Владелец</th>
               </tr>
             </thead>
@@ -273,7 +273,7 @@ const removeOrder = () => run(async () => {
                 <td class="py-2">{{ row.client ?? "…" }}</td>
                 <td class="py-2">{{ row.status ?? "…" }}</td>
                 <td class="py-2 text-right">{{ row.total ?? "…" }}</td>
-                <td class="py-2 text-right" :class="row.margin === undefined ? 'text-gray-300' : ''">
+                <td class="py-2 pr-6 text-right" :class="row.margin === undefined ? 'text-gray-300' : ''">
                   {{ row.margin ?? "—" }}
                 </td>
                 <td class="py-2 text-xs" :class="row.ownerId === state.auth.userId ? 'text-emerald-700' : 'text-gray-500'">
