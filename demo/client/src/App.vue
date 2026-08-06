@@ -65,7 +65,7 @@ function humanize(message) {
   if (MESSAGES[message]) return MESSAGES[message]
   const field = message.match(/^Write denied: field (.+)$/)
   if (field) return `Запись запрещена: поле «${field[1]}» вне ваших прав`
-  if (message.startsWith("Write denied")) return "Запись запрещена правами группы"
+  if (message.startsWith("Write denied")) return "Запись запрещена: это чужой заказ"
   if (message.startsWith("Read denied")) return "Чтение запрещено правами группы"
   return message
 }
@@ -131,13 +131,15 @@ const saveArchived = () => run(
 const addOrder = () => run(async () => {
   // Именованный RPC-метод сервера рядом со стандартным CRUD.
   const { number } = await state.socket.rpc("order.next-number", {})
+  // ownerId обязателен: право на запись у менеджера — { ownerId: "$adminid" },
+  // и для add фильтр проверяется по новому документу.
   return state.order.add({
     number,
     status: "новый",
     client: "Новый клиент",
     total: 1000,
     comment: "",
-    margin: 200
+    ownerId: state.auth.userId
   }, "список")
 }, "Заказ создан")
 
@@ -244,8 +246,8 @@ const removeOrder = () => run(async () => {
           </div>
           <p class="mt-1 text-xs text-gray-500">
             listRef: список сам перечитывается после любой записи. Номер выдаёт свой RPC-метод order.next-number.
-            Создание доступно руководителю: у менеджера write_fields разрешает только статус и комментарий,
-            поэтому новый заказ будет отклонён.
+            Менеджер видит все заказы, но правит и удаляет только свои — право на запись у него
+            ограничено фильтром { ownerId: "$adminid" }, и этот фильтр уходит прямо в запрос к базе.
           </p>
 
           <table class="mt-3 w-full text-left text-sm">
@@ -256,6 +258,7 @@ const removeOrder = () => run(async () => {
                 <th class="py-2">Статус</th>
                 <th class="py-2 text-right">Сумма</th>
                 <th class="py-2 text-right">Маржа</th>
+                <th class="py-2">Владелец</th>
               </tr>
             </thead>
             <tbody>
@@ -272,6 +275,9 @@ const removeOrder = () => run(async () => {
                 <td class="py-2 text-right">{{ row.total ?? "…" }}</td>
                 <td class="py-2 text-right" :class="row.margin === undefined ? 'text-gray-300' : ''">
                   {{ row.margin ?? "—" }}
+                </td>
+                <td class="py-2 text-xs" :class="row.ownerId === state.auth.userId ? 'text-emerald-700' : 'text-gray-500'">
+                  {{ row.ownerId === state.auth.userId ? "мой" : "чужой" }}
                 </td>
               </tr>
             </tbody>

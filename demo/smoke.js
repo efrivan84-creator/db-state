@@ -36,7 +36,8 @@ try {
     status: "новый",
     client: "ООО Ромашка",
     total: 1200,
-    comment: "Позвонить до обеда"
+    comment: "Позвонить до обеда",
+    ownerId: "u_manager"
   })
 
   // Списки, счётчик и уникальные значения.
@@ -98,15 +99,57 @@ try {
   const next = await rpc(ws, messages, "order.next-number", {})
   assert.equal(next.number, 1005)
 
-  // Создать заказ менеджер не может: write_fields разрешает только
-  // status и comment, а add пишет ещё number, client и total.
+  // Менеджер создаёт свой заказ: фильтр { ownerId: "$adminid" } проверяется
+  // для add по новому документу.
+  const own = await rpc(ws, messages, "add", {
+    table: "order",
+    obj: { number: next.number, status: "новый", client: "АО Тест", total: 10, ownerId: "u_manager" },
+    sessionId: "smoke_manager"
+  })
+  assert.equal(own.ok, true)
+
+  // Чужой заказ создать нельзя — фильтр не пропускает.
   await assert.rejects(
     () => rpc(ws, messages, "add", {
       table: "order",
-      obj: { number: next.number, status: "новый", client: "АО Тест", total: 10 },
+      obj: { number: next.number + 1, status: "новый", client: "АО Тест", total: 10, ownerId: "u_admin" },
       sessionId: "smoke_manager"
     }),
-    /Write denied: field/
+    /Write denied: order/
+  )
+
+  // Своё удаляем, чужое — нет.
+  assert.equal((await rpc(ws, messages, "remove", {
+    table: "order",
+    id: own.id,
+    sessionId: "smoke_manager"
+  })).ok, true)
+
+  await assert.rejects(
+    () => rpc(ws, messages, "remove", { table: "order", id: "o3", sessionId: "smoke_manager" }),
+    /Write denied: order/
+  )
+
+  // Чужой заказ нельзя и править.
+  await assert.rejects(
+    () => rpc(ws, messages, "update", {
+      table: "order",
+      id: "o3",
+      set: { status: "тест" },
+      sessionId: "smoke_manager"
+    }),
+    /Write denied: order/
+  )
+
+  // Маржа по-прежнему вне прав менеджера даже в своём заказе.
+  await assert.rejects(
+    () => rpc(ws, messages, "update", {
+      table: "order",
+      id: "o1",
+      set: { margin: 5 },
+      sessionId: "smoke_manager"
+    }),
+    /Write denied: field margin/
   )
 
   // Неизвестная таблица отклоняется.
@@ -157,7 +200,7 @@ try {
   const nextAdmin = await rpc(adminWs, adminMessages, "order.next-number", {})
   const created = await rpc(adminWs, adminMessages, "add", {
     table: "order",
-    obj: { number: nextAdmin.number, status: "новый", client: "АО Тест", total: 10, margin: 2 },
+    obj: { number: nextAdmin.number, status: "новый", client: "АО Тест", total: 10, margin: 2, ownerId: "u_admin" },
     sessionId: "smoke_admin"
   })
   assert.equal(created.ok, true)

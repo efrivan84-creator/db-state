@@ -31,13 +31,16 @@ const mongo = createMemoryMongo({
     {
       _id: "manager",
       name: "Менеджер",
-      // Те же строки, но не все поля: маржу менеджер не видит и не правит.
       access: {
         order: {
+          // Читает все заказы, но не все поля: маржу не видит.
           read: {},
-          read_fields: ["number", "status", "client", "total", "comment"],
-          write: {},
-          write_fields: ["status", "comment"]
+          read_fields: ["number", "status", "client", "total", "comment", "ownerId"],
+          // Писать может только в свои заказы: фильтр уходит в запрос к базе.
+          // Для add он проверяется по новому документу, для update и
+          // remove — по существующему.
+          write: { ownerId: "$adminid" },
+          write_fields: ["number", "status", "client", "total", "comment", "ownerId"]
         }
       }
     }
@@ -50,7 +53,8 @@ const mongo = createMemoryMongo({
       client: "ООО Ромашка",
       total: 1200,
       comment: "Позвонить до обеда",
-      margin: 340
+      margin: 340,
+      ownerId: "u_manager"
     },
     {
       _id: "o2",
@@ -59,7 +63,8 @@ const mongo = createMemoryMongo({
       client: "ИП Петров",
       total: 500,
       comment: "Закрыт в прошлом году",
-      margin: 90
+      margin: 90,
+      ownerId: "u_manager"
     },
     {
       _id: "o3",
@@ -68,7 +73,8 @@ const mongo = createMemoryMongo({
       client: "ООО Ромашка",
       total: 8400,
       comment: "Ждём предоплату",
-      margin: 1500
+      margin: 1500,
+      ownerId: "u_admin"
     },
     {
       _id: "o4",
@@ -77,7 +83,8 @@ const mongo = createMemoryMongo({
       client: "АО Вектор",
       total: 3100,
       comment: "",
-      margin: 620
+      margin: 620,
+      ownerId: "u_admin"
     }
   ]
 })
@@ -86,8 +93,9 @@ const dbState = createDbStateServer({
   mongo,
   tables: ["order"],
 
-  // Права целиком в access групп (см. _group выше): руководитель видит всё,
-  // менеджер — те же строки, но без поля margin.
+  // Права целиком в access групп (см. _group выше): руководитель видит и
+  // правит всё, менеджер читает все заказы без поля margin, а пишет только
+  // в свои — фильтр { ownerId: "$adminid" } уходит прямо в запрос к базе.
   //
   // Хуки — для того, что фильтром не выразить. Каждый объявляется один раз
   // на весь сервер, таблица разбирается внутри по ctx.table.
@@ -101,7 +109,7 @@ const dbState = createDbStateServer({
       // Динамическое сужение полей: ctx.fields уходит в projection запроса.
       // Сузить можно, расширить сверх read_fields группы — нет.
       if (ctx.method === "load" && !ctx.user.groups.includes("admin")) {
-        ctx.fields = ["number", "status", "client", "total", "comment"]
+        ctx.fields = ["number", "status", "client", "total", "comment", "ownerId"]
       }
 
       // Ничего не вернули → дальше решает access группы.
