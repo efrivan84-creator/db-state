@@ -158,8 +158,7 @@ By default the client uses these keys:
 |---|---|---|
 | `sessionStorage` | `db-state.sessionId` | per-tab session id (used by sync to suppress echo) |
 | `localStorage` | `db-state.time1` | last successful sync timestamp |
-| `localStorage` | `db-state.userId` | saved auth user id |
-| `localStorage` | `db-state.authHash` | saved auth hash |
+| `localStorage` | `db-state.auth` | saved sign-in as JSON `{ userId, hash }` |
 | IndexedDB | `db-state` / `records` | cached documents |
 | IndexedDB | `db-state` / `__dbstate_query` | cached `idsRef` and `countRef` values |
 
@@ -170,8 +169,7 @@ createDbState({
   tables: ["order"],
   sessionKey: "myapp.sessionId",
   syncKey:    "myapp.time1",
-  userIdKey:  "myapp.userId",
-  authHashKey: "myapp.authHash",
+  authKey:    "myapp.auth",
   cache: createIndexedDbCache({ name: "myapp-cache" })
 })
 ```

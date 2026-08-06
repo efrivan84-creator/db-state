@@ -93,17 +93,22 @@ export interface DbStateOptions<TSchema extends DbStateSchema = DbStateSchema> {
   metaStorage?: StorageLike
   /** Storage for `sessionId`. Default: `sessionStorage`. */
   sessionStorage?: StorageLike
-  /** Storage for `userId` / `authHash`. Default: `localStorage`. */
+  /** Storage for the saved sign-in. Default: `localStorage`. */
   authStorage?: StorageLike
 
   /** Custom key names for the storages above. */
   sessionKey?: string
   syncKey?: string
-  userIdKey?: string
-  authHashKey?: string
+
+  /**
+   * Key holding the saved sign-in as JSON `{ userId, hash }`.
+   * Default `"db-state.auth"`. JSON keeps the type of `userId`, which a
+   * plain string value would lose when `_id` is numeric.
+   */
+  authKey?: string
 
   /** Pre-seed the saved user id (overrides `authStorage`). */
-  userId?: string
+  userId?: string | number
 
   /** Reconnect delay after socket close, ms. Default `1000`. */
   reconnectDelay?: number
@@ -140,7 +145,8 @@ export interface SyncState {
 }
 
 export interface AuthState {
-  userId: string | null
+  /** Keeps the type the server sent: a number when `_id` is numeric. */
+  userId: string | number | null
   hash: string | null
   /** Login of the signed-in user, from the server response. `null` when anonymous. */
   login: string | null
@@ -154,7 +160,7 @@ export interface AuthState {
 /** Result of `state.login` / `authByHash`. */
 export interface AuthResult {
   ok: true
-  userId: string
+  userId: string | number
   login?: string
   hash: string
   groups: string[]

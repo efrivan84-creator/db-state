@@ -5,7 +5,7 @@ import { createIndexedDbCache, createMemoryCache, createStorageCache } from "./c
 import { createChangeHooks, notifyChangeHooks, subscribe } from "./hooks.js"
 import { getKeyRef } from "./keys.js"
 import { createSocketFacade } from "./socket.js"
-import { getSessionId, safeStorage } from "./storage.js"
+import { getSessionId, readAuth, safeStorage, writeAuth } from "./storage.js"
 import {
   clearAllCountRefs,
   clearAllIdsRefs,
@@ -25,8 +25,9 @@ export function createDbState(input) {
   const idsRefs = new Map()
   const changeHooks = createChangeHooks(options.tables)
   const sessionId = getSessionId(options.sessionStorage, options.sessionKey, options.userId)
-  const savedUserId = options.authStorage.getItem(options.userIdKey)
-  const savedAuthHash = options.authStorage.getItem(options.authHashKey)
+  const savedAuth = readAuth(options.authStorage, options.authKey)
+  const savedUserId = savedAuth?.userId ?? null
+  const savedAuthHash = savedAuth?.hash ?? null
   let syncPromise
   let autoAuthPromise
 
@@ -292,8 +293,7 @@ function normalizeOptions(input) {
     sessionKey: "db-state.sessionId",
     sessionStorage: safeStorage("sessionStorage"),
     authStorage: safeStorage("localStorage"),
-    authHashKey: "db-state.authHash",
-    userIdKey: "db-state.userId",
+    authKey: "db-state.auth",
     syncKey: "db-state.time1",
     syncOnAuth: true,
     waitTimeout: 15000,
@@ -378,13 +378,11 @@ function clearAuthUser(state) {
 }
 
 function saveAuth(options, result) {
-  options.authStorage.setItem(options.userIdKey, result.userId)
-  options.authStorage.setItem(options.authHashKey, result.hash)
+  writeAuth(options.authStorage, options.authKey, result)
 }
 
 function clearAuth(options) {
-  options.authStorage.removeItem(options.userIdKey)
-  options.authStorage.removeItem(options.authHashKey)
+  options.authStorage.removeItem(options.authKey)
 }
 
 function applyReactiveChange(tables, change) {

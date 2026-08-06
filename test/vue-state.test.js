@@ -609,8 +609,7 @@ test("login clears stale cached load in place before retrying it", async () => {
 test("autoAuth refreshes uncached reactive refs after authorization", async () => {
   const cache = createMemoryCache()
   const storage = testStorage()
-  storage.authStorage.setItem("db-state.userId", "u1")
-  storage.authStorage.setItem("db-state.authHash", "h1")
+  storage.authStorage.setItem("db-state.auth", JSON.stringify({ userId: "u1", hash: "h1" }))
   const state = createDbState({
     autoConnect: false,
     cache,
@@ -679,8 +678,7 @@ test("autoAuth refreshes cached query refs only for synced changed tables", asyn
   ))
 
   const storage = testStorage()
-  storage.authStorage.setItem("db-state.userId", "u1")
-  storage.authStorage.setItem("db-state.authHash", "h1")
+  storage.authStorage.setItem("db-state.auth", JSON.stringify({ userId: "u1", hash: "h1" }))
   const secondState = createDbState({
     autoConnect: false,
     cache,
@@ -744,8 +742,7 @@ test("autoAuth refreshes cached query refs only for synced changed tables", asyn
 test("autoAuth clears stale saved credentials when hash auth is rejected", async () => {
   const cache = createMemoryCache()
   const storage = testStorage()
-  storage.authStorage.setItem("db-state.userId", "u1")
-  storage.authStorage.setItem("db-state.authHash", "bad")
+  storage.authStorage.setItem("db-state.auth", JSON.stringify({ userId: "u1", hash: "bad" }))
   const errors = []
   const state = createDbState({
     autoConnect: false,
@@ -764,15 +761,13 @@ test("autoAuth clears stale saved credentials when hash auth is rejected", async
   assert.equal(state.auth.status, "anonymous")
   assert.equal(state.auth.userId, null)
   assert.equal(state.auth.hash, null)
-  assert.equal(storage.authStorage.getItem("db-state.userId"), null)
-  assert.equal(storage.authStorage.getItem("db-state.authHash"), null)
+  assert.equal(storage.authStorage.getItem("db-state.auth"), null)
   assert.deepEqual(errors, ["Unauthorized"])
 })
 
 test("saved credentials start in restored status for offline cached reads", () => {
   const storage = testStorage()
-  storage.authStorage.setItem("db-state.userId", "u1")
-  storage.authStorage.setItem("db-state.authHash", "h1")
+  storage.authStorage.setItem("db-state.auth", JSON.stringify({ userId: "u1", hash: "h1" }))
   const state = createDbState({
     autoConnect: false,
     cache: createMemoryCache(),
@@ -786,14 +781,53 @@ test("saved credentials start in restored status for offline cached reads", () =
   assert.equal(state.auth.hash, "h1")
 })
 
+test("a numeric user id survives being saved and restored", () => {
+  const storage = testStorage()
+  // Как это записал бы login при numericIds: userId — число.
+  storage.authStorage.setItem("db-state.auth", JSON.stringify({ userId: 1, hash: "h1" }))
+
+  const state = createDbState({
+    autoConnect: false,
+    cache: createMemoryCache(),
+    safetySyncInterval: 0,
+    ...storage,
+    tables: ["order"]
+  })
+
+  // Плоская строка вернулась бы как "1", и authByHash не нашёл бы
+  // пользователя с _id: 1.
+  assert.equal(state.auth.userId, 1)
+  assert.equal(typeof state.auth.userId, "number")
+  assert.equal(state.auth.status, "restored")
+})
+
+test("a damaged saved sign-in is treated as no sign-in", () => {
+  for (const raw of ["not json", "null", '{"userId":"u1"}', '{"hash":"h1"}', "[]"]) {
+    const storage = testStorage()
+    storage.authStorage.setItem("db-state.auth", raw)
+
+    const state = createDbState({
+      autoConnect: false,
+      cache: createMemoryCache(),
+      safetySyncInterval: 0,
+      ...storage,
+      tables: ["order"]
+    })
+
+    // Ни падения, ни полувосстановленного состояния: пара нужна целиком.
+    assert.equal(state.auth.status, "anonymous", `raw: ${raw}`)
+    assert.equal(state.auth.userId, null, `raw: ${raw}`)
+    assert.equal(state.auth.hash, null, `raw: ${raw}`)
+  }
+})
+
 test("socket close downgrades current authorization to restored when credentials are saved", async () => {
   const OriginalWebSocket = globalThis.WebSocket
   globalThis.WebSocket = FakeWebSocket
 
   try {
     const storage = testStorage()
-    storage.authStorage.setItem("db-state.userId", "u1")
-    storage.authStorage.setItem("db-state.authHash", "h1")
+    storage.authStorage.setItem("db-state.auth", JSON.stringify({ userId: "u1", hash: "h1" }))
     const state = createDbState({
       autoAuth: false,
       cache: createMemoryCache(),
@@ -856,8 +890,7 @@ test("socket rpc emits the result envelope for diagnostics", async () => {
 test("load before restored authorization uses cache only and retries unloaded documents after authorization", async () => {
   const cache = createMemoryCache()
   const storage = testStorage()
-  storage.authStorage.setItem("db-state.userId", "u1")
-  storage.authStorage.setItem("db-state.authHash", "h1")
+  storage.authStorage.setItem("db-state.auth", JSON.stringify({ userId: "u1", hash: "h1" }))
   const state = createDbState({
     autoConnect: false,
     cache,

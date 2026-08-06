@@ -4,6 +4,10 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.1.3
+
+- **Breaking: the saved sign-in is stored as one JSON object.** `userIdKey` and `authHashKey` are replaced by a single `authKey` (default `"db-state.auth"`) holding `{ userId, hash }`. Storages only hold strings, so the flat value lost its type: with `numericIds` a numeric `_id` came back as `"1"`, `authByHash()` asked the server for `_id: "1"`, got `Unauthorized`, and then cleared the saved credentials — "remember me" silently stopped working and could not retry. JSON keeps the type, and writing the pair as one value also removes the "id saved, hash missing" state. A damaged or foreign value is treated as no sign-in at all. The old two-key format is not read: anyone signed in before the upgrade signs in once more.
+
 ## 0.1.2
 
 - Fixed: with `numericIds` the Vue client could not `load()` a document. The client normalizes an id to a string for its keys — reactive table, cache, loading marks — but the same string was also sent to the server, and Mongo does not match `"1"` against `_id: 1`, so the read silently returned nothing. The string is now used only as a key; the server and the document's own `_id` keep the original value. Same fix in `__retryUnloaded` and `resetRecord`, which rebuilt the id from the object key (always a string) and so lost the type on reconnect and on user switch.

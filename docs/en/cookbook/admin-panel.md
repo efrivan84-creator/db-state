@@ -28,8 +28,7 @@ export const state = createDbState({
   wsUrl: "ws://127.0.0.1:8788/db-state/ws",
   sessionKey: "admin.sessionId",
   syncKey: "admin.time1",
-  userIdKey: "admin.userId",
-  authHashKey: "admin.authHash"
+  authKey: "admin.auth"
 })
 ```
 

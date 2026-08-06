@@ -51,12 +51,11 @@ createDbState<Schema>(["order", "product"])
 | `cache` | `DbStateCache` | `createIndexedDbCache()` | Document cache backend. |
 | `metaStorage` | `StorageLike` | `localStorage` | For `time1`. |
 | `sessionStorage` | `StorageLike` | `sessionStorage` | For session id. |
-| `authStorage` | `StorageLike` | `localStorage` | For saved `userId`/`hash`. |
+| `authStorage` | `StorageLike` | `localStorage` | For the saved sign-in. |
 | `sessionKey` | `string` | `"db-state.sessionId"` | Storage key. |
 | `syncKey` | `string` | `"db-state.time1"` | Storage key. |
-| `userIdKey` | `string` | `"db-state.userId"` | Storage key. |
-| `authHashKey` | `string` | `"db-state.authHash"` | Storage key. |
-| `userId` | `string` | — | Pre-seed user id (overrides `authStorage`). |
+| `authKey` | `string` | `"db-state.auth"` | Storage key holding `{ userId, hash }` as JSON. |
+| `userId` | `string \| number` | — | Pre-seed user id (overrides `authStorage`). |
 | `reconnectDelay` | `number` | `1000` | ms before WebSocket reconnect. |
 | `rpcTimeout` | `number` | `15000` | ms for RPC waits. |
 | `safetySyncInterval` | `number` | `0` | Optional background sync interval. Disabled by default. |
