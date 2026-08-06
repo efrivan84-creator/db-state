@@ -5,6 +5,12 @@ import { state } from "./state.js"
 
 const login = ref("manager")
 const password = ref("manager")
+
+// В demo пароль совпадает с логином — подставляем его при смене пользователя,
+// чтобы выбор в списке не приводил к «Invalid login or password».
+watch(login, (next) => {
+  password.value = next
+})
 const error = ref("")
 const info = ref("")
 const journal = ref([])
@@ -48,6 +54,22 @@ function note(text) {
   journal.value = [`${new Date().toLocaleTimeString("ru-RU")} — ${text}`, ...journal.value].slice(0, 8)
 }
 
+// Сообщения библиотеки приходят по-английски — показываем их по-русски.
+const MESSAGES = {
+  "Invalid login or password": "Неверный логин или пароль",
+  "Unauthorized": "Требуется авторизация",
+  "Too many attempts": "Слишком много попыток"
+}
+
+function humanize(message) {
+  if (MESSAGES[message]) return MESSAGES[message]
+  const field = message.match(/^Write denied: field (.+)$/)
+  if (field) return `Запись запрещена: поле «${field[1]}» вне ваших прав`
+  if (message.startsWith("Write denied")) return "Запись запрещена правами группы"
+  if (message.startsWith("Read denied")) return "Чтение запрещено правами группы"
+  return message
+}
+
 async function run(action, okText) {
   error.value = ""
   info.value = ""
@@ -56,7 +78,7 @@ async function run(action, okText) {
     const result = await action()
     info.value = typeof okText === "function" ? okText(result) : okText
   } catch (err) {
-    error.value = err.message
+    error.value = humanize(err.message)
   }
 }
 
@@ -165,7 +187,8 @@ const removeOrder = () => run(async () => {
             Войти
           </button>
           <p class="mt-3 text-xs text-gray-500">
-            Пароль совпадает с логином. У менеджера поле «маржа» скрыто и защищено от записи.
+            Пароль совпадает с логином и подставляется сам при выборе пользователя.
+            У менеджера поле «маржа» скрыто и защищено от записи.
           </p>
           <div class="mt-3 flex flex-wrap gap-2">
             <button type="button" class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50" @click="signOut">
