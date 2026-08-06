@@ -345,7 +345,6 @@ function resetRecord(target, id) {
   }
 
   Object.assign(target, {
-    id,
     _id: id,
     __cacheChecked: false,
     __loaded: false
@@ -375,7 +374,8 @@ function applyReactiveChange(tables, change) {
   }
 
   if (change.action === "insert") {
-    const obj = change.obj ?? { _id: change.id }
+    // _id есть всегда: на него опираются ключи списков и выбор записи.
+    const obj = { _id: change.id, ...change.obj }
 
     if (table[change.id]) {
       replaceRecord(table[change.id], obj)
@@ -383,9 +383,6 @@ function applyReactiveChange(tables, change) {
       table[change.id] = { ...obj }
     }
 
-    // Документы из load всегда имеют id, и код вокруг (ключи списков,
-    // выбор строки) на него рассчитывает. В кэш это поле не уходит.
-    table[change.id].id = change.id
     return
   }
 
@@ -444,10 +441,7 @@ async function writeCache(cache, change, obj, wasLoaded) {
   }
 }
 
-// В кэш пишем то же, что кладёт load: без служебных __-полей и без
-// клиентского id (сервер отдаёт только _id).
+// В кэш пишем то же, что кладёт load: без служебных __-полей.
 function cleanRecord(obj) {
-  return Object.fromEntries(
-    Object.entries(obj).filter(([key]) => !key.startsWith("__") && key !== "id")
-  )
+  return Object.fromEntries(Object.entries(obj).filter(([key]) => !key.startsWith("__")))
 }

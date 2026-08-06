@@ -56,7 +56,7 @@ test("sync update caches records that were already fully loaded", async () => {
   })
 })
 
-test("inserted records expose id like loaded ones, without leaking it into cache", async () => {
+test("records are keyed by _id only, with no mirrored id field", async () => {
   const cache = createMemoryCache()
   const state = createDbState({
     autoConnect: false,
@@ -75,10 +75,24 @@ test("inserted records expose id like loaded ones, without leaking it into cache
     obj: { _id: "o9", status: "новый" }
   })
 
-  // Списки строятся по row.id — у созданной записи оно должно быть.
-  assert.equal(state.order.load("o9").id, "o9")
-  // А в кэше лежит ровно то, что отдаёт сервер: без клиентского id.
+  // Списки строятся по row._id — он есть и у созданной записи.
+  const inserted = state.order.load("o9")
+  assert.equal(inserted._id, "o9")
+  assert.equal("id" in inserted, false)
+
+  // Документ, пришедший через load, устроен так же.
+  const loaded = state.order.load("o404")
+  assert.equal(loaded._id, "o404")
+  assert.equal("id" in loaded, false)
+
+  // В кэше лежит ровно то, что отдаёт сервер.
   assert.deepEqual(await cache.get("order", "o9"), { _id: "o9", status: "новый" })
+
+  // Сброс записи при логине тоже не возвращает зеркальный id.
+  await state.clearLocalDB()
+  const reset = state.order.load("o9")
+  assert.equal(reset._id, "o9")
+  assert.equal("id" in reset, false)
 })
 
 test("insert sync keeps the same reactive object when a page already loaded it", async () => {

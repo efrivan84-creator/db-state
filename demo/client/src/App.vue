@@ -264,10 +264,10 @@ const removeOrder = () => run(async () => {
             <tbody>
               <tr
                 v-for="row in orders"
-                :key="row.id"
+                :key="row._id"
                 class="cursor-pointer border-t border-gray-100 hover:bg-gray-50"
-                :class="row.id === selectedId ? 'bg-gray-50' : ''"
-                @click="selectedId = row.id"
+                :class="row._id === selectedId ? 'bg-gray-50' : ''"
+                @click="selectedId = row._id"
               >
                 <td class="py-2">{{ row.number ?? "…" }}</td>
                 <td class="py-2">{{ row.client ?? "…" }}</td>

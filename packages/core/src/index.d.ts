@@ -60,11 +60,13 @@ export function normalizeServicePrefix(
 // Document and change shape
 // ---------------------------------------------------------------------------
 
-/** Generic shape that every document in db-state must satisfy. */
+/**
+ * Generic shape that every document in db-state must satisfy.
+ * The key is `_id`, as in Mongo — reactive documents no longer mirror it
+ * into `id`. An `id` passed to `add()` is still accepted as the document key.
+ */
 export interface BaseDoc {
   _id: string
-  /** Optional mirror of `_id` for legacy paths. The library writes both. */
-  id?: string
 }
 
 /** Mongo-style filter accepted by db-state query APIs. */

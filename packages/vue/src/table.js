@@ -15,7 +15,6 @@ export function createTableApi(ctx) {
 
     if (!tables[table][normalizedId]) {
       tables[table][normalizedId] = reactive({
-        id: normalizedId,
         _id: normalizedId,
         __cacheChecked: false,
         __loaded: false
