@@ -46,6 +46,7 @@ export function createAuth(config) {
       send(client, DB_STATE_MESSAGES.loginResult, message.id, {
         ok: true,
         userId: user._id,
+        login: client.user.login,
         hash,
         groups: user.groups ?? [],
         access: client.user.access
@@ -74,6 +75,7 @@ export function createAuth(config) {
       send(client, DB_STATE_MESSAGES.authResult, message.id, {
         ok: true,
         userId: user._id,
+        login: client.user.login,
         groups: user.groups ?? [],
         access: client.user.access
       })

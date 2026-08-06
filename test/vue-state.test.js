@@ -493,6 +493,39 @@ test("login clears stale local data, moves sync cursor to now, and retries activ
   assert.ok(Date.parse(cursor) <= Date.now())
 })
 
+test("login keeps who signed in: login, groups and access, cleared on logout", async () => {
+  const state = createDbState({
+    autoConnect: false,
+    cache: createMemoryCache(),
+    ...testStorage(),
+    tables: ["order"]
+  })
+  state.socket.system = async () => ({
+    ok: true,
+    userId: "u1",
+    login: "ivan",
+    hash: "h1",
+    groups: ["manager"],
+    access: { order: { read: {} } }
+  })
+  state.socket.rpc = async () => undefined
+
+  assert.equal(state.auth.login, null)
+  assert.deepEqual(state.auth.groups, [])
+
+  await state.login("ivan", "secret")
+
+  assert.equal(state.auth.login, "ivan")
+  assert.deepEqual(state.auth.groups, ["manager"])
+  assert.deepEqual(state.auth.access, { order: { read: {} } })
+
+  await state.logout()
+
+  assert.equal(state.auth.login, null)
+  assert.deepEqual(state.auth.groups, [])
+  assert.equal(state.auth.access, null)
+})
+
 test("load before manual login retries the same reactive object after authorization", async () => {
   const cache = createMemoryCache()
   const state = createDbState({

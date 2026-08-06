@@ -85,6 +85,29 @@ A common UI pattern:
 </template>
 ```
 
+## Who is signed in
+
+Besides the status, `state.auth` keeps the user itself. These fields come from
+the server response, so no extra request is needed:
+
+| Field | Meaning |
+|---|---|
+| `userId` | The user's id. |
+| `login` | The login used to sign in. `null` when anonymous. |
+| `groups` | The user's groups. Empty array when anonymous. |
+| `access` | Merged access object of those groups. `null` when anonymous. |
+
+```vue
+<div v-if="state.auth.login">
+  {{ state.auth.login }} ({{ state.auth.groups.join(", ") }})
+</div>
+```
+
+`access` is handy for hiding parts of the UI — the server enforces permissions
+anyway, but there is no point in showing buttons that will be rejected.
+
+All three fields are cleared on logout and on a rejected hash.
+
 ## Logout
 
 ```js

@@ -32,6 +32,24 @@ const loadingPercent = computed(() => Math.round(loading.percent))
 const status = ref("")
 const comment = ref("")
 
+// login, groups и access приходят от сервера при входе и лежат в state.auth.
+const AUTH_LABELS = {
+  anonymous: "не выполнена",
+  authorizing: "выполняется…",
+  restored: "восстановлена",
+  authorized: "выполнена"
+}
+
+const ROLES = { admin: "руководитель", manager: "менеджер" }
+
+const authLabel = computed(() => {
+  const label = AUTH_LABELS[state.auth.status] ?? state.auth.status
+  if (!state.auth.login) return label
+
+  const role = state.auth.groups.map((group) => ROLES[group] ?? group).join(", ")
+  return role ? `${state.auth.login} (${role})` : state.auth.login
+})
+
 watch(
   () => [order.value.status, order.value.comment, order.value.__loaded],
   ([nextStatus, nextComment, loaded]) => {
@@ -165,7 +183,7 @@ const removeOrder = () => run(async () => {
       </div>
       <div class="text-right text-sm text-gray-600">
         <div>Соединение: {{ state.sync.connected ? "есть" : "нет" }}</div>
-        <div>Авторизация: {{ state.auth.status }}</div>
+        <div>Авторизация: {{ authLabel }}</div>
         <div>Синхронизация: {{ state.sync.status }}</div>
       </div>
     </header>

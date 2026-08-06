@@ -1,4 +1,4 @@
-import type { BaseDoc, Change, ServiceGroup, ServiceUser } from "@db-state/core"
+import type { AccessObject, BaseDoc, Change, ServiceGroup, ServiceUser } from "@db-state/core"
 import type { DbStateCache } from "./cache"
 import type { LoadingKeyRef } from "./keys"
 import type { DbStateSocketFacade } from "./socket"
@@ -142,6 +142,12 @@ export interface SyncState {
 export interface AuthState {
   userId: string | null
   hash: string | null
+  /** Login of the signed-in user, from the server response. `null` when anonymous. */
+  login: string | null
+  /** Groups of the signed-in user. Empty when anonymous. */
+  groups: string[]
+  /** Merged access object of the user's groups. `null` when anonymous. */
+  access: AccessObject | null
   status: AuthStatus
 }
 
@@ -149,8 +155,10 @@ export interface AuthState {
 export interface AuthResult {
   ok: true
   userId: string
+  login?: string
   hash: string
   groups: string[]
+  access?: AccessObject
 }
 
 /** Per-table reactive accessors injected onto the store. */

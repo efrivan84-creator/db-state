@@ -43,6 +43,10 @@ export function createDbState(input) {
     auth: {
       userId: savedUserId,
       hash: savedAuthHash,
+      // Заполняются ответом сервера при login/authByHash.
+      login: null,
+      groups: [],
+      access: null,
       status: savedUserId && savedAuthHash ? "restored" : "anonymous"
     },
 
@@ -174,6 +178,7 @@ export function createDbState(input) {
       saveAuth(options, result)
       state.auth.userId = result.userId
       state.auth.hash = result.hash
+      applyAuthResult(state, result)
       state.auth.status = "authorized"
       await retryUnloadedTables(state, options)
       return result
@@ -188,6 +193,7 @@ export function createDbState(input) {
           userId: state.auth.userId,
           hash: state.auth.hash
         })
+        applyAuthResult(state, result)
         state.auth.status = "authorized"
         await syncAfterAuth(state, options)
         await retryUnloadedTables(state, options)
@@ -196,6 +202,7 @@ export function createDbState(input) {
         clearAuth(options)
         state.auth.userId = null
         state.auth.hash = null
+        clearAuthUser(state)
         state.auth.status = "anonymous"
         options.onError(error)
         return false
@@ -219,6 +226,7 @@ export function createDbState(input) {
       clearAuth(options)
       state.auth.userId = null
       state.auth.hash = null
+      clearAuthUser(state)
       state.auth.status = "anonymous"
     },
 
@@ -349,6 +357,20 @@ function resetRecord(target, id) {
     __cacheChecked: false,
     __loaded: false
   })
+}
+
+// Сервер присылает login, groups и access — сохраняем их, чтобы приложению
+// не приходилось запрашивать то же самое отдельно.
+function applyAuthResult(state, result) {
+  state.auth.login = result?.login ?? null
+  state.auth.groups = result?.groups ?? []
+  state.auth.access = result?.access ?? null
+}
+
+function clearAuthUser(state) {
+  state.auth.login = null
+  state.auth.groups = []
+  state.auth.access = null
 }
 
 function saveAuth(options, result) {
