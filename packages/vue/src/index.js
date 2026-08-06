@@ -186,7 +186,7 @@ export function createDbState(input) {
     },
 
     async authByHash() {
-      if (!state.auth.userId || !state.auth.hash) return false
+      if (state.auth.userId == null || !state.auth.hash) return false
       state.auth.status = "authorizing"
 
       try {
@@ -213,7 +213,7 @@ export function createDbState(input) {
     async autoAuth() {
       if (!options.autoAuth) return false
       if (state.auth.status === "authorized") return true
-      if (!state.auth.userId || !state.auth.hash) return false
+      if (state.auth.userId == null || !state.auth.hash) return false
       if (autoAuthPromise) return autoAuthPromise
 
       autoAuthPromise = state.authByHash().finally(() => {

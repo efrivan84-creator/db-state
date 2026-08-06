@@ -24,8 +24,9 @@ export function readAuth(storage, key) {
   try {
     const saved = JSON.parse(raw)
     if (!saved || typeof saved !== "object") return undefined
-    if (saved.userId == null || !saved.hash) return undefined
-    return { userId: saved.userId, hash: String(saved.hash) }
+    if (typeof saved.userId !== "string" && typeof saved.userId !== "number") return undefined
+    if (typeof saved.hash !== "string" || !saved.hash) return undefined
+    return { userId: saved.userId, hash: saved.hash }
   } catch {
     // Чужое или испорченное значение — ведём себя как при отсутствии входа.
     return undefined

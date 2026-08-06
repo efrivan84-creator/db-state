@@ -801,8 +801,41 @@ test("a numeric user id survives being saved and restored", () => {
   assert.equal(state.auth.status, "restored")
 })
 
+test("autoAuth accepts numeric user id zero", async () => {
+  const storage = testStorage()
+  storage.authStorage.setItem("db-state.auth", JSON.stringify({ userId: 0, hash: "h0" }))
+  const state = createDbState({
+    autoConnect: false,
+    cache: createMemoryCache(),
+    safetySyncInterval: 0,
+    ...storage,
+    tables: ["order"]
+  })
+  let sent
+  state.socket.system = async (type, payload) => {
+    sent = { type, payload }
+    return { ok: true, userId: 0, hash: "h0" }
+  }
+  state.socket.rpc = async () => ({ to: "2026-05-21T10:00:00.000Z", changes: [] })
+
+  assert.equal(await state.autoAuth(), true)
+  assert.deepEqual(sent, {
+    type: "dbstate:auth",
+    payload: { userId: 0, hash: "h0" }
+  })
+})
+
 test("a damaged saved sign-in is treated as no sign-in", () => {
-  for (const raw of ["not json", "null", '{"userId":"u1"}', '{"hash":"h1"}', "[]"]) {
+  for (const raw of [
+    "not json",
+    "null",
+    '{"userId":"u1"}',
+    '{"hash":"h1"}',
+    "[]",
+    '{"userId":false,"hash":"h1"}',
+    '{"userId":{},"hash":"h1"}',
+    '{"userId":"u1","hash":1}'
+  ]) {
     const storage = testStorage()
     storage.authStorage.setItem("db-state.auth", raw)
 
