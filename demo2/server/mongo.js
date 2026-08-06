@@ -7,30 +7,13 @@ const seed = {
     { _id: "u_viewer", login: "viewer", passwordHash: "demo:viewer", groups: ["viewer"], disabled: false }
   ],
   _group: [
-    { _id: "admin", name: "Administrators" },
+    {
+      _id: "admin",
+      name: "Administrators",
+      access: { order: { read: {}, write: {} }, file: { read: {}, write: {} }, _user: { read: {}, write: {} }, _group: { read: {}, write: {} }, log: { read: {} } }
+    },
     { _id: "manager", name: "Order managers" },
     { _id: "viewer", name: "Read only" }
-  ],
-  _permission: [
-    { _id: "perm_user_admin", table: "_user", priority: 100, read: { groups: ["admin"] }, write: { groups: ["admin"] } },
-    { _id: "perm_group_admin", table: "_group", priority: 100, read: { groups: ["admin"] }, write: { groups: ["admin"] } },
-    { _id: "perm_permission_admin", table: "_permission", priority: 100, read: { groups: ["admin"] }, write: { groups: ["admin"] } },
-    { _id: "perm_log_admin", table: "log", priority: 100, read: { groups: ["admin"] }, write: { groups: ["admin"], action: false } },
-    { _id: "perm_order_admin", table: "order", priority: 100, read: { groups: ["admin"] }, write: { groups: ["admin"] } },
-    {
-      _id: "perm_order_manager",
-      table: "order",
-      priority: 20,
-      read: { groups: ["manager"], fields: ["_id", "status", "total", "comment", "ownerId"] },
-      write: { groups: ["manager"], fields: ["status", "comment"] }
-    },
-    {
-      _id: "perm_order_viewer",
-      table: "order",
-      priority: 10,
-      read: { groups: ["viewer"], fields: ["_id", "status", "total"] },
-      write: { groups: ["viewer"], action: false }
-    }
   ],
   order: [
     { _id: "o1", status: "open", total: 1200, margin: 340, comment: "First order", ownerId: "u_manager" },
@@ -55,7 +38,7 @@ export async function createDemoMongo() {
 }
 
 async function seedDemo(db) {
-  for (const name of ["_user", "_group", "_permission", "order", "file", "log"]) {
+  for (const name of ["_user", "_group", "order", "file", "log"]) {
     await db.collection(name).deleteMany({})
   }
 
@@ -64,7 +47,6 @@ async function seedDemo(db) {
   }
 
   await db.collection("log").createIndex({ createdAt: 1, logId: 1 })
-  await db.collection("_permission").createIndex({ table: 1, priority: -1 })
   await db.collection("file").createIndex({ ownerId: 1, status: 1 })
   await db.collection("file").createIndex({ token: 1 }, { unique: true, sparse: true })
 }

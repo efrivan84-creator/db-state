@@ -36,10 +36,10 @@ This gives you:
 - CRUD methods: `load`, `getIds`, `getUnique`, `count`, `sync`, `update`, `add`, `remove`
 - Auth via `dbstate:login` / `dbstate:auth` messages
 - Append-only log in `log` collection
-- Permission checks against `_permission` collection
+- Permission checks against group `access` objects (merged into `user.access` at login)
 
 `tables` lists only tables exposed through the CRUD/RPC API. Service tables such as
-`_user`, `_group`, and `_permission` are not exposed automatically; list them explicitly
+`_user` and `_group` are not exposed automatically; list them explicitly
 when an admin UI needs to read or edit them through db-state.
 
 Set `servicePrefix`/`prefix` when you need several isolated db-state servers in one MongoDB database:
@@ -52,12 +52,12 @@ const dbState = createDbStateServer({
 })
 ```
 
-With this prefix the service collections are `cfg_user`, `cfg_group`, `cfg_permission`, and `cfg_log`.
-Without a prefix the old defaults stay unchanged: `_user`, `_group`, `_permission`, `log`.
+With this prefix the service collections are `cfg_user`, `cfg_group`, and `cfg_log`.
+Without a prefix the old defaults stay unchanged: `_user`, `_group`, `log`.
 If clients need access to these tables, include the prefixed names in `tables`, for example
-`["order", "cfg_user", "cfg_group", "cfg_permission", "cfg_log"]`.
+`["order", "cfg_user", "cfg_group", "cfg_log"]`.
 
-It does **not** give you any seeded data — you must add a user and at least one permission before clients can do anything (see below).
+It does **not** give you any seeded data — you must add a user and a group with an `access` object before clients can do anything (see below).
 
 ## Required Mongo indices
 
@@ -65,10 +65,9 @@ The library doesn't create indices automatically. For a healthy production serve
 
 ```js
 await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
-await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
 ```
 
-With `servicePrefix: "cfg"`, create the same indices on `cfg_log` and `cfg_permission`.
+With `servicePrefix: "cfg"`, create the same index on `cfg_log`.
 
 The first index is critical — `sync` reads slices of the log ordered by these fields. Without it, sync becomes O(N) per call.
 
@@ -101,22 +100,14 @@ await mongo.collection("_user").updateOne(
   { upsert: true }
 )
 
-await mongo.collection("_permission").updateMany(
-  {},
-  {
-    $setOnInsert: {
-      _id: "perm_admin_all",
-      table: "*",  // Actually no — you need one row PER table; see permissions.md
-      priority: 100,
-      read:  { groups: ["admin"] },
-      write: { groups: ["admin"] }
-    }
-  },
+await mongo.collection("_group").updateOne(
+  { _id: "admin" },
+  { $set: { name: "Admins", access: { fullaccess: 1 } } },
   { upsert: true }
 )
 ```
 
-(The library doesn't support `table: "*"` wildcards — see [permissions.md](permissions.md). Add one rule per table.)
+Rights live on groups as `access` objects — see [permissions.md](permissions.md).
 
 ## All `createDbStateServer` options
 
@@ -126,20 +117,18 @@ createDbStateServer({
   tables: ["order", "product"],  // required: app table names
 
   // Optional:
-  access:           { ... },     // code access rules (see code-access-rules.md)
+  hooks:            { ... },     // lifecycle hooks (see hooks.md)
   hooks:            { ... },     // before/after/error read/write lifecycle hooks
   password:         { hash, verify },  // password adapter (default: PBKDF2)
   createAuthHash:   () => string,      // default: 32 random bytes hex
   createLogId:      () => string,      // default: crypto.randomUUID()
   getUser:          async (ctx) => user, // resolve user from request
-  servicePrefix:    "cfg",       // optional: cfg_user/cfg_group/cfg_permission/cfg_log
+  servicePrefix:    "cfg",       // optional: cfg_user/cfg_group/cfg_log
   logCollection:    "log",       // log collection name
-  permissionTable:  "_permission",
   groupTable:       "_group",
   userTable:        "_user",
   systemUserId:     "system",    // actor for internal writes without a user
   now:              () => new Date().toISOString(),  // server clock
-  syncLimit:        1000,        // max changes per sync call
   socket:           adapter      // out-of-process broadcast adapter
 })
 ```
@@ -173,11 +162,11 @@ createDbStateServer({ mongo, tables, now: () => frozen })
 // then in tests: frozen = "2026-01-02T00:00:00.000Z"
 ```
 
-### `syncLimit`
+### Sync time windows
 
-Maximum number of log entries returned in a single `sync` call. Default 1000. Lower it only if your log entries are very large and your write volume is low; raise it if you have a lot of small changes.
+One `sync` response covers at most 12 hours of log time. When the client is further behind, the server returns `hasMore: true`; the Vue client immediately requests the next window until it catches up.
 
-The current cursor is timestamp-based. A single sync response should fit all visible changes in its `(from, to]` window. For very busy systems, use a higher `syncLimit` or add cursor continuation by `{ createdAt, logId }` before relying on a small limit for long catch-up windows.
+If the cursor is more than 20 days old, replay is refused with `reset: true`. The client discards its local cache, reloads active records and queries from the database, and resumes incremental sync from the returned `to`.
 
 ## WebSocket integration
 

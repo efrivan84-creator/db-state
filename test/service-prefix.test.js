@@ -16,15 +16,14 @@ test("core builds prefixed service table names", () => {
   assert.equal(normalizeServicePrefix({ prefix: "tenant_" }), "tenant")
   assert.equal(normalizeServicePrefix({ servicePrefix: "svc", prefix: "tenant" }), "svc")
   assert.equal(createPrefixedTableName("cfg_", "log", "log"), "cfg_log")
-  assert.deepEqual(createServiceTableNames("cfg"), ["cfg_user", "cfg_group", "cfg_permission"])
+  assert.deepEqual(createServiceTableNames("cfg"), ["cfg_user", "cfg_group"])
   assert.deepEqual(normalizeTables(["order"]), ["order"])
   assert.deepEqual(normalizeTables(["order"], createServiceTableNames("cfg")), [
     "order",
     "cfg_user",
-    "cfg_group",
-    "cfg_permission"
+    "cfg_group"
   ])
-  assert.deepEqual(createServiceTableNames(), ["_user", "_group", "_permission"])
+  assert.deepEqual(createServiceTableNames(), ["_user", "_group"])
 })
 
 test("server prefix changes service, log and file tables", async () => {
@@ -34,22 +33,19 @@ test("server prefix changes service, log and file tables", async () => {
     mongo,
     tables: ["order", "cfg_user", "cfg_group"],
     prefix: "cfg",
-    files,
-    access: {
-      read: () => true,
-      write: () => true
-    }
+    files
   })
+  const admin = { user: { _id: "admin", groups: ["admin"], access: { fullaccess: 1 } } }
 
   await server.add({
     table: "cfg_user",
     obj: { _id: "u1", login: "admin" },
-    req: { user: { _id: "admin", groups: ["admin"] } }
+    req: admin
   })
   await server.add({
     table: "cfg_group",
     obj: { _id: "admin", name: "Admins" },
-    req: { user: { _id: "admin", groups: ["admin"] } }
+    req: admin
   })
   await server.add({
     table: "cfg_file",
@@ -62,7 +58,7 @@ test("server prefix changes service, log and file tables", async () => {
       status: "ready",
       downloadPolicy: { mode: "registered" }
     },
-    req: { __dbStateFileInternal: true, user: { _id: "admin", groups: ["admin"] } }
+    req: { ...admin, __dbStateFileInternal: true }
   })
 
   assert.ok(mongo.collectionNames.includes("cfg_user"))
@@ -73,26 +69,44 @@ test("server prefix changes service, log and file tables", async () => {
   assert.equal(mongo.collectionNames.includes("file"), false)
 
   await assert.rejects(
-    () => server.load({ table: "_user", id: "u1", req: { user: { _id: "admin", groups: ["admin"] } } }),
+    () => server.load({ table: "_user", id: "u1", req: admin }),
     /Unknown db-state table/
   )
 })
 
-test("server prefix changes permission lookup table", async () => {
+test("server prefix changes group lookup table for user access", async () => {
   const mongo = createMongoRecorder()
   const server = createDbStateServer({
     mongo,
     tables: ["order"],
-    servicePrefix: "cfg"
+    servicePrefix: "cfg",
+    password: {
+      hash: async (password) => `p:${password}`,
+      verify: async (password, hash) => hash === `p:${password}`
+    }
   })
 
+  await mongo.collection("cfg_user").insertOne({ _id: "u1", login: "admin", passwordHash: "p:secret", groups: ["admins"] })
+  await mongo.collection("cfg_group").insertOne({ _id: "admins", access: { order: { read: {}, write: {} } } })
+  await mongo.collection("order").insertOne({ _id: "o1", status: "open" })
+
+  const sent = []
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { sessionId: "s1" })
+  await server.socket.handleMessage(client, JSON.stringify({ type: "dbstate:login", id: "l1", login: "admin", password: "secret" }))
+
+  const login = sent.find((message) => message.type === "dbstate:login_result")
+  assert.deepEqual(login.access, { order: { read: {}, write: {} } })
+
+  assert.deepEqual(await server.load({ table: "order", id: "o1", req: { client } }), { _id: "o1", status: "open" })
+
   await assert.rejects(
-    () => server.load({ table: "order", id: "o1", req: { user: { _id: "admin", groups: ["admin"] } } }),
+    () => server.load({ table: "order", id: "o1", req: { user: { _id: "guest", groups: [] } } }),
     /Read denied/
   )
 
-  assert.ok(mongo.collectionNames.includes("cfg_permission"))
-  assert.equal(mongo.collectionNames.includes("_permission"), false)
+  assert.ok(mongo.collectionNames.includes("cfg_group"))
+  assert.equal(mongo.collectionNames.includes("_group"), false)
 })
 
 test("file modules and client accept service prefix", () => {

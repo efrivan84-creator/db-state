@@ -13,7 +13,7 @@ const set = diffSet(original, draft)
 await state.order.update({ id: draft._id, set })
 ```
 
-Это уменьшает конфликты и лучше сочетается с `write.fields`.
+Это уменьшает конфликты и лучше сочетается с `write_fields`.
 
 ## Soft delete
 
@@ -47,18 +47,24 @@ hooks: {
 
 ## Owner-based permissions
 
+Фильтром в правах группы — без кода, база отбирает строки сама:
+
 ```js
-access: {
-  order: {
-    read: async ({ user, loadDoc }) => {
-      const doc = await loadDoc()
-      return doc?.ownerId === user._id
-    }
+{ _id: "staff", access: { order: { read: { ownerId: "$adminid" } } } }
+```
+
+Если условие сложнее (зависит от времени, внешних данных), тот же смысл через хук:
+
+```js
+hooks: {
+  beforeRead: (ctx) => {
+    if (ctx.table !== "order") return
+    ctx.filter = { $and: [ctx.filter ?? {}, { ownerId: ctx.user._id }] }
   }
 }
 ```
 
-Для sync это может загружать документы, поэтому short-circuit admin/common cases до `loadDoc()`.
+Оба варианта уходят в запрос к базе — документы не вычитываются ради проверки.
 
 ## Custom loading indicators
 

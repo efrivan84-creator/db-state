@@ -4,285 +4,132 @@ This is the most important page in the documentation. Read it once carefully —
 
 ## The deny-by-default rule
 
-The server denies every read and every write unless **something explicitly allows it**. There is no implicit access. A user with no matching rule sees nothing and writes nothing.
+The server denies every read and every write unless **something explicitly allows it**. There is no implicit access. A user with no matching grant sees nothing and writes nothing.
 
-When a request arrives, the server runs `assertAccess` in this order:
+When a request arrives, the server checks access in this order:
 
 ```
-1. Code rule for (table, docId, action) — see code-access-rules.md
-2. Code rule for (table, action) — also code-access-rules.md
-3. _permission row matching table + if-conditions — this page
-4. Deny.
+1. beforeRead / beforeWrite hook — may allow, deny, or stay silent
+2. user.access                   — merged from the user's groups at login (this page)
+3. Deny.
 ```
 
-The first rule that returns a non-`null` decision wins. If none match, access is denied.
+The first step that returns an explicit decision wins. If none match, access is denied.
 
-## The `_permission` table
+## The `access` object on groups
 
-Each row is a Mongo document like this:
+Permissions are **data on the group** (`_group`). Each group document carries an `access` object:
 
 ```js
 {
-  _id: "perm_order_open",
-  table: "order",
-  priority: 10,
-
-  if: {
-    status: "open"
-  },
-
-  read: {
-    users:   ["u_123"],
-    groups:  ["manager", "viewer"],
-    action:  true,                              // optional, defaults to true if user/group matches
-    fields:  ["_id", "status", "total"]         // optional, whitelist of paths
-  },
-
-  write: {
-    users:   [],
-    groups:  ["manager"],
-    action:  true,
-    fields:  ["status", "comment"]
+  _id: "installers",
+  name: "Installers",
+  access: {
+    zad:  { read: {}, write: { master: "$adminid" } },  // read all tickets, edit own
+    bill: {
+      read: { needact: true },                          // only matching documents
+      read_fields: ["fio", "balans"]                    // and only these fields
+    }
   }
 }
+
+{ _id: "boss", name: "Management", access: { fullaccess: 1 } }
 ```
 
-Field by field:
+The shape per table:
 
-| Field | Required | Meaning |
-|---|---|---|
-| `_id` | yes | Any unique string. |
-| `table` | yes | App table name this rule applies to. |
-| `priority` | no (default 0) | Higher number = checked first. |
-| `if` | no | Equality-only matcher on the document. If absent, applies to all docs. |
-| `read` | no | `PermissionPart` for read access. |
-| `write` | no | `PermissionPart` for write access (insert + update + delete). |
+| Key | Meaning |
+|---|---|
+| `read` | Row filter for reads. `{}` — all rows. Absent — no read access. |
+| `read_fields` | Field whitelist for reads. Absent — all fields. |
+| `write` | Row filter for writes. `{}` — all rows. Absent — no write access. |
+| `write_fields` | Field whitelist for writes. Absent — all fields. |
 
-A `PermissionPart`:
+The only flag value is the special `fullaccess: 1` key — access to everything.
 
-| Field | Required | Meaning |
-|---|---|---|
-| `users` | no | List of user `_id`s allowed by this part. |
-| `groups` | no | List of group names allowed (matched against `user.groups[]`). |
-| `action` | no | If `false`, explicitly denies even when user/group matches. Defaults to `true`. |
-| `fields` | no | Whitelist of dot-paths the user may read/write. If absent, all fields allowed. |
-
-The user matches when **either** `users.includes(user._id)` **or** `user.groups` has overlap with `groups`. After matching, `action: false` overrides to deny; otherwise allow.
-
-## Evaluation order
-
-For each `(table, action)` request, the server:
-
-1. Fetches all `_permission` rows where `table === request.table`, sorted by `priority` descending.
-2. For each row, checks `if` against the document (`ctx.obj` for writes/reads of existing docs; `ctx.old` for deletes).
-3. For the first row whose `if` matches:
-   - Evaluates `part = row[action]`.
-   - If `part` is undefined → continue to next row.
-   - If `part` is defined and the user matches → return `{ allowed: action !== false, fields: part.fields }`.
-   - If the user does **not** match → continue to next row.
-4. If no row decided, return deny.
-
-**Key subtlety**: only the **first matching row with a decision** wins. Lower-priority rules don't accumulate. If you want layered permissions, use `priority` to order them and design each rule to either decide or pass.
-
-## Examples
-
-### 1. Open everything to one group
+A `read` / `write` value must be a **filter object** (or an array of filters, which is what group merging produces). Any other value is not a grant and means full denial:
 
 ```js
-{
-  _id: "perm_admin",
-  table: "order",
-  priority: 100,
-  read:  { groups: ["admin"] },
-  write: { groups: ["admin"] }
-}
+{ zad: { read: {} } }              // access to every row
+{ zad: { read: { city: "msk" } } } // access to matching rows
+{ zad: { read: true } }            // DENIED — not a filter
+{ zad: { read: 1 } }               // DENIED — not a filter
+{ zad: { read: false } }           // DENIED
 ```
 
-Admins can read every order and write to every order. No field restrictions.
+That way a typo or a stale record in the database never turns into unexpected access.
 
-### 2. Managers see only some fields and can only edit status
+## Merging at login
+
+At login the server merges the `access` of all the user's groups, then the user's personal `access` (a field on `_user`) on top. The merged object is attached as `user.access` and returned in `login_result` / `auth_result`, so the client can hide UI sections without extra requests.
+
+Merging is **additive only** — there are no deny rules:
+
+- filters for the same action from different groups combine into an **any-of** set (the document passes when at least one filter matches);
+- `{}` (all rows) beats any filter;
+- `*_fields` lists are united; a grant **without** a field limit removes the limit.
+
+Changing a group's `access` applies on the user's next login or reconnect.
+
+## Filters
+
+A filter is a plain object of `dot.path -> expected value` pairs, all of which must match (Mongo semantics). `{}` matches every document.
+
+Values support two placeholders:
+
+- `"$adminid"` — the current user's id;
+- `"$groupid"` — matches any of the current user's group ids (becomes `{ $in: groups }` in database queries).
 
 ```js
-{
-  _id: "perm_manager",
-  table: "order",
-  priority: 10,
-  read:  { groups: ["manager"], fields: ["_id", "status", "total", "comment"] },
-  write: { groups: ["manager"], fields: ["status", "comment"] }
-}
+{ zad: { read: { master: "$adminid" } } }   // a technician sees only their tickets
+{ zad: { read: { dep: "$groupid" } } }      // a department sees its own area
 ```
 
-A manager doing `state.order.load("o1")` gets a projection containing only the four whitelisted fields plus `_id`/`id`. A manager doing `state.order.update({ id: "o1", set: { margin: 999 } })` gets `"Write denied: field margin"`.
+The `write` filter is checked against the **existing** document for `update` / `remove`, and against the **new** document for `add`.
 
-### 3. State-conditional access
+## What `read` and `write` cover
+
+| Action | RPC methods |
+|---|---|
+| `read` | `load`, `getIds`, `getUnique`, `count`, and change visibility in `sync` |
+| `write` | `add`, `update`, `remove` |
+
+`read_fields` projects `load` results and filters `sync` changes per field. `write_fields` validates the field paths of `add` / `update` — a patch touching a path outside the whitelist **rejects the whole operation** with `Write denied: field <path>` (nothing is silently dropped).
+
+## The database evaluates filters
+
+Access checks are pushed into Mongo instead of being applied per row in JS:
+
+- `getIds` / `count` / `getUnique` merge the access condition straight into the query (`{ $and: [clientFilter, { $or: [accessFilters] }] }`); the database returns only permitted rows, `getIds` requests only `_id`, `count` uses `countDocuments` without fetching data;
+- `load` checks the filter with a single `findOne({ $and: [{ _id }, filter] })` and, with `read_fields`, asks Mongo only for the allowed fields (projection);
+- `sync` checks a changed document with one `findOne` that already includes the access filter;
+- `{}` grants and `fullaccess` are decided without touching the database at all.
+
+This is the only read path — there is no per-row fallback, so `skip` / `limit` always page over permitted rows.
+
+Add normal Mongo indexes for the fields your access filters use (`master`, `dep`, ...) — the access condition is part of the query, so it benefits from indexes like any other condition.
+
+## Named methods
+
+Custom RPC methods (see the server README) check access themselves:
 
 ```js
-{
-  _id: "perm_closed_readonly",
-  table: "order",
-  priority: 20,
-  if: { status: "closed" },
-  read:  { groups: ["manager"] },
-  write: { groups: ["manager"], action: false }
-}
+import { accessAllows } from "@db-state/server-mongo"
 
-{
-  _id: "perm_open_writable",
-  table: "order",
-  priority: 10,
-  read:  { groups: ["manager"] },
-  write: { groups: ["manager"], fields: ["status", "comment"] }
-}
+accessAllows(user.access, "bill", "write")            // any access at all?
+accessAllows(user.access, "zad", "read", doc, user)   // access to this document?
 ```
 
-Closed orders are read-only for managers (any write returns "Write denied"). Open orders allow editing status/comment.
+## Service tables
 
-The `if` matches by equality only — `{ status: "closed" }` matches docs where `status === "closed"`. For richer conditions (`$in`, `$ne`, dot-paths into the user), use [code access rules](code-access-rules.md).
-
-### 4. Layered allow/deny with priority
+`_user` and `_group` follow the same rules. Expose them in `tables` explicitly when the admin UI needs them, and grant access like any other table:
 
 ```js
-// Catch-all: managers can read everything
-{
-  _id: "perm_manager_read_all",
-  table: "order",
-  priority: 1,
-  read: { groups: ["manager"] }
-}
-
-// But: deny reading "secret" orders specifically
-{
-  _id: "perm_secret_deny",
-  table: "order",
-  priority: 100,
-  if: { type: "secret" },
-  read: { groups: ["manager"], action: false }
-}
+{ _id: "admin", access: { _user: { read: {}, write: {} }, _group: { read: {}, write: {} } } }
 ```
 
-For a doc with `type: "secret"`: the priority-100 rule matches `if`, has a `read` part, the user is in `groups: ["manager"]` — decision = `action: false` → deny. For other docs: priority-100 doesn't match `if`, fall through to priority-1, allow.
+Be careful granting non-admin groups `write` on `_group` — they could grant themselves new rights. Because groups are a normal db-state table, an admin UI can edit `access` objects at runtime; changes apply to each user at their next login or reconnect.
 
-### 5. Field-level writes with two rules
+## Beyond filters
 
-```js
-{
-  _id: "perm_manager_status",
-  table: "order",
-  priority: 10,
-  write: { groups: ["manager"], fields: ["status"] }
-}
-```
-
-A manager can change `status`. They can't change `total`, `margin`, anything else.
-
-For inserts (`add`), every dot-path in the new object's fields must be in `write.fields`. So a manager can't `add` an order with `margin: 100` either.
-
-For deletes (`remove`), the `write` part is checked at the **document** level — `fields` is ignored. If you want stricter delete rules, use [code rules](code-access-rules.md).
-
-## Field projection on reads
-
-If a matched `read.fields` is present:
-
-- **`load(id)`** returns only the listed fields plus `_id` and `id`.
-- **`getIds(query)`** still works (the filter runs on full Mongo docs), but only ids of visible docs are returned.
-- **`getUnique({field})`** filters by readability per row, then projects, then extracts the field. If `field` is not in `read.fields`, you get nothing.
-- **`sync` changes** are projected too: `insert.obj` is projected, `delete.old` is projected, `update.set`/`update.unset` are filtered to only keep allowed paths. If everything in a change is filtered out, the change is dropped from the sync result entirely.
-
-This means clients literally cannot see forbidden fields — not in the cache, not in the sync log, not via getUnique. The projection is server-side.
-
-## Field validation on writes
-
-When a write happens, the server collects every dot-path the change touches:
-
-```js
-update({ set: { status: "closed", "profile.city": "Moscow" }, unset: ["draft"] })
-// touches: ["status", "profile.city", "draft"]
-```
-
-If `write.fields` is set on the matching rule, every touched path must be **at or under** an allowed field:
-
-```js
-fields: ["status", "profile"]
-// allowed: "status", "profile", "profile.city", "profile.x.y.z"
-// forbidden: "total", "margin", "draft"
-```
-
-The check is a `startsWith` on dot-paths — `"profile"` allows the whole subtree. Use granular paths if you want to allow only `profile.city` but not `profile.name`.
-
-If any path fails, the **whole operation is rejected** — partial updates don't happen.
-
-## Permissions for service tables
-
-`_user`, `_group`, `_permission` are normal tables — they follow the same rules. You'll usually have:
-
-```js
-{ _id: "perm_user_admin",       table: "_user",       priority: 100, read: { groups: ["admin"] }, write: { groups: ["admin"] } },
-{ _id: "perm_group_admin",      table: "_group",      priority: 100, read: { groups: ["admin"] }, write: { groups: ["admin"] } },
-{ _id: "perm_permission_admin", table: "_permission", priority: 100, read: { groups: ["admin"] }, write: { groups: ["admin"] } }
-```
-
-**Without these, even admins can't manage users/groups/permissions through the library** — deny by default applies here too. The demo2 app seeds exactly these three rules.
-
-If you want users to see their own `_user` record but not others:
-
-```js
-// This needs a code rule, since "id matches the caller's id" is not expressible in if:
-access: {
-  _user: {
-    read: ({ user, id }) => id === user?._id ? true : null  // null = pass to next layer
-  }
-}
-```
-
-See [code-access-rules.md](code-access-rules.md).
-
-## How sync respects permissions
-
-When a client calls `sync(from)`, the server:
-
-1. Reads all log entries with `createdAt > from`.
-2. For each entry, evaluates `read` access **as the caller**, using:
-   - `ctx.obj` = current document (loaded lazily, only if needed)
-   - `ctx.old` = `change.old` for deletes
-   - `ctx.change` = the change itself
-3. If allowed, filters the change's fields by `read.fields`.
-4. If the entire change has no surviving fields, drops it.
-
-This means a client never sees changes they couldn't have seen anyway. **The log is filtered per client.**
-
-For performance: if a permission rule has no `if`, the server can decide access without loading the document. With `if`, it must `findOne` to check. That's why even minor `if` conditions on hot tables can multiply sync cost.
-
-## Common pitfalls
-
-### "Why does my admin get Write denied?"
-
-Most likely: there's a higher-priority rule with `action: false` matching. List rows for that table sorted by priority and trace which one matches.
-
-### "Field-level write rejects my update"
-
-Check `write.fields` of the matching rule. Every key in `set` and entry in `unset` must be at or under an allowed prefix.
-
-Common surprise: `set: { "_id": "..." }` — `_id` is treated as a normal path. It's filtered out before write checks (the library knows `_id` is immutable), but if you somehow pass it through it could trip you up.
-
-### "Sync returns no changes even though there are updates"
-
-Either:
-1. The session id matches and the server is suppressing echo.
-2. The read permission denies access to those changes.
-3. The `time1` cursor is already at or beyond the latest change.
-
-### "A user can read but everyone else gets a 'Write denied' error on the same field"
-
-Field whitelists on `read` and `write` are independent. Common pattern: managers can `read` `margin` (it's in `read.fields`) but can't `write` it (it's not in `write.fields`).
-
-### "Adding a row throws 'Write denied: field X'"
-
-For inserts, every field in the new object is validated against `write.fields`. If you want managers to insert with the default `status: "open"` and let admins set everything, structure the insert to include only manager-allowed fields.
-
-## Editing permissions live
-
-Because `_permission` is a normal table, you can build an admin UI to edit rules at runtime. The library re-reads `_permission` on every check (with a small per-sync cache), so changes take effect immediately for new requests.
-
-The demo2 app has a JSON-textarea editor for `_permission` — see [cookbook/admin-panel.md](../cookbook/admin-panel.md#server-permissions).
-
-Be careful giving non-admin groups write access to `_permission` itself — they could grant themselves new rules.
+When a rule cannot be expressed as a data filter — external ACLs, cross-document checks, custom field projections per role — use a [hook](hooks.md). `beforeRead` / `beforeWrite` run first, may rewrite the query, set `ctx.fields`, and allow or deny outright.

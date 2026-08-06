@@ -163,7 +163,7 @@ dbState.socket.addClient(ws, {
 
 ## Multi-tenancy
 
-Храни `tenantId` в `_user` и документах, затем добавь read/write hooks или code access rules:
+Храни `tenantId` в `_user` и документах, затем добавь хук:
 
 ```js
 hooks: {

@@ -10,14 +10,15 @@ export interface RpcRequest<TBody = Record<string, unknown>> {
   dbStateMeta?: RpcMeta
 }
 
-/** Optional metadata sent next to an RPC result without changing the result shape. */
+/**
+ * Optional metadata sent next to an RPC result without changing the result
+ * shape. Only facts the server already knows are reported — nothing is counted
+ * or re-queried for the sake of this metadata, and how many rows a read
+ * permission hid is never disclosed.
+ */
 export interface RpcMeta {
-  /** True when rows/changes were hidden by read permissions. */
-  accessFiltered?: boolean
-  /** True when object fields/change fields were hidden by read field whitelists. */
+  /** True when a read field whitelist applies, so returned fields are limited. */
   fieldsFiltered?: boolean
-  /** Number of rows/changes hidden by read permissions in this response window. */
-  denied?: number
   [key: string]: unknown
 }
 

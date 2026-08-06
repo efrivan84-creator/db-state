@@ -46,10 +46,10 @@ export const DB_STATE_MESSAGES: Readonly<{
 }>
 
 /** Default service table names. Add them to `tables` explicitly when you want to expose them. */
-export const SERVICE_TABLES: readonly ["_user", "_group", "_permission"]
+export const SERVICE_TABLES: readonly ["_user", "_group"]
 
 /** Base service table names used with a prefix (`cfg` -> `cfg_user`, etc.). */
-export const SERVICE_TABLE_BASE_NAMES: readonly ["user", "group", "permission"]
+export const SERVICE_TABLE_BASE_NAMES: readonly ["user", "group"]
 
 /** Normalizes `servicePrefix` / `prefix` input by trimming whitespace and trailing underscores. */
 export function normalizeServicePrefix(
@@ -98,6 +98,27 @@ export interface UpdateArgs<T extends BaseDoc = BaseDoc> extends UpdatePatch<T> 
   objedit?: Partial<T> & Record<string, unknown>
 }
 
+/** Document filter inside an access entry (`{}` matches everything; values support `"$adminid"` / `"$groupid"`). */
+export type AccessFilter = Record<string, unknown>
+
+/** Per-table entry inside a group/user `access` object. */
+export type AccessEntry = {
+  /** Row filter for reads: `{}` — all rows, a filter — only matching rows. */
+  read?: AccessFilter | AccessFilter[]
+  read_fields?: string[]
+  /** Row filter for writes: `{}` — all rows. */
+  write?: AccessFilter | AccessFilter[]
+  write_fields?: string[]
+}
+
+/**
+ * Access object stored on `_group` (and optionally `_user`) documents, e.g.
+ * `{ zad: { read: {}, write: {} }, bill: { read: { needact: true }, read_fields: ["fio"] } }`.
+ * Merged additively across the user's groups at login. The only flag value is
+ * the special `fullaccess: 1` key.
+ */
+export type AccessObject = { fullaccess?: 1 | true } & Record<string, AccessEntry | 1 | true | undefined>
+
 /** Built-in shape of the `_user` service table. */
 export interface ServiceUser extends BaseDoc {
   login?: string
@@ -107,34 +128,18 @@ export interface ServiceUser extends BaseDoc {
   passwordHash: string
   hash?: string
   groups?: string[]
+  /** Personal access merged on top of group access at login. */
+  access?: AccessObject
   disabled?: boolean
 }
 
 /** Built-in shape of the `_group` service table. */
 export interface ServiceGroup extends BaseDoc {
   name?: string
+  /** Table access granted to every user of the group. */
+  access?: AccessObject
 }
 
-/** A `read` or `write` block inside a permission rule. */
-export interface PermissionPart {
-  /** Allowed group ids. */
-  groups?: string[]
-  /** Allowed user ids. */
-  users?: string[]
-  /** If explicitly `false`, denies even when the user/group matches. */
-  action?: boolean
-  /** Whitelist of field paths the user may read or write. */
-  fields?: string[]
-}
-
-/** Built-in shape of the `_permission` service table. */
-export interface ServicePermission<T extends BaseDoc = BaseDoc> extends BaseDoc {
-  table: string
-  priority?: number
-  if?: Filter<T>
-  read?: PermissionPart
-  write?: PermissionPart
-}
 
 /** The three actions stored in the log. */
 export type ChangeAction = "insert" | "update" | "delete"
@@ -186,7 +191,7 @@ export function createPrefixedTableName(
   fallback?: string
 ): string
 
-/** Returns service tables for a prefix (`cfg` -> `cfg_user`, `cfg_group`, `cfg_permission`). */
+/** Returns service tables for a prefix (`cfg` -> `cfg_user`, `cfg_group`). */
 export function createServiceTableNames(prefix?: string | null): string[]
 
 /** Deduplicates table names. Pass extra tables explicitly when you want to append them. */

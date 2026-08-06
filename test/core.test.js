@@ -103,11 +103,10 @@ test("createChange keeps compact audit fields", () => {
 
 test("normalizeTables deduplicates explicit tables without adding service tables implicitly", () => {
   assert.deepEqual(normalizeTables(["order", "order"]), ["order"])
-  assert.deepEqual(normalizeTables(["order"], ["_user", "_group", "_permission"]), [
+  assert.deepEqual(normalizeTables(["order"], ["_user", "_group"]), [
     "order",
     "_user",
     "_group",
-    "_permission"
   ])
 })
 

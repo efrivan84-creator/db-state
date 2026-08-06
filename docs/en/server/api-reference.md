@@ -24,8 +24,8 @@ import type {
   MutationResult, SyncResult,
   GetUserFn,
   MongoDatabaseLike, MongoCollectionLike, MongoCursorLike,
-  AccessConfig, AccessContext, AccessDecision, AccessRule, AccessUser,
-  ServerPermissionRule, PermissionPart,
+  AccessContext, AccessDecision, AccessUser,
+  UserAccess, AccessTableEntry, AccessFilter,
   PasswordHasher, AuthHandlers, LoginMessage, AuthMessage, LogoutMessage,
   BroadcastOptions, ClientMeta, DetachClient, SocketAdapter, SocketClient, SocketHub,
   RpcHandler, RpcRequest, RpcRouter,
@@ -46,9 +46,8 @@ createDbStateServer(config: DbStateServerConfig): DbStateServer
 | Option | Type | Default | Notes |
 |---|---|---|---|
 | `mongo` | `MongoDatabaseLike` | required | Mongo database handle. |
-| `tables` | `string[]` | required | Tables exposed through CRUD/RPC. Add `_user`, `_group`, `_permission` explicitly when needed. |
-| `access` | `AccessConfig` | `{}` | Code access rules. |
-| `hooks` | `ServerHooks` | `{}` | Lifecycle hooks around read/write operations. |
+| `tables` | `string[]` | required | Tables exposed through CRUD/RPC. Add `_user`, `_group` explicitly when needed. |
+| `hooks` | `ServerHooks` | `{}` | Lifecycle hooks around read/write operations; `before*` may also allow or deny. See [hooks.md](hooks.md). |
 | `password` | `PasswordHasher` | PBKDF2 | Password hash adapter. |
 | `authLoginFields` | `string[]` | `["login"]` | `_user` fields accepted by `dbstate:login`, e.g. `["login", "email", "phone"]`. |
 | `normalizeAuthLogin` | `(value, field) => string` | `String(value).trim()` | Normalizes submitted login values before matching each configured field. |
@@ -58,11 +57,9 @@ createDbStateServer(config: DbStateServerConfig): DbStateServer
 | `createLogId` | `() => string` | `crypto.randomUUID()` | Log entry id generator. |
 | `getUser` | `GetUserFn` | reads `req.client.user` | Resolve calling user. |
 | `logCollection` | `string` | `"log"` | Log collection name. |
-| `permissionTable` | `string` | `"_permission"` | Permissions collection. |
 | `userTable` | `string` | `"_user"` | Users collection. |
 | `systemUserId` | `string` | `"system"` | Actor id written to `info.makeid` / `info.editid` and `change.userId` for internal writes without an authenticated user. |
 | `now` | `() => string` | `new Date().toISOString()` | Server clock. |
-| `syncLimit` | `number` | `1000` | Max changes per sync call. |
 | `changesBroadcastDelay` | `number` | `3000` | Debounce delay before waking clients after writes, ms. |
 | `changesBroadcastRate` | `number` | `100` | Maximum clients to wake per second. |
 | `socket` | `SocketAdapter` | undefined | Out-of-process broadcast hook. |
@@ -197,12 +194,13 @@ Returns the count after permission filtering. Note: this loads every matching do
 interface SyncRequest {
   from: string         // ISO timestamp (exclusive)
   sessionId?: string   // skip changes from this session
-  limit?: number       // overrides config.syncLimit
   req?: unknown
 }
 ```
 
-Returns `{ to: string, changes: Change[] }`. The `to` is what the caller writes as the new `time1`. The `changes` array is permission-filtered.
+Returns `{ to, changes, hasMore? }` for an incremental window of at most 12 hours. `changes` is permission- and field-filtered. When `hasMore: true`, call `sync` again from `to`.
+
+If `from` is more than 20 days behind the server clock, returns `{ to, changes: [], reset: true }`. The client must discard local data, reload current records/queries, and continue from `to`.
 
 ## `socket: SocketHub`
 
@@ -259,44 +257,41 @@ function hashValue(value: unknown): string        // SHA-256 hex of String(value
 ## Access types
 
 ```ts
-type AccessConfig = {
-  read?: AccessRule<any>
-  write?: AccessRule<any>
-} & Record<string, { read?: AccessRule<any>; write?: AccessRule<any> } | AccessRule<any> | undefined>
-
-type AccessRule<T> = (ctx: AccessContext<T>) => AccessDecisionValue | Promise<AccessDecisionValue>
-
-type AccessDecisionValue =
-  | boolean
-  | { allowed: boolean; fields?: string[] }
-  | { action: boolean; fields?: string[] }
-  | { fields?: string[] }
-  | null
-  | undefined
-
 interface AccessDecision {
   allowed: boolean
   fields?: string[]
 }
 
 interface AccessContext<T = BaseDoc> {
-  req?: unknown
+  req?: unknown           // req.body holds the client payload
   user?: AccessUser
   table: string
+  method?: "load" | "getIds" | "getUnique" | "count" | "sync" | "add" | "update" | "remove"
   id: string
   docId: string
   obj?: T
   old?: T
   set?: Partial<T> & Record<string, unknown>
   unset?: string[]
+  filter?: Record<string, unknown>
+  sort?: Record<string, 1 | -1>
+  skip?: number
+  limit?: number
+  field?: string
+  fields?: string[]       // beforeRead may narrow the returned fields
+  rows?: T[]
+  result?: unknown
   change?: Change<T>
   action?: "insert" | "update" | "delete"
+  sessionId?: string
+  actorId?: string
+  now?: string
+  error?: Error
   loadDoc?: () => Promise<T | undefined>
-  permissionRules?: ServerPermissionRule<T>[]
 }
 ```
 
-See [code-access-rules.md](code-access-rules.md) for usage.
+Permissions live in the `access` object of the user's groups — see [permissions.md](permissions.md). For dynamic decisions use hooks; see [hooks.md](hooks.md).
 
 ## Lifecycle hooks
 
@@ -330,16 +325,14 @@ createDbStateServer({
     beforeRead: async (ctx) => {
       ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
     },
-    order: {
-      beforeWrite: async (ctx) => {
-        if (ctx.action === "update") ctx.set.updatedBy = ctx.user._id
-      },
-      afterWrite: async ({ change }) => {
-        // change is already written to the log.
-      },
-      errorWrite: async ({ error, method }) => {
-        console.warn("write failed", method, error.message)
-      }
+    beforeWrite: async (ctx) => {
+      if (ctx.table === "order" && ctx.method === "update") ctx.set.updatedBy = ctx.user._id
+    },
+    afterWrite: async ({ change }) => {
+      // change is already written to the log.
+    },
+    errorWrite: async ({ error, method }) => {
+      console.warn("write failed", method, error.message)
     }
   }
 })
@@ -347,12 +340,9 @@ createDbStateServer({
 
 ### Hook lookup order
 
-For table operations, the global hook runs first, then the table hook:
-
-```text
-hooks.beforeRead
-  -> hooks[table].beforeRead
-```
+Each hook is declared once for the whole server; branch on `ctx.table` inside.
+Hooks contributed by mounted modules run before the application hook of the same
+name, and the first explicit decision (`true` / `false`) stops the chain.
 
 The same order applies to all hook names. For `sync`, there is no single table for the whole operation, so only global `beforeRead/afterRead/errorRead` run for the outer sync call. Per-change filtering still uses normal read access rules.
 
@@ -402,7 +392,7 @@ strip client info
 create server info.makeid/info.makedata
 beforeWrite
 access write
-write.fields validation
+write_fields validation
 Mongo insert
 append log
 schedule changes_available
@@ -420,7 +410,7 @@ create server info.editid/info.editdata
 beforeWrite
 apply patch for access ctx.obj
 access write
-write.fields validation
+write_fields validation
 Mongo update
 append log
 schedule changes_available
@@ -460,10 +450,9 @@ The main use is server-side prefiltering:
 
 ```js
 hooks: {
-  order: {
-    beforeRead: async (ctx) => {
-      ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
-    }
+  beforeRead: async (ctx) => {
+    if (ctx.table !== "order") return
+    ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
   }
 }
 ```
@@ -504,21 +493,15 @@ Example guard:
 
 ```js
 hooks: {
-  order: {
-    afterWrite: async (ctx) => {
-      if (ctx.req?.internalHook) return
+  afterWrite: async (ctx) => {
+    if (ctx.table !== "order") return
+    if (ctx.req?.internalHook) return
 
-      await dbState.add({
-        table: "audit",
-        obj: { sourceTable: ctx.table, sourceId: ctx.id },
-        req: { ...ctx.req, internalHook: true }
-      })
-    }
-  },
-  audit: {
-    afterWrite: async (ctx) => {
-      if (ctx.req?.internalHook) return
-    }
+    await dbState.add({
+      table: "audit",
+      obj: { sourceTable: ctx.table, sourceId: ctx.id },
+      req: { ...ctx.req, internalHook: true }
+    })
   }
 }
 ```
@@ -540,7 +523,7 @@ function handleRpc(
 ): Promise<void>
 ```
 
-Default read handlers keep their normal `result` shape, but the `dbstate:rpc_result` envelope can include diagnostics: `meta.accessFiltered = true` and `meta.denied = N` when read permissions hide whole rows or log changes, plus `meta.fieldsFiltered = true` when read field whitelists remove object/change fields.
+Default read handlers keep their normal `result` shape, but the `dbstate:rpc_result` envelope can include `meta.fieldsFiltered = true` when a read field whitelist limits the returned fields. Rows hidden by read permissions are dropped silently — their count is never reported.
 
 Wrap or extend for tracing, rate limiting, custom methods:
 

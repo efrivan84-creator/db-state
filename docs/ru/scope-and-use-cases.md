@@ -79,7 +79,7 @@ state.socket.send("position:update", {
 
 - Документы, блоки, проекты, задачи → db-state
 - Комментарии, упоминания, история → db-state
-- Sharing-permissions → `_permission` таблица db-state
+- Sharing-permissions → объекты `access` на группах db-state
 - Позиции курсоров, «X печатает», подсветки выделений → custom-канал через `state.socket`
 
 Custom-слой тут маленький, потому что курсоры эфемерны — нет смысла писать каждое движение курсора в Mongo.

@@ -94,7 +94,7 @@ const n = state.order.countRef({ status: "open" })
 
 ## Service tables
 
-`_user`, `_group`, `_permission` are typed automatically with default shapes:
+`_user`, `_group` are typed automatically with default shapes:
 
 ```ts
 state._user.load("u1")

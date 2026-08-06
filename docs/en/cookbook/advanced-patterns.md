@@ -79,72 +79,67 @@ The exact filter operators depend on your server's Mongo query handling. The Mon
 
 ## Multi-tenant data
 
-Use `_permission.if` when the tenant is a document field:
+Use an access filter with `"$groupid"` when the tenant is a document field — one group per tenant:
 
 ```js
+// _group: one per tenant, tenantId equals the group id
 {
-  _id: "perm_order_t1_manager",
-  table: "order",
-  priority: 100,
-  if: { tenantId: "t1" },
-  read: { groups: ["t1_manager"] },
-  write: { groups: ["t1_manager"], fields: ["status", "comment"] }
+  _id: "t1",
+  name: "Tenant 1 managers",
+  access: {
+    order: {
+      read: { tenantId: "$groupid" },
+      write: { tenantId: "$groupid" },
+      write_fields: ["status", "comment"]
+    }
+  }
 }
 ```
 
-For many tenants, code access rules are often cleaner than generating thousands of permission rows:
+For policies that data filters cannot express, a hook is the fallback:
 
 ```js
 const dbState = createDbStateServer({
   mongo,
   tables: ["order"],
-  access: {
-    order: {
-      read: async ({ user, loadDoc }) => {
-        const doc = await loadDoc()
-        return user.tenantIds?.includes(doc?.tenantId)
-      },
-      write: async ({ user, action, loadDoc }) => {
-        if (action === "insert") return true
-        const doc = await loadDoc()
-        return user.tenantIds?.includes(doc?.tenantId)
+  hooks: {
+    beforeRead: (ctx) => {
+      if (ctx.table !== "order") return
+      ctx.filter = { $and: [ctx.filter ?? {}, { tenantId: { $in: ctx.user.tenantIds ?? [] } }] }
+    },
+    beforeWrite: (ctx) => {
+      if (ctx.table !== "order" || ctx.method === "add") return
+      if (!ctx.user.tenantIds?.includes(ctx.old?.tenantId)) {
+        return { allowed: false, reason: "Order belongs to another tenant" }
       }
     }
   }
 })
 ```
 
-`loadDoc()` is lazy during sync. If the rule does not call it, Mongo is not queried for the changed document.
+The read hook rewrites the query, so the database never returns other tenants' rows.
 
 ## Owner-based permissions
 
-Example: users can read only their own tasks, admins can read all:
+Users read only their own tasks, admins read all. As data, with no code at all:
 
 ```js
-access: {
-  task: {
-    read: async ({ user, loadDoc }) => {
-      if (user.groups?.includes("admin")) return true
-      const task = await loadDoc()
-      return task?.ownerId === user._id
-    },
-    write: async ({ user, action, loadDoc }) => {
-      if (user.groups?.includes("admin")) return true
-      if (action === "insert") return true
-
-      const task = await loadDoc()
-      return task?.ownerId === user._id
-    }
-  }
-}
+{ _id: "staff", access: { task: { read: { ownerId: "$adminid" }, write: { ownerId: "$adminid" } } } }
+{ _id: "admin", access: { task: { read: {}, write: {} } } }
 ```
 
-Return `undefined` when you want `_permission` rules to decide instead:
+When the condition needs code — say it depends on the time of day or an external
+service — use a hook and leave the rest to the group access:
 
 ```js
-read: async ({ user }) => {
-  if (user.disabled) return false
-  return undefined
+hooks: {
+  beforeRead: (ctx) => {
+    if (ctx.user.disabled) return { allowed: false, reason: "Account disabled" }
+    if (ctx.table === "task" && !ctx.user.groups?.includes("admin")) {
+      ctx.filter = { $and: [ctx.filter ?? {}, { ownerId: ctx.user._id }] }
+    }
+    // nothing returned → the group access decides on the narrowed query
+  }
 }
 ```
 
@@ -252,7 +247,6 @@ For production, create:
 
 ```js
 await db.collection("log").createIndex({ createdAt: 1, logId: 1 })
-await db.collection("_permission").createIndex({ table: 1, priority: -1 })
 ```
 
 Add app indexes for list queries:

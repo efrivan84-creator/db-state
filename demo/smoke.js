@@ -26,6 +26,7 @@ try {
     password: "manager"
   })
   assert.equal(login.userId, "u_manager")
+  const syncFrom = new Date(Date.now() - 60_000).toISOString()
 
   const loaded = await rpc(ws, messages, "load", {
     table: "order",
@@ -56,7 +57,7 @@ try {
   )
 
   const sync = await rpc(ws, messages, "sync", {
-    from: "1970-01-01T00:00:00.000Z",
+    from: syncFrom,
     sessionId: "smoke_reader"
   })
   assert.equal(sync.changes.some((change) => change.set?.margin), false)

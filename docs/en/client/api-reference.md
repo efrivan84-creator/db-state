@@ -21,7 +21,7 @@ import type {
   DbStateCache, StorageLike, LoadingKeyRef,
   DbStateSocketFacade, SocketMessage,
   AuthResult, AuthStatus, SyncStatus, SyncState, AuthState,
-  ServiceUser, ServiceGroup, ServicePermission, PermissionPart,
+  ServiceUser, ServiceGroup, AccessObject, AccessEntry,
   BaseDoc, Change, ChangeAction
 } from "@db-state/vue"
 ```
@@ -44,7 +44,7 @@ createDbState<Schema>(["order", "product"])
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
-| `tables` | `string[]` | required | Tables exposed on the client. Add `_user`, `_group`, `_permission` explicitly when needed. |
+| `tables` | `string[]` | required | Tables exposed on the client. Add `_user`, `_group` explicitly when needed. |
 | `wsUrl` | `string` | `${ws-mapped origin}/db-state/ws` | WebSocket URL. |
 | `autoConnect` | `boolean` | `true` | Open the socket immediately. |
 | `autoAuth` | `boolean` | `true` | Try `authByHash` on socket open. |
@@ -317,7 +317,7 @@ interface DbStateSocketFacade {
 | `rpc(method, payload)` | Library RPC (not for app code). |
 | `system(type, payload)` | Library system round-trip (login, auth, logout). |
 
-`rpc()` resolves with `result`, but `dbstate:rpc_result` / `dbstate:rpc_error` envelopes are also observable through `on(...)`. Use this for diagnostics such as server `meta.accessFiltered` or `meta.fieldsFiltered`.
+`rpc()` resolves with `result`, but `dbstate:rpc_result` / `dbstate:rpc_error` envelopes are also observable through `on(...)`. Use this for diagnostics such as server `meta.fieldsFiltered`.
 
 See [socket.md](socket.md) for usage.
 
@@ -363,22 +363,18 @@ interface ServiceUser extends BaseDoc {
 
 interface ServiceGroup extends BaseDoc {
   name?: string
+  access?: AccessObject
 }
 
-interface ServicePermission<T = BaseDoc> extends BaseDoc {
-  table: string
-  priority?: number
-  if?: Partial<T>
-  read?: PermissionPart
-  write?: PermissionPart
+// Access rights stored on _group (and optionally _user):
+type AccessFilter = Record<string, unknown>   // {} matches everything
+type AccessEntry = {
+  read?: AccessFilter | AccessFilter[]
+  read_fields?: string[]
+  write?: AccessFilter | AccessFilter[]
+  write_fields?: string[]
 }
-
-interface PermissionPart {
-  groups?: string[]
-  users?: string[]
-  action?: boolean
-  fields?: string[]
-}
+type AccessObject = { fullaccess?: 1 | true } & Record<string, AccessEntry | 1 | true | undefined>
 ```
 
 Override in your `Schema` if you have extra fields — see [typescript.md](typescript.md#service-tables).

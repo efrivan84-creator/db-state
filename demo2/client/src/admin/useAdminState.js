@@ -6,7 +6,6 @@ const tabs = [
   { id: "orders", label: "Заказы", table: "order", hint: "Операции, суммы, маржа и ответственные" },
   { id: "users", label: "Пользователи", table: "_user", hint: "Логины, группы и блокировка доступа" },
   { id: "groups", label: "Группы", table: "_group", hint: "Группы клиентов без ролей" },
-  { id: "permissions", label: "Права", table: "_permission", hint: "Правила чтения, записи, условий и полей" },
   { id: "files", label: "Файлы", table: "file", hint: "Metadata, tokens, политики и WebSocket chunks" },
   { id: "audit", label: "Аудит", table: "log", hint: "Append-only log: кто, когда и что изменил" }
 ]
@@ -184,65 +183,32 @@ const tableConfigs = {
 
   _group: {
     idPrefix: "group_",
-    query: {
-      searchPlaceholder: "ID или название",
-      searchFields: ["_id", "name"],
-      sort: [
-        { value: "_id:1", label: "ID ↑" },
-        { value: "name:1", label: "Название ↑" }
-      ],
-      pageSizes: [5, 10, 20]
-    },
-    columns: [
-      { key: "_id", label: "ID" },
-      { key: "name", label: "Название" }
-    ],
-    fields: [
-      { key: "_id", label: "ID", type: "text", disabled: true },
-      { key: "name", label: "Название", type: "text" }
-    ],
-    emptyDraft: () => ({ _id: "", name: "" }),
-    fromDoc: (doc) => ({ _id: doc?._id ?? "", name: doc?.name ?? "" }),
-    toPatch: (draft) => ({ name: draft.name }),
-    buildNewDoc: (id) => ({ _id: id, name: "Новая группа" }),
-    notices: { saved: "Группа сохранена", added: "Группа добавлена", removed: "Группа удалена" }
-  },
-
-  _permission: {
-    idPrefix: "perm_",
     rawJson: true,
     query: {
-      searchPlaceholder: "ID или таблица",
-      searchFields: ["_id", "table"],
-      filters: [
-        { key: "table", label: "Таблица", field: "table", all: "Все таблицы", options: ["order", "file", "log", "_user", "_group", "_permission"] }
-      ],
+      searchPlaceholder: "ID Ð¸Ð»Ð¸ Ð½Ð°Ð·Ð²Ð°Ð½Ð¸Ðµ",
+      searchFields: ["_id", "name"],
       sort: [
-        { value: "priority:-1", label: "Приоритет ↓" },
-        { value: "table:1", label: "Таблица ↑" },
-        { value: "_id:1", label: "ID ↑" }
+        { value: "_id:1", label: "ID â" },
+        { value: "name:1", label: "ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ â" }
       ],
       pageSizes: [5, 10, 20]
     },
     columns: [
       { key: "_id", label: "ID" },
-      { key: "table", label: "Таблица" },
-      { key: "priority", label: "Приоритет" },
-      { key: "read.groups", label: "Чтение" },
-      { key: "write.groups", label: "Запись" }
+      { key: "name", label: "ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ" },
+      { key: "access", label: "ÐÑÐ°Ð²Ð°" }
     ],
     emptyDraft: () => "",
     fromDoc: (doc) => doc ? JSON.stringify(cleanDoc(stripId(doc)), null, 2) : "",
     toPatch: (draft) => stripId(JSON.parse(draft)),
     buildNewDoc: (id) => ({
       _id: id,
-      table: "order",
-      priority: 0,
-      read: { groups: ["viewer"], fields: ["_id", "status"] },
-      write: { groups: ["viewer"], action: false }
+      name: "ÐÐ¾Ð²Ð°Ñ Ð³ÑÑÐ¿Ð¿Ð°",
+      access: { order: { read: {} } }
     }),
-    notices: { saved: "Правило сохранено", added: "Правило добавлено", removed: "Правило удалено" }
+    notices: { saved: "ÐÑÑÐ¿Ð¿Ð° ÑÐ¾ÑÑÐ°Ð½ÐµÐ½Ð°", added: "ÐÑÑÐ¿Ð¿Ð° Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð°", removed: "ÐÑÑÐ¿Ð¿Ð° ÑÐ´Ð°Ð»ÐµÐ½Ð°" }
   },
+
 
   log: {
     idPrefix: "log_",
@@ -252,7 +218,7 @@ const tableConfigs = {
       searchPlaceholder: "ID записи, таблица, документ или пользователь",
       searchFields: ["_id", "logId", "table", "id", "userId"],
       filters: [
-        { key: "table", label: "Таблица", field: "table", all: "Все таблицы", options: ["order", "file", "_user", "_group", "_permission"] },
+        { key: "table", label: "Таблица", field: "table", all: "Все таблицы", options: ["order", "file", "_user", "_group"] },
         { key: "action", label: "Действие", field: "action", all: "Все действия", options: ["insert", "update", "delete"] }
       ],
       sort: [
@@ -360,7 +326,6 @@ export function useAdminState() {
     orders: countRefs.order.value,
     users: countRefs._user.value,
     groups: countRefs._group.value,
-    permissions: countRefs._permission.value,
     files: countRefs.file.value,
     log: countRefs.log.value
   }))
@@ -543,7 +508,7 @@ export function useAdminState() {
     const account = authorizedLogin.value
 
     if (account === "admin") {
-      if (table === "_permission") return Object.keys(changedPatch(table))
+      if (table === "_group") return Object.keys(changedPatch(table))
       return (tableConfigs[table]?.fields ?? [])
         .filter((field) => !field.disabled)
         .map((field) => field.key)

@@ -34,7 +34,7 @@ new WebSocketServer({ port: wsPort, path: wsPath })
 ```
 
 `tables` содержит только таблицы, которые нужно открыть через CRUD/RPC API. Служебные таблицы
-`_user`, `_group` и `_permission` не добавляются автоматически: укажи их явно, если админке
+`_user` и `_group` не добавляются автоматически: укажи их явно, если админке
 нужно читать или редактировать их через db-state.
 
 Если нужно поднять несколько независимых db-state серверов в одной MongoDB database,
@@ -48,19 +48,18 @@ const dbState = createDbStateServer({
 })
 ```
 
-Тогда служебные коллекции будут `cfg_user`, `cfg_group`, `cfg_permission`, а log — `cfg_log`.
-Без prefix сохраняются старые имена: `_user`, `_group`, `_permission`, `log`.
+Тогда служебные коллекции будут `cfg_user`, `cfg_group`, а log — `cfg_log`.
+Без prefix сохраняются старые имена: `_user`, `_group`, `log`.
 Если эти таблицы нужно открыть клиенту, добавь prefixed имена в `tables`, например
-`["order", "cfg_user", "cfg_group", "cfg_permission", "cfg_log"]`.
+`["order", "cfg_user", "cfg_group", "cfg_log"]`.
 
 ## Обязательные индексы MongoDB
 
 ```js
 await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
-await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
 ```
 
-С `servicePrefix: "cfg"` используй соответственно `cfg_log` и `cfg_permission`.
+С `servicePrefix: "cfg"` используй соответственно `cfg_log`.
 
 Для прикладных запросов добавляй обычные Mongo indexes под свои filters/sorts:
 
@@ -88,16 +87,9 @@ await mongo.collection("_user").updateOne(
   { upsert: true }
 )
 
-await mongo.collection("_permission").updateOne(
-  { _id: "perm_admin_order" },
-  {
-    $set: {
-      table: "order",
-      priority: 10,
-      read: { groups: ["admin"], action: true },
-      write: { groups: ["admin"], action: true }
-    }
-  },
+await mongo.collection("_group").updateOne(
+  { _id: "admin" },
+  { $set: { name: "Admins", access: { fullaccess: 1 } } },
   { upsert: true }
 )
 ```
@@ -108,18 +100,15 @@ await mongo.collection("_permission").updateOne(
 |---|---:|---|
 | `mongo` | required | Mongo database-like object. |
 | `tables` | required | Прикладные таблицы. |
-| `access` | `{}` | Code access rules. |
-| `hooks` | `{}` | Lifecycle hooks. |
+| `hooks` | `{}` | Хуки жизненного цикла; `before*` могут разрешить или запретить. См. [hooks.md](hooks.md). |
 | `socket` | `{}` | Socket hub options. |
 | `password` | PBKDF2 adapter | Password hasher/verifier. |
-| `servicePrefix` / `prefix` | unset | Prefix для служебных коллекций: `cfg_user`, `cfg_group`, `cfg_permission`, `cfg_log`. |
+| `servicePrefix` / `prefix` | unset | Prefix для служебных коллекций: `cfg_user`, `cfg_group`, `cfg_log`. |
 | `logCollection` | `"log"` | Имя log-коллекции; переопределяет prefix для log. |
 | `userTable` | `"_user"` | Имя таблицы пользователей; переопределяет prefix для users. |
 | `groupTable` | `"_group"` | Имя таблицы групп; переопределяет prefix для groups. |
-| `permissionTable` | `"_permission"` | Имя таблицы permissions; переопределяет prefix для permissions. |
 | `now` | `new Date().toISOString()` | Server clock. |
 | `id` | random id | Generator для log/doc ids. |
-| `syncLimit` | `1000` | Максимум changes за sync. |
 | `systemUserId` | `"system"` | Actor id для внутренних writes без user. |
 | `files` | `[]` | File modules. |
 
@@ -131,9 +120,11 @@ await mongo.collection("_permission").updateOne(
 
 Подставляй deterministic clock в тестах. В production все процессы должны иметь согласованные часы.
 
-### `syncLimit`
+### Временные окна sync
 
-Должен покрывать одно sync window. Для high-write workloads добавь continuation по `{ createdAt, logId }`.
+Один ответ `sync` покрывает не более 12 часов журнала. Если клиент отстал сильнее, сервер возвращает `hasMore: true`, а Vue-клиент сразу запрашивает следующее окно.
+
+Если cursor старше 20 дней, сервер возвращает `reset: true`: клиент удаляет локальный cache, заново загружает активные объекты и query refs и продолжает sync от полученного `to`.
 
 ## WebSocket integration
 

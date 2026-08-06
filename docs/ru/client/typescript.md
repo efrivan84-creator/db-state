@@ -68,7 +68,7 @@ const count = state.order.countRef({ status: "open" })
 
 ## Service tables
 
-`_user`, `_group`, `_permission` не добавляются автоматически. Укажи и типизируй их явно, если UI работает с админскими таблицами:
+`_user`, `_group` не добавляются автоматически. Укажи и типизируй их явно, если UI работает с админскими таблицами:
 
 ```ts
 type Schema = {

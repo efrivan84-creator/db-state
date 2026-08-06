@@ -350,7 +350,7 @@ For multi-tenant apps where users belong to organizations:
 }
 ```
 
-Then your permissions and code rules can use `acme:admin` etc.
+Then your permissions and hooks can use `acme:admin` etc.
 
 Or set a custom field:
 
@@ -362,12 +362,11 @@ Or set a custom field:
 }
 ```
 
-And use it in code rules:
+And use it in a hook:
 
 ```js
-read: async (ctx) => {
-  const obj = ctx.obj ?? await ctx.loadDoc?.()
-  return obj?.tenantId === ctx.user?.tenantId
+beforeRead: (ctx) => {
+  ctx.filter = { ...ctx.filter, tenantId: ctx.user?.tenantId }
 }
 ```
 

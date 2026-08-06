@@ -77,7 +77,6 @@ Delete log хранит old document:
 
 ```js
 await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
-await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
 ```
 
 Для audit views полезны:
@@ -89,7 +88,7 @@ await mongo.collection("log").createIndex({ userId: 1, createdAt: -1 })
 
 ## Permission filtering
 
-Sync не отдает log rows, которые пользователь не имеет права читать. Field-level `read.fields` фильтрует `obj`, `set`, `unset` и `old`. Поэтому audit UI для обычного пользователя должен использовать отдельные permissions, а не прямой доступ к полной коллекции `log`.
+Sync не отдает log rows, которые пользователь не имеет права читать. Field-level `read_fields` фильтрует `obj`, `set`, `unset` и `old`. Поэтому audit UI для обычного пользователя должен использовать отдельные access-настройки, а не прямой доступ к полной коллекции `log`.
 
 ## Time-travel reconstruction
 

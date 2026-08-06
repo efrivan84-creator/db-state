@@ -67,9 +67,9 @@ import {
 |---|---|
 | `DB_STATE_EVENTS` | Совместимый subset серверных событий: hello, changes available, force-resync, error. |
 | `DB_STATE_MESSAGES` | Полная карта зарезервированных protocol/local сообщений для RPC, login, auth, logout, socket open/close, sync notification и force-resync. |
-| `SERVICE_TABLES` | Встроенные служебные таблицы: `_user`, `_group`, `_permission`. |
+| `SERVICE_TABLES` | Встроенные служебные таблицы: `_user`, `_group`. |
 | `BaseDoc`, `Change`, `Filter`, `SortSpec`, `ListQuery`, `UpdatePatch`, `UpdateArgs` | Общие TypeScript-типы документов, изменений, query и update. |
-| `ServiceUser`, `ServiceGroup`, `ServicePermission`, `PermissionPart` | Общие TypeScript-типы служебных таблиц и прав. |
+| `ServiceUser`, `ServiceGroup`, `AccessObject`, `AccessEntry` | Общие TypeScript-типы служебных таблиц и access-прав. |
 | `createChange` | Создаёт компактную нормализованную запись изменения. |
 | `applyChange`, `applyPatch` | Применяют insert/update/delete изменения к локальным объектам. |
 | `getByPath`, `setByPath`, `unsetByPath` | Читают и изменяют вложенные поля по dot-path. |
@@ -79,7 +79,7 @@ import {
 
 ## Правила
 
-- `normalizeTables(tables)` дедуплицирует переданные имена. Добавляй `_user`, `_group` и `_permission` явно, если нужно открыть их через API.
+- `normalizeTables(tables)` дедуплицирует переданные имена. Добавляй `_user` и `_group` явно, если нужно открыть их через API.
 - `createdAt > time1 && createdAt <= time2` — окно sync.
 - `sessionId` нужен, чтобы не присылать клиенту его же подтверждённые изменения.
 - `set` поддерживает dot-path-поля типа `"profile.city"`.

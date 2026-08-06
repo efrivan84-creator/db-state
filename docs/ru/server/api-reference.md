@@ -25,7 +25,6 @@ import {
 const dbState = createDbStateServer({
   mongo,
   tables: ["order"],
-  access,
   hooks
 })
 ```
@@ -36,12 +35,10 @@ const dbState = createDbStateServer({
 |---|---|
 | `mongo` | Mongo database-like object. |
 | `tables` | Прикладные таблицы. |
-| `access` | Code access config. |
-| `hooks` | Lifecycle hooks. |
+| `hooks` | Хуки жизненного цикла; `before*` могут разрешить или запретить. См. [hooks.md](hooks.md). |
 | `password` | Password adapter. |
 | `socket` | Socket hub config. |
 | `files` | File modules. |
-| `syncLimit` | Max changes за sync. |
 | `systemUserId` | Actor для внутренних writes. |
 
 ## `DbStateServer`
@@ -101,7 +98,7 @@ await dbState.remove({ table: "order", id: "o1", req })
 await dbState.load({ table: "order", id: "o1", req })
 ```
 
-Возвращает документ с учетом `read.fields`.
+Возвращает документ с учетом `read_fields`.
 
 ### `getIds(input)`
 
@@ -144,7 +141,9 @@ await dbState.sync({
 })
 ```
 
-Возвращает `{ to, changes }` с permission filtering.
+Возвращает `{ to, changes, hasMore? }` для окна не более 12 часов. При `hasMore: true` клиент сразу вызывает `sync` ещё раз от нового `to`.
+
+Если `from` старше серверного времени более чем на 20 дней, возвращает `{ to, changes: [], reset: true }`. Клиент должен удалить локальные данные, перечитать актуальные объекты/query refs и продолжить от `to`.
 
 ## `socket: SocketHub`
 
@@ -175,16 +174,10 @@ Socket hub обрабатывает `dbstate:*` messages и может проп�
 }
 ```
 
-## Access types
+## Права
 
-Access rule возвращает boolean, decision object или `undefined`:
-
-```ts
-type AccessDecision =
-  | boolean
-  | { action?: boolean; fields?: string[] }
-  | undefined
-```
+Права живут в объекте `access` групп пользователя — см. [permissions.md](permissions.md).
+Динамические решения — в хуках, см. [hooks.md](hooks.md).
 
 ## Lifecycle hooks
 
@@ -195,27 +188,20 @@ hooks: {
   errorRead(ctx) {},
   beforeWrite(ctx) {},
   afterWrite(ctx) {},
-  errorWrite(ctx) {},
-  order: {
-    beforeWrite(ctx) {}
-  }
+  errorWrite(ctx) {}
 }
 ```
 
-### Hook lookup order
-
-Глобальный hook выполняется первым, затем table hook:
-
-```text
-hooks.beforeRead -> hooks.order.beforeRead
-```
+Каждый хук объявляется один раз на весь сервер; таблица разбирается внутри по
+`ctx.table`. Возврат `false` / `{ allowed: false, reason }` запрещает операцию,
+`true` разрешает без проверки прав группы, `undefined` передаёт решение правам.
 
 ### Read order
 
 ```text
 beforeRead
-Mongo read
-access/filter/projection
+access группы (если хук не решил)
+Mongo read (фильтр права и projection уже в запросе)
 afterRead
 ```
 
@@ -235,7 +221,7 @@ broadcast wake-up
 
 ### Mutable fields
 
-`beforeRead` может менять `filter`, `sort`, `skip`, `limit`, `from`. `beforeWrite` может менять `obj`, `set`, `unset`.
+`beforeRead` может менять `filter`, `sort`, `skip`, `limit`, `from` и `fields` (проекция полей). `beforeWrite` может менять `obj`, `set`, `unset`.
 
 ### Errors
 
@@ -259,10 +245,12 @@ broadcast wake-up
 {
   to: string
   changes: Change[]
+  hasMore?: true
+  reset?: true
 }
 ```
 
-RPC envelope может дополнительно содержать `meta.accessFiltered`, `meta.fieldsFiltered`, `meta.denied`.
+RPC envelope может дополнительно содержать `meta.fieldsFiltered`. Число скрытых правами строк не передаётся.
 
 ## Performance limits
 
@@ -270,6 +258,5 @@ RPC envelope может дополнительно содержать `meta.acce
 
 - индексом `log`;
 - индексами прикладных query;
-- `syncLimit`;
-- количеством `loadDoc()` в code access rules;
-- post-filtering permissions на больших list/count.
+- объём изменений внутри одного 12-часового sync-окна;
+- объёмом работы в хуках `beforeRead` / `beforeWrite`.

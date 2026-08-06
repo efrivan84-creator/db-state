@@ -18,17 +18,26 @@ export function createFileModule(input = {}) {
   const module = {
     table: options.table,
     tables: [options.table],
-    access: {
-      [options.table]: {
-        read: ({ req, user, obj }) => {
-          if (req?.__dbStateFileInternal) return true
-          if (!user || !obj || obj.ownerId !== user._id) return false
-          return { allowed: true, fields: FILE_FIELDS }
-        },
-        write: ({ req }) => req?.__dbStateFileInternal === true
+    // Загрузка и скачивание идут через сам модуль, а не через CRUD: такие
+    // вызовы помечены internalReq и проходят без прав группы. Всё остальное
+    // подчиняется обычному access группы на таблице файлов, например
+    //   { file: { read: { ownerId: "$adminid" }, read_fields: [...] } }
+    hooks: {
+      beforeRead: (ctx) => {
+        if (ctx.table !== options.table) return
+        // storageKey не покидает сервер даже при внутреннем чтении.
+        ctx.fields = FILE_FIELDS
+        if (ctx.req?.__dbStateFileInternal) return true
+      },
+
+      beforeWrite: (ctx) => {
+        if (ctx.table !== options.table) return
+        // Прямая правка метаданных запрещена: только через файловый API.
+        return ctx.req?.__dbStateFileInternal === true
+          ? true
+          : { allowed: false, reason: "File metadata is managed by the file API" }
       }
     },
-    hooks: {},
 
     bind(context) {
       api = context.api
@@ -153,7 +162,8 @@ export function createFileModule(input = {}) {
     })
 
     uploads.delete(client)
-    const file = await api.load({ table: options.table, id: upload.fileId, req: { client } })
+    // Отдаём загрузившему его же файл: чтение внутреннее, права группы не нужны.
+    const file = await api.load({ table: options.table, id: upload.fileId, req: internalReq(client) })
     sendJson(client, {
       type: "dbfile:upload_done",
       id: upload.id,

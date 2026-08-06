@@ -24,7 +24,7 @@ createdAt > from        // exclusive lower bound
 && sessionId != caller  // skip the caller's own session
 ```
 
-Where `to` is the server's clock at the moment of the call.
+`to` is the earlier of the server clock and `from + 12 hours`. A client further behind receives `hasMore: true` and immediately requests the next window.
 
 This guarantees:
 - No change is returned twice (idempotent up to `time1` write).
@@ -42,8 +42,7 @@ Client → server:
   "method": "sync",
   "payload": {
     "from": "2026-05-22T17:30:42.123Z",
-    "sessionId": "u123_abcdef",
-    "limit": 1000
+    "sessionId": "u123_abcdef"
   }
 }
 ```
@@ -56,21 +55,20 @@ Server → client:
   "id": "rpc-uuid",
   "result": {
     "to": "2026-05-22T17:30:42.456Z",
+    "hasMore": true,
     "changes": [
       { "logId": "...", "createdAt": "...", "table": "order", "id": "o1", "action": "update", "set": { ... }, ... }
     ]
   },
   "meta": {
-    "accessFiltered": true,
-    "fieldsFiltered": true,
-    "denied": 3
+    "fieldsFiltered": true
   }
 }
 ```
 
-`meta` is optional. `accessFiltered: true` means some whole rows or log changes in the response window were hidden by read permissions. `fieldsFiltered: true` means field-level read rules removed individual object/change fields. The `result` shape stays unchanged.
+`meta` is optional and carries only what the server already knows — nothing is counted for it. `fieldsFiltered: true` means field-level read rules limit the returned fields. How many rows or changes read permissions hid is never reported.
 
-The client applies changes in order to the reactive store, persists each affected document to cache, and writes `to` as the new `time1` only after the whole response has been processed. The UI can observe intermediate reactive updates while a large batch is being applied, but the stored cursor only advances after the batch is done.
+The client applies changes in order, persists each affected document, writes `to` only after the window succeeds, and repeats while `hasMore` is true.
 
 ## Notifications
 
@@ -141,9 +139,9 @@ for (const change of changes) {
 
 Optimisations:
 
-1. `_permission` rows are cached **per sync call per table** — no N+1 lookup.
-2. The current document is loaded lazily via `ctx.loadDoc()` — only if a rule actually calls it.
-3. For tables with no `if`-based rules, document loading is skipped entirely; the rule can decide from `{ table, user, change }` alone.
+1. `user.access` is already on the socket — filtering needs no permission reads.
+2. A `{}` grant is decided from `{ table, user, change }` alone — no document reads.
+3. A row filter is checked by the database with one filtered `findOne` per change; code rules load the document lazily via `ctx.loadDoc()`.
 
 Field filtering:
 
@@ -166,7 +164,7 @@ function filterChangeFields(change, fields) {
 }
 ```
 
-So a manager with `read.fields: ["status", "total"]` syncing an update that touched only `margin` gets **nothing** — that change is filtered out of the result.
+So a manager with `read_fields: ["status", "total"]` syncing an update that touched only `margin` gets **nothing** — that change is filtered out of the result.
 
 ## Server clock
 
@@ -198,13 +196,16 @@ So the order is **deterministic** across sync calls: same `time1`, same `to` win
 
 `logId` is `crypto.randomUUID()` by default — UUIDs sort lexically, giving a stable order even for simultaneous changes from different sources.
 
-## Limit handling
+## Time-window handling
 
-`sync(from, limit)` caps the response at `limit` entries (default 1000 from `config.syncLimit`).
+The protocol limits elapsed time, not the number of log rows:
 
-The server still returns the `to` timestamp captured at the start of the call. Keep `syncLimit` high enough that one client can drain the expected amount of log traffic between sync calls. If more than `limit` visible changes exist inside one `(from, to]` window, advancing the client cursor to `to` would skip the overflowed entries.
+- one response covers no more than 12 hours;
+- every matching row in that window is processed;
+- `hasMore: true` tells the client to request the next 12-hour window;
+- a cursor older than 20 days receives `{ reset: true, to, changes: [] }`.
 
-For very busy systems, raise the limit (`createDbStateServer({ syncLimit: 5000 })`) or add cursor continuation before lowering it. A robust continuation cursor should include both `createdAt` and `logId`, because multiple log rows can share the same millisecond timestamp.
+On reset the Vue client clears persistent and reactive cached data while preserving authorization, reloads all active records/count/id queries, then syncs once more from `to` to catch writes made during the reload.
 
 ## Echo suppression: subtle case
 
@@ -231,7 +232,7 @@ state.socket.on(DB_STATE_EVENTS.forceResync, async () => {
 })
 ```
 
-This pulls everything from the log. Expensive but useful after:
+The epoch cursor is older than 20 days, so the next `sync` returns a reset marker. The client clears its cache and reloads current state instead of replaying the entire log. This is useful after:
 - A major data migration where you want fresh state on every client.
 - Recovery from a malformed change that you've now patched server-side.
 

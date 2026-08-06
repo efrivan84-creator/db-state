@@ -24,8 +24,8 @@ export const DB_STATE_MESSAGES = Object.freeze({
   socketClose: "dbstate:socket_close"
 })
 
-export const SERVICE_TABLES = Object.freeze(["_user", "_group", "_permission"])
-export const SERVICE_TABLE_BASE_NAMES = Object.freeze(["user", "group", "permission"])
+export const SERVICE_TABLES = Object.freeze(["_user", "_group"])
+export const SERVICE_TABLE_BASE_NAMES = Object.freeze(["user", "group"])
 
 export function normalizeServicePrefix(input) {
   const prefix = input && typeof input === "object"

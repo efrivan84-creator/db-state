@@ -24,7 +24,7 @@ Notes:
 
 - If you don't pass `_id`, the server generates one (via `createLogId`, default `crypto.randomUUID()`).
 - The full inserted object goes into the log as `obj`. Other clients receive it directly on their next `sync` (no extra `findOne`).
-- Permission check: `write` access for the new document. Field-level `write.fields` is enforced — any forbidden field in `obj` rejects the whole insert.
+- Permission check: `write` access for the new document. Field-level `write_fields` is enforced — any forbidden field in `obj` rejects the whole insert.
 
 ## `update`
 
@@ -69,11 +69,11 @@ The cookbook has a [diff-based save pattern](../cookbook/admin-panel.md#diff-bas
 
 ### Permissions
 
-The server runs `assertAccess('write', ...)` against the document. If `write.fields` is set on a matching permission rule, every dot-path in `set` and `unset` must be in the whitelist:
+The server runs `assertAccess('write', ...)` against the document. If `write_fields` is set on the group access entry, every dot-path in `set` and `unset` must be in the whitelist:
 
 ```js
-// _permission row:
-{ table: "order", write: { groups: ["manager"], fields: ["status", "comment"] } }
+// _group row:
+{ _id: "manager", access: { order: { read: {}, write: {}, write_fields: ["status", "comment"] } } }
 
 // As a manager:
 state.order.update({ id: "o1", set: { status: "closed" } })            // ✅
@@ -93,7 +93,7 @@ await state.order.remove("o1")
 
 Notes:
 
-- Permission check: document-level `write` access. **Field-level `write.fields` does not apply to remove** — if you need stricter delete rules, use [code access rules](../server/code-access-rules.md) with `action === "delete"`.
+- Permission check: document-level `write` access. **Field-level `write_fields` does not apply to remove** — if you need stricter delete rules, use a [`beforeWrite` hook](../server/hooks.md) with `ctx.method === "remove"`.
 - The full deleted document is stored in the log as `change.old`. This is what makes deletes safe for sync: clients that need to check read permissions on the deleted doc can still see what was there.
 
 ## Local effects of a mutation

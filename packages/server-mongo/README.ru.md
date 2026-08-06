@@ -2,21 +2,20 @@
 
 > [English](README.md) · **Русский**
 
-Серверная часть для [db-state](https://github.com/efrivan84-creator/db-state) на MongoDB: CRUD, append-only лог, sync, WebSocket RPC, декларативные права доступа с правилами на уровне полей.
+Серверная часть для [db-state](https://github.com/efrivan84-creator/db-state) на MongoDB: CRUD, append-only лог, sync, WebSocket RPC, права по группам (объект `access`) с фильтрами строк и списками полей, плюс хуки.
 
 CRUD и sync доступны только через WebSocket RPC. HTTP-обработчиков в пакете нет.
 
 ## Что входит
 
 - WebSocket RPC сервер для `load`, `getIds`, `getUnique`, `count`, `sync`, `add`, `update`, `remove`.
-- Mongo-backed таблицы приложения плюс служебные `_user`, `_group`, `_permission`.
+- Mongo-backed таблицы приложения плюс служебные `_user` и `_group`.
 - Логин по паролю и reconnect по hash через тот же WebSocket.
 - Append-only коллекция `log` для realtime sync, аудита, восстановления удалений и time-travel reconstruction.
 - Sync по log-окнам `(time1, to]` с подавлением собственного session-эха.
-- Проверка read/write прав для каждого RPC, включая служебные таблицы.
+- Проверка read/write прав для каждого RPC по объекту `access` групп пользователя; фильтры строк уходят прямо в Mongo-запрос.
 - Field-level права для чтения, sync-изменений, insert и update.
-- Code access rules, которые могут переопределять или дополнять `_permission` и лениво грузить документы только когда это нужно.
-- Серверные read/write hooks для prefilter, нормализации, side effects и audit ошибок.
+- Хуки вокруг каждого чтения и записи: правка запроса, ограничение полей, разрешение и запрет с причиной, аудит ошибок.
 - Встроенный socket hub и adapter hook для Redis/NATS-style broadcast в нескольких процессах.
 
 ## Установка
@@ -38,7 +37,7 @@ const dbState = createDbStateServer({
 })
 ```
 
-`_user`, `_group` и `_permission` не открываются через CRUD/RPC автоматически. Добавь их в `tables` явно, если они нужны админке; доступ всё равно запрещён, пока его не разрешат code-правила или `_permission`.
+`_user` и `_group` не открываются через CRUD/RPC автоматически. Добавь их в `tables` явно, если они нужны админке; доступ всё равно запрещён, пока его не разрешит хук или `access` групп.
 
 Подключай WebSocket-клиентов из своего `ws`-сервера:
 
@@ -59,7 +58,6 @@ dbState.socket.addClient(ws, {
 
 ```js
 await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
-await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
 ```
 
 Для запросов приложения добавляй обычные Mongo-индексы под `getIds`, `count`, `getUnique`:
@@ -93,11 +91,11 @@ await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
   type: "dbstate:rpc_result",
   id: "rpc1",
   result: { ok: true, change },
-  meta: { accessFiltered: true, fieldsFiltered: true, denied: 2 } // optional
+  meta: { fieldsFiltered: true } // optional
 }
 ```
 
-`meta` присутствует только когда серверу нужно передать дополнительную информацию об ответе. `accessFiltered: true` означает, что права чтения скрыли целые строки или изменения лога. `fieldsFiltered: true` означает, что field-level правила чтения скрыли отдельные свойства объекта или изменения. Обычная форма `result` не меняется.
+В `meta` попадает только то, что серверу и так известно — ради него ничего не считается и не перезапрашивается. `fieldsFiltered: true` означает, что действует белый список полей на чтение, поэтому набор возвращённых полей ограничен. Сколько строк или изменений скрыли права чтения, сервер не сообщает: клиенту это не нужно, а подсчёт стоил бы лишнего запроса. Обычная форма `result` не меняется.
 
 Поддерживаемые методы:
 
@@ -118,16 +116,16 @@ RPC отклоняется, пока сокет не авторизован.
 
 | Метод | Для чего |
 |---|---|
-| `load` | Читает один разрешённый документ с проекцией по `read.fields`. |
+| `load` | Читает один разрешённый документ с проекцией по `read_fields`. |
 | `getIds` | Возвращает разрешённые id после `filter`, `sort`, `skip`, `limit`. |
 | `getUnique` | Возвращает уникальные разрешённые значения одного поля. |
 | `count` | Считает разрешённые документы по фильтру. |
 | `sync` | Возвращает видимые log-изменения новее клиентского cursor. |
-| `add` | Вставляет документ после проверки `write` и `write.fields`. |
-| `update` | Применяет `set` / `unset` после проверки `write` и `write.fields`. |
+| `add` | Вставляет документ после проверки `write` и `write_fields`. |
+| `update` | Применяет `set` / `unset` после проверки `write` и `write_fields`. |
 | `remove` | Удаляет после document-level `write`; сохраняет удалённый объект в `change.old`. |
 
-Для read RPC WebSocket envelope `dbstate:rpc_result` может содержать диагностический `meta` без изменения `result`: `meta.accessFiltered = true` / `meta.denied = N`, если были скрыты целые строки или изменения лога, и `meta.fieldsFiltered = true`, если field-level правила чтения удалили свойства из возвращаемых документов или изменений.
+Для read RPC WebSocket envelope `dbstate:rpc_result` может содержать `meta.fieldsFiltered = true` без изменения `result` — значит, действуют field-level правила чтения и набор полей ограничен. Скрытые строки не разглашаются.
 
 ## Свои RPC-методы
 
@@ -151,8 +149,8 @@ const dbState = createDbStateServer({
 - Обработчик получает `{ body, client, userId, sessionId }` и сам решает, что читать и писать.
 - RPC отклоняется до авторизации сокета, как и стандартные методы.
 - Имена, совпадающие со встроенными (`load`, `sync`, ...), запрещены — сервер бросит ошибку при старте.
-- Модули (`files`) могут добавлять свои методы через поле `methods`, как `access` и `hooks`.
-- Проверки `access`/`_permission` и лог изменений применяются только к стандартным CRUD: если именованный метод пишет в базу напрямую, права, audit log и broadcast — его собственная ответственность (или вызывайте `api.add`/`api.update` изнутри метода).
+- Модули (`files`) могут добавлять свои методы через поле `methods`, как `hooks`.
+- Проверки прав и лог изменений применяются только к стандартным CRUD: если именованный метод пишет в базу напрямую, права, audit log и broadcast — его собственная ответственность (или вызывайте `api.add`/`api.update` изнутри метода).
 
 ### Методы-файлы: `methodsDir`
 
@@ -220,7 +218,8 @@ export default async ({ body, user, db }) => {
   ok: true,
   userId: "u1",
   hash: "auth-secret",
-  groups: ["manager"]
+  groups: ["manager"],
+  access: { order: { read: {} } }
 }
 ```
 
@@ -254,157 +253,161 @@ createDbStateServer({
 })
 ```
 
-## Таблица прав
+## Права: `access` на группах
 
 По умолчанию доступ запрещён.
 
-Сервер проверяет права в таком порядке:
-
-1. Code-правило для `table + docId`.
-2. Code-правило для `table`.
-3. Правило в `_permission` с подходящими `table` и `if`.
-4. Deny.
-
-Документ права:
+Права хранятся как данные на группе (`_group`), объект произвольной вложенности:
 
 ```js
 {
-  _id: "perm_order_open",
-  table: "order",
-  priority: 10,
-
-  if: {
-    status: "open"
-  },
-
-  read: {
-    users: ["u1"],
-    groups: ["manager"],
-    action: true,
-    fields: ["_id", "status", "total"]
-  },
-
-  write: {
-    users: [],
-    groups: ["admin"],
-    action: true,
-    fields: ["status", "comment"]
+  _id: "montaj",
+  name: "Монтажники",
+  access: {
+    zad: { read: {}, write: {} },    // полный доступ к таблице ({} = все строки)
+    bill: { read: {} },              // только чтение, все строки и поля
+    admin: {
+      read: { enable: true },        // фильтр: видны только совпавшие документы
+      read_fields: ["fio", "tel"],   // и только эти поля
+      write: {},                     // {} = редактировать любые строки
+      write_fields: ["tel"]          //   но менять только эти поля
+    },
+    fullaccess: 1                    // спецключ: доступ ко всему
   }
 }
 ```
 
-Если `if` отсутствует — правило применяется ко всей таблице.
+При логине сервер сливает `access` всех групп пользователя (плюс личный
+`access` на самом `_user`, если есть) и вешает результат на `user.access`.
+Слияние только аддитивное, запретов нет: фильтры разных групп складываются
+в any-of, `{}` (все строки) шире любого фильтра.
+Объект возвращается в `login_result`/`auth_result` — клиент может прятать
+разделы UI без запросов. Изменение прав группы применяется при следующем
+логине или reconnect.
 
-Если `action` отсутствует — подходящие пользователи/группы получают `true`.
+Сервер проверяет права в таком порядке:
 
-Используй `action: false` для явного запрета.
+1. Code-правило для таблицы (`access[table][action]`).
+2. Глобальное code-правило (`access[action]`).
+3. `user.access`: `fullaccess`, затем фильтр `<table>.<action>`.
+4. Deny.
 
-Если `fields` отсутствует — разрешены все поля. Если `fields` задан:
+Маппинг действий: `read` — `load`, `getIds`, `getUnique`, `count` и видимость
+изменений в `sync`; `write` — `add`, `update`, `remove`.
 
-- `read.fields` проецирует результат `load()`.
-- `read.fields` также проецирует `insert`, `update` и `delete.old`-изменения, возвращаемые `sync()`.
-- `write.fields` валидирует поля в `add()` и `update()`.
-- `remove()` контролируется document-level `write`; для более строгого правила удаления используй code-правило с `action === "delete"`.
+### Фильтры и поля
 
-Запрещённые поля при записи отклоняют всю операцию.
+Значение `read`/`write` — **фильтр по документу** (dot-пути): `{}` совпадает
+со всем, то есть даёт действие на всю таблицу; после слияния групп может быть
+массив фильтров (документ подходит, если совпал хотя бы один).
 
-## Code-правила доступа
+Подстановки в значениях фильтра:
 
-Code-правила могут перебить базовые permissions:
-
-```js
-const dbState = createDbStateServer({
-  mongo,
-  tables: ["order"],
-  access: {
-    order: {
-      read: async ({ user, loadDoc, id }) => {
-        if (id === "public-order") return true
-        const obj = await loadDoc()
-        return obj.ownerId === user._id
-      },
-      write: async ({ user, obj, set }) => false
-    }
-  }
-})
-```
-
-Во время `sync()` изменённые документы подгружаются лениво. Если у `_permission`-правил для таблицы нет `if`, sync может решить вопрос доступа по `table + user/groups`, не читая изменённый документ. Code-правила, которым нужен документ, должны вызвать `ctx.loadDoc()` — это сделает Mongo `findOne` только когда правило действительно об этом просит.
-
-`write` покрывает все мутирующие операции:
-
-```text
-insert
-update
-delete
-```
-
-Используй поле `action` в code-правилах, когда операция требует более строгого решения:
+- `"$adminid"` — id текущего пользователя;
+- `"$groupid"` — совпадение с любой из его групп.
 
 ```js
-const dbState = createDbStateServer({
-  mongo,
-  tables: ["order"],
-  access: {
-    order: {
-      write: async ({ action, user }) => {
-        if (action === "insert") return true
-        if (action === "update") return true
-        if (action === "delete") return user.groups.includes("admin")
-        return undefined
-      }
-    }
-  }
-})
+{ zad: { read: { master: "$adminid" } } }   // техник видит только свои заявки
+{ zad: { read: { dep: "$groupid" } } }      // отдел видит заявки своего участка
 ```
 
-Возвращаемые значения:
+`write`-фильтр проверяется по **существующему** документу для `update`/`remove`
+и по **новому** — для `add`. `read_fields`/`write_fields` — белые списки полей:
+чтение проецирует документы и sync-изменения, запись отклоняет чужие пути.
+При слиянии групп поля объединяются, а право без ограничения полей снимает
+ограничение целиком.
 
-- `true` — разрешить.
-- `false` — запретить.
-- `{ action: true, fields: ["status"] }` — разрешить с ограничением полей.
-- `undefined` или `null` — без решения, передать на следующий слой.
+**Фильтры проверяет сама база, одним запросом:**
 
-## Server Hooks
+- списки (`getIds`, `count`, `getUnique`) добавляют фильтр права прямо
+  в условие Mongo (`$or` при нескольких), база возвращает только разрешённые
+  строки, а `getIds` запрашивает только `_id` (projection); `count` при этом использует `countDocuments` без выгрузки данных
+  (если у таблицы нет code-правил чтения — иначе проверка построчная);
+- `load` проверяет фильтр права тем же `findOne`, а при `read_fields` просит
+  у Mongo только разрешённые поля (projection); `getUnique` — только нужное поле;
+- `sync` для изменённого документа делает один `findOne` сразу с фильтром права;
+- `{}`-права решаются вообще без обращения к базе;
+- `"$groupid"` в запросе превращается в `{ $in: группы }`.
 
-Hooks отделены от `access`: access решает **разрешить/запретить/поля**, hooks выполняют lifecycle-логику вокруг серверных операций.
+Проверить объект вручную (например, в именованном методе):
+
+```js
+import { accessAllows } from "@db-state/server-mongo"
+
+accessAllows(user.access, "bill", "write")            // есть ли доступ в принципе
+accessAllows(user.access, "zad", "read", doc, user)   // проверить конкретный документ
+```
+
+Права до уровня полей и построчные условия выражаются code-правилами
+(см. следующий раздел) — они могут вернуть `{ fields: [...] }` или посмотреть
+на документ.
+
+## Хуки
+
+Хуки — точки, где приложение вмешивается в стандартные команды: правит запрос,
+ограничивает поля, разрешает или запрещает, дополняет ответ.
 
 ```js
 const dbState = createDbStateServer({
   mongo,
   tables: ["order"],
   hooks: {
-    beforeRead: async (ctx) => {
-      // Глобальный read-prefilter.
+    beforeRead: (ctx) => {
+      // Общий префильтр для всех таблиц.
       ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
+      if (ctx.table === "order" && ctx.method === "getIds") ctx.limit = Math.min(ctx.limit || 200, 200)
     },
-    order: {
-      beforeWrite: async (ctx) => {
-        if (ctx.action === "update") ctx.set.updatedBy = ctx.user._id
-      },
-      afterWrite: async ({ change }) => {
-        // change здесь уже записан в log.
-      },
-      errorWrite: async ({ error, method }) => {
-        console.warn("write failed", method, error.message)
+    beforeWrite: (ctx) => {
+      if (ctx.table !== "order") return
+      if (ctx.method === "remove" && !ctx.user.groups.includes("admin")) {
+        return { allowed: false, reason: "Удалять заказы может только администратор" }
       }
+      if (ctx.method === "update") ctx.set.updatedBy = ctx.user._id
+    },
+    afterWrite: ({ change }) => {
+      // change уже записан в лог.
+    },
+    errorWrite: ({ error, method }) => {
+      console.warn("write failed", method, error.message)
     }
   }
 })
 ```
 
-Доступные имена hooks:
+Имена хуков:
 
 ```text
 beforeRead   afterRead   errorRead
 beforeWrite  afterWrite  errorWrite
 ```
 
-Глобальные hooks выполняются первыми, затем табличные: `hooks.beforeRead` -> `hooks.order.beforeRead`.
+Каждый объявляется один раз на весь сервер; таблица разбирается внутри по
+`ctx.table`. Вложенности вида `hooks: { order: { beforeRead } }` нет.
 
-`beforeRead` может менять `ctx.filter`, `ctx.sort`, `ctx.skip`, `ctx.limit`, `ctx.from` и похожие поля запроса до чтения Mongo. `beforeWrite` может менять `ctx.obj`, `ctx.set` и `ctx.unset` до проверки прав и сохранения. `afterWrite` вызывается после Mongo write + append-log; доступны `ctx.change` и `ctx.result`.
+### Что возвращать
 
-`errorRead` / `errorWrite` получают `ctx.error`. Они не глотают ошибку; исходная ошибка всё равно уходит вызывающему коду.
+| Возврат | Что происходит |
+| --- | --- |
+| `undefined` | Решения нет — дальше проверяются права группы |
+| `true` | Разрешено, права группы не проверяются |
+| `false` | Запрет, сообщение `Read denied: <таблица>` |
+| `{ allowed: false, reason }` | Запрет, причина уходит клиенту |
+
+Изменения `ctx` применяются всегда, независимо от возврата: можно поправить
+запрос и оставить решение правам группы.
+
+`beforeRead` меняет `ctx.filter`, `ctx.sort`, `ctx.skip`, `ctx.limit` и
+`ctx.fields` (проекция полей) до обращения к Mongo. `beforeWrite` меняет
+`ctx.obj`, `ctx.set`, `ctx.unset` до проверки прав и сохранения.
+
+`afterWrite` вызывается после записи в Mongo, дозаписи лога и рассылки —
+запретить оттуда уже нельзя, доступны `ctx.change` и `ctx.result`.
+
+`errorRead` / `errorWrite` получают `ctx.error` и не глотают ошибку: исходная
+ошибка всё равно уходит вызывающему коду.
+
+Хуки подключённых модулей выполняются перед хуком приложения с тем же именем;
+первое явное решение останавливает цепочку.
 
 ## Логирование удалений
 
@@ -464,9 +467,9 @@ beforeWrite  afterWrite  errorWrite
 }
 ```
 
-Клиенты вызывают `sync({ from, sessionId })`. Сервер читает `createdAt > from && createdAt <= to`, исключает session отправителя, применяет права на чтение, фильтрует запрещённые поля и возвращает `{ to, changes }`.
+Клиенты вызывают `sync({ from, sessionId })`. Сервер читает не более 12 часов журнала, исключает session отправителя, применяет права на чтение, фильтрует запрещённые поля и возвращает `{ to, changes, hasMore? }`. Клиент автоматически проходит все окна с `hasMore`.
 
-Для систем с большим числом записей держи `syncLimit` достаточно высоким для одного sync-окна или добавляй cursor continuation по `{ createdAt, logId }`.
+Если `from` старше 20 дней, сервер возвращает `reset: true`; клиент очищает локальный cache и перечитывает текущее состояние вместо воспроизведения старого журнала.
 
 ## Полезные ссылки
 
@@ -478,7 +481,7 @@ beforeWrite  afterWrite  errorWrite
 ## Внутренние файлы
 
 - `index.js` — CRUD, sync, запись в лог, публичная фабрика.
-- `access.js` — code-правила и резолвинг `_permission`.
+- `access.js` — code-правила, `accessAllows` и field-level фильтрация.
 - `hooks.js` — runner серверных read/write lifecycle hooks.
 - `rpc.js` — диспатчер WebSocket RPC.
 - `socket.js` — реестр WebSocket-клиентов и broadcast.

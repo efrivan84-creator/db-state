@@ -77,15 +77,39 @@ export function createDbState(input) {
       state.sync.status = "syncing"
 
       syncPromise = (async () => {
-        const response = await state.socket.rpc("sync", {
-          from: state.sync.time1,
-          sessionId: state.sync.sessionId
-        })
-
         const changedTables = new Set()
-        for (const change of response.changes ?? []) {
-          changedTables.add(change.table)
-          await state.applyChange(change, { refreshQueries: false })
+        let hasMore = true
+
+        while (hasMore) {
+          const response = await state.socket.rpc("sync", {
+            from: state.sync.time1,
+            sessionId: state.sync.sessionId
+          })
+
+          if (response.reset) {
+            await resetLocalState({
+              clearSession: false,
+              countRefs,
+              idsRefs,
+              options,
+              persistTime: true,
+              state,
+              tables,
+              time1: response.to
+            })
+            await retryUnloadedTables(state, options)
+            hasMore = true
+            continue
+          }
+
+          for (const change of response.changes ?? []) {
+            changedTables.add(change.table)
+            await state.applyChange(change, { refreshQueries: false })
+          }
+
+          state.sync.time1 = response.to
+          options.metaStorage.setItem(options.syncKey, response.to)
+          hasMore = response.hasMore === true
         }
 
         for (const table of changedTables) {
@@ -93,8 +117,6 @@ export function createDbState(input) {
           scheduleIdsRefresh(idsRefs, table, options)
         }
 
-        state.sync.time1 = response.to
-        options.metaStorage.setItem(options.syncKey, response.to)
         state.sync.status = "idle"
         syncPromise = undefined
       })()

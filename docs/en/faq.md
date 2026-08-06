@@ -10,7 +10,7 @@ db-state is the boilerplate, extracted into a library that fits in ~5.4 KB brotl
 
 ### Is it production-ready?
 
-`0.0.x`. The shape of the API is stable and the test suite covers the core behavior, but you should expect minor breaking changes until `1.0`. Audit trail and time-travel work by design; the lack of optimistic concurrency control is intentional (see [next question](#what-about-conflicts-between-concurrent-edits)).
+The current release line is `0.1.0`. The core behavior is covered by the test suite, but the API is still pre-1.0 and may have breaking changes before `1.0`. Audit trail and time-travel work by design; the lack of optimistic concurrency control is intentional (see [next question](#what-about-conflicts-between-concurrent-edits)).
 
 ### What about conflicts between concurrent edits?
 
@@ -84,9 +84,9 @@ For deployments, you can also bump a "cache version" prefix in `cache` options s
 
 ### Are permissions checked on the server, or just the client?
 
-**Server only**. The client has no permission knowledge — it just calls RPCs. Every RPC method (`load`, `update`, `add`, `remove`, `sync`, `count`, `getIds`, `getUnique`) runs `assertAccess` before touching Mongo.
+**Server only**. The client receives the merged `access` object for UI decisions, but it is not trusted for enforcement. Every built-in RPC method (`load`, `update`, `add`, `remove`, `sync`, `count`, `getIds`, `getUnique`) enforces the `beforeRead`/`beforeWrite` hooks and the server-side `user.access`; declarative row filters are pushed into Mongo queries.
 
-A malicious client cannot bypass permissions by editing JavaScript. Field-level rules are enforced both on read (server projects the result) and on write (server validates `set`/`unset` paths against `write.fields`).
+A malicious client cannot bypass permissions by editing JavaScript. `read_fields` is enforced through projection/change filtering, while `write_fields` validates `add` objects and `update` paths. Code rules can also return a `{ fields: [...] }` decision.
 
 ### How are passwords stored?
 
@@ -110,11 +110,11 @@ If retention matters, you can periodically prune `log` entries older than N days
 
 ## Roadmap & contributions
 
-### Will you add operator support to `if` conditions?
+### Which operators do declarative access filters support?
 
-Yes, this is the next planned change. The current `matchesIf` only does equality (`{ status: "open" }`). The intended extension supports `$in`, `$ne`, `$gt`, `$lte`, `$eq` and dot-path access to `ctx.user` (`{ ownerId: { $eq: "user._id" } }`).
+The public declarative contract is equality-style matching, including dot-path fields, plus the `"$adminid"` and `"$groupid"` placeholders. `{}` matches every document. These filters are always merged into the Mongo query.
 
-For now, any non-trivial predicate goes through code rules. See [server/code-access-rules.md](server/code-access-rules.md).
+Mongo operator objects are not yet part of the portable access-filter contract. Use a `beforeRead` hook for dynamic, external, or cross-document predicates. See [server/hooks.md](server/hooks.md).
 
 ### Will you add React support?
 

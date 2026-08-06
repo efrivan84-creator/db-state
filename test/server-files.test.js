@@ -69,21 +69,24 @@ test("file module uploads through the db-state socket and exposes safe metadata"
     assert.match(stored.storageKey, /^files\/[a-z0-9]{2}\/[a-z0-9]{2}\/.+\.file$/)
     assert.equal(await readFile(path.join(root, stored.storageKey), "utf8"), "hello")
 
-    const visible = await server.load({ table: "file", id: done.fileId, req: { client } })
+    // Права на таблицу файлов — обычный access группы, как у любой другой таблицы.
+    const reader = { client, user: { _id: "u1", groups: [], access: { file: { read: { ownerId: "$adminid" } } } } }
+    const visible = await server.load({ table: "file", id: done.fileId, req: reader })
     assert.equal(visible.token, done.token)
     assert.equal(visible.storageKey, undefined)
 
+    // Прямая правка метаданных запрещена модулем с понятной причиной.
     await assert.rejects(
       () => server.add({ table: "file", obj: { _id: "manual" }, req: { client } }),
-      /Write denied/
+      /File metadata is managed by the file API/
     )
     await assert.rejects(
       () => server.update({ table: "file", id: done.fileId, set: { name: "manual.txt" }, req: { client } }),
-      /Write denied/
+      /File metadata is managed by the file API/
     )
     await assert.rejects(
       () => server.remove({ table: "file", id: done.fileId, req: { client } }),
-      /Write denied/
+      /File metadata is managed by the file API/
     )
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -343,6 +346,15 @@ class MemoryCollection {
 }
 
 function matches(item, filter = {}) {
+  if (filter.$and) {
+    const { $and, ...rest } = filter
+    return matches(item, rest) && $and.every((part) => matches(item, part))
+  }
+  if (filter.$or) {
+    const { $or, ...rest } = filter
+    return matches(item, rest) && $or.some((part) => matches(item, part))
+  }
+
   return Object.entries(filter).every(([key, expected]) => {
     const value = item[key]
     if (expected && typeof expected === "object" && !Array.isArray(expected)) {

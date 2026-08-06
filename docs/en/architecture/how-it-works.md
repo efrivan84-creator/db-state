@@ -19,7 +19,7 @@ This page explains the data flow from end to end, what each package does, and wh
 └──────────────────────────┘                │   │  - tables        │   │
                                             │   │  - log (append)  │   │
                                             │   │  - _user         │   │
-                                            │   │  - _permission   │   │
+                                            │   │  - _group        │   │
                                             │   └──────────────────┘   │
                                             └──────────────────────────┘
 ```
@@ -38,7 +38,7 @@ Key exports:
 - `applyPatch(target, change)` — applies set/unset to one document.
 - `setByPath` / `getByPath` / `unsetByPath` — dot-path utilities.
 - `DB_STATE_EVENTS` — reserved socket event names.
-- `SERVICE_TABLES` — `["_user", "_group", "_permission"]`, added to every schema.
+- `SERVICE_TABLES` — `["_user", "_group"]`, added to every schema.
 
 The client uses `applyPatch` when it receives a change. The server uses `createChange` when appending to the log. Both speak the same dialect.
 
@@ -57,7 +57,7 @@ The browser client.
 The Node server.
 
 - **CRUD methods**: `add` / `update` / `remove` / `load` / `getIds` / `getUnique` / `count`.
-- **Permission layer**: code rules → `_permission` rows → deny.
+- **Permission layer**: `beforeRead`/`beforeWrite` hooks → `user.access` (merged from groups at login) → deny.
 - **Append-only log**: every write appended with `userId`, `set`, `unset`, full `old` for deletes.
 - **WebSocket hub**: registers clients, broadcasts `changes_available`.
 - **Auth**: PBKDF2 password adapter, hash-based reconnect.
@@ -72,8 +72,8 @@ The Node server.
    3. Runs `assertAccess("write", ctx)`:
       - Tries `access.order.write` (your table-specific code rule, if any).
       - Tries `access.write` (your global code fallback, if any).
-      - Reads `_permission` rows for `table: "order"`, sorted by priority, finds the first matching rule for this user.
-      - Validates every dot-path in `set`/`unset` against `write.fields`.
+      - Checks `user.access.order.write` (merged from the user's groups at login): the row filter against the existing document.
+      - Validates every dot-path in `set`/`unset` against `write_fields`.
    4. `mongo.collection("order").updateOne({ _id: "o1" }, { $set: ... })`.
    5. Appends to `log` collection: `{ logId, createdAt, table: "order", id: "o1", action: "update", set, unset, userId, sessionId }`.
    6. Schedules a debounced/rate-limited `{ type: "dbstate:changes_available" }` broadcast to all sockets, including the writer.
@@ -130,27 +130,14 @@ The socket is upgraded to authenticated via two paths:
 
 Once authenticated, the socket stays that way until close or `dbstate:logout`. Subsequent RPCs reference `client.user` via the default `getUser`.
 
-## The permission cache during sync
+## Access checks during sync
 
-A naive `sync` would look like:
+`user.access` is already on the socket (merged at login), so filtering sync changes needs no permission reads at all.
 
-```js
-for (const change of allChanges) {
-  const rules = await mongo.collection("_permission").find({ table: change.table }).toArray()
-  // ...
-}
-```
-
-That's N Mongo round-trips per sync. The library does it once per table per call:
-
-```js
-const permissionRulesByTable = new Map()
-// for each change:
-const rules = permissionRulesByTable.get(table) ?? await fetchRules(table)
-permissionRulesByTable.set(table, rules)
-```
-
-Same for the document load — only happens if a rule has `if` (and only then). For tables with no `if`-based rules, `sync` doesn't load any actual documents — it decides access from the change + user + permission rows alone.
+- A `{}` grant (all rows) is decided from the change + user alone — no document reads.
+- A row filter (e.g. `{ dep: "north" }`) is checked by the database itself: one `findOne` per change that already includes the filter (`{ $and: [{ _id }, filter] }`).
+- Delete changes use the `old` snapshot stored in the log — no reads either.
+- `sync` loads a changed document only when a row filter has to be checked against it.
 
 ## Why an append-only log?
 

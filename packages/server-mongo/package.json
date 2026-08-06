@@ -1,7 +1,7 @@
 {
   "name": "@db-state/server-mongo",
-  "version": "0.0.12",
-  "description": "MongoDB-backed server for db-state: CRUD, append-only log, sync, WebSocket RPC, declarative permissions with field-level rules.",
+  "version": "0.1.0",
+  "description": "MongoDB-backed server for db-state: CRUD, append-only log, sync, WebSocket RPC, group-based access objects with row filters and field-level rules, file-based custom methods.",
   "keywords": [
     "db-state",
     "mongodb",
@@ -45,7 +45,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@db-state/core": "^0.0.11"
+    "@db-state/core": "^0.1.0"
   },
   "peerDependencies": {
     "mongodb": ">=5.0.0"

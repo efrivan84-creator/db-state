@@ -47,21 +47,13 @@ await mongo.collection("_user").updateOne(
   { upsert: true }
 )
 
-await mongo.collection("_permission").updateOne(
-  { _id: "perm_admin_order" },
-  {
-    $set: {
-      table: "order",
-      priority: 10,
-      read: { groups: ["admin"], action: true },
-      write: { groups: ["admin"], action: true }
-    }
-  },
+await mongo.collection("_group").updateOne(
+  { _id: "admin" },
+  { $set: { name: "Admins", access: { order: { read: {}, write: {} } } } },
   { upsert: true }
 )
 
 await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
-await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
 await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 
 const dbState = createDbStateServer({
@@ -73,7 +65,7 @@ new WebSocketServer({ port: 8788, path: "/db-state/ws" })
   .on("connection", (ws) => dbState.socket.addClient(ws))
 ```
 
-`_user`, `_group` и `_permission` добавляются к списку таблиц автоматически. Но доступ все равно deny-by-default, поэтому для чтения и записи нужны permissions или code access rules.
+`_user` и `_group` не открываются через CRUD автоматически — добавь их в `tables`, если админке нужно ими управлять. Доступ deny-by-default: для чтения и записи нужен `access` на группе или разрешающий хук.
 
 ## Клиент (Vue 3)
 

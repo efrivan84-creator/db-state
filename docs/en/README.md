@@ -31,8 +31,8 @@ How to use `@db-state/vue` in a Vue 3 app.
 How to set up `@db-state/server-mongo`.
 
 - [Setup](server/setup.md) — minimal server, ws integration, configuration.
-- [Permissions](server/permissions.md) — the `_permission` table, `if`-conditions, field projections, common patterns.
-- [Code access rules](server/code-access-rules.md) — JS callback rules at the table or document level.
+- [Permissions](server/permissions.md) — group `access` objects, row filters, `read_fields`/`write_fields`, placeholders.
+- [Server hooks](server/hooks.md) — `beforeRead`/`beforeWrite` and friends: rewrite queries, narrow fields, allow or deny.
 - [Authentication](server/authentication.md) — user table, password adapters, hash auth, custom password hashers.
 - [WebSocket integration](server/websocket-integration.md) — `ws`, `uWebSockets.js`, Fastify, custom adapters.
 - [Server API reference](server/api-reference.md) — every CRUD method, every option, every type.

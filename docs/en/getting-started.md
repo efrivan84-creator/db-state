@@ -53,16 +53,14 @@ await mongo.collection("_user").updateOne(
   { upsert: true }
 )
 
-// 3. Seed at least one permission so the client can read/write.
-await mongo.collection("_permission").updateOne(
-  { _id: "perm_order_admin" },
+// 3. Seed the group with an access object so the client can read/write.
+await mongo.collection("_group").updateOne(
+  { _id: "admin" },
   {
     $setOnInsert: {
-      _id: "perm_order_admin",
-      table: "order",
-      priority: 100,
-      read:  { groups: ["admin"] },
-      write: { groups: ["admin"] }
+      _id: "admin",
+      name: "Admins",
+      access: { order: { read: {}, write: {} } }
     }
   },
   { upsert: true }
@@ -83,7 +81,7 @@ console.log("db-state server on ws://localhost:8788/db-state/ws")
 
 Run it: `node server.js`.
 
-> **Permissions are deny-by-default.** Without the `_permission` row above, no client can read or write `order`. See [Permissions](server/permissions.md) for the full model.
+> **Permissions are deny-by-default.** Without the group `access` object above, no client can read or write `order`. See [Permissions](server/permissions.md) for the full model.
 
 > **Passwords**: in production use the bundled PBKDF2 adapter via `defaultPassword.hash(...)`. For local demos, you can plug in a trivial adapter (`hash: p => "demo:" + p, verify: (p, h) => h === "demo:" + p`) — see [Authentication](server/authentication.md).
 
@@ -150,7 +148,7 @@ Without writing any extra code, you now have:
 |---|---|
 | **Realtime cross-tab sync** | Server broadcasts `changes_available`; clients pull the diff over WebSocket. |
 | **Offline read** | First load is from IndexedDB cache; server refresh happens after reconnect/login. |
-| **Per-field permissions** | Add `fields: ["status", "total"]` to the `_permission` rule — server projects reads and rejects forbidden writes. |
+| **Per-field permissions** | Add `read_fields: ["status", "total"]` to the group access entry — Mongo projects reads, forbidden writes are rejected. |
 | **Audit trail** | Every change is in the `log` collection with `userId`, `set`, `unset`, full `old` document on delete. |
 | **Time-travel** | Replay `log` entries by `createdAt` to reconstruct any document at any point in time. |
 | **Auto reconnect** | Client retries the WebSocket with backoff; on success it calls `authByHash` and resyncs from the last `time1`. |

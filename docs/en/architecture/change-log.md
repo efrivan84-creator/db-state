@@ -116,14 +116,9 @@ db.collection("log")
     sessionId: { $ne: currentSessionId }
   })
   .sort({ createdAt: 1, logId: 1 })
-  .limit(syncLimit)
 ```
 
-The recommended permission index is:
-
-```js
-await db.collection("_permission").createIndex({ table: 1, priority: -1 })
-```
+`to` covers at most 12 hours after `from`; the client follows `hasMore` windows until caught up. Cursors older than 20 days receive a cache-reset marker instead of a historical replay.
 
 ## Permission filtering
 
@@ -131,16 +126,16 @@ Raw log entries are not sent blindly. During `sync()` the server checks read per
 
 Fast path:
 
-- `_permission` rules are loaded once per table per sync call.
-- If a table's rules have no `if`, the server can decide from `table + user/groups` without loading the changed document.
-- If a rule has `if`, the server loads the current document to evaluate it.
-- Code access rules can call `ctx.loadDoc()` when they need the document. If they do not call it, no document read happens.
+- `user.access` is merged at login and lives on the socket — no permission reads during sync.
+- A `{}` grant decides from `table + user` without loading the changed document.
+- A row filter is evaluated by the database: one `findOne` per change that already includes the filter.
+- A row filter is checked by the database with one filtered `findOne` per change; `{}` grants and `fullaccess` need no document read at all.
 
 Field filtering happens after access is allowed:
 
-- `insert`: `obj` is projected to `read.fields`;
+- `insert`: `obj` is projected to `read_fields`;
 - `update`: only allowed `set`/`unset` paths remain;
-- `delete`: `old` is projected to `read.fields`.
+- `delete`: `old` is projected to `read_fields`.
 
 If an update contains no allowed fields after projection, it is dropped from the sync response.
 

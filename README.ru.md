@@ -187,39 +187,36 @@ client update()
 ```text
 code rule for table: access[table].read/write
   -> global code rule: access.read/write
-  -> _permission rules
+  -> user.access (слит из групп пользователя при логине)
   -> deny
 ```
 
-Правила лежат в `_permission`:
+Права — объекты `access` на группах (`_group`):
 
 ```js
 {
-  _id: "perm_order_manager",
-  table: "order",
-  priority: 10,
-  if: { status: "open" },
-
-  read: {
-    groups: ["manager"],
-    fields: ["_id", "status", "total"],
-    action: true
-  },
-
-  write: {
-    groups: ["admin"],
-    fields: ["status", "comment"],
-    action: true
+  _id: "manager",
+  name: "Менеджеры заказов",
+  access: {
+    order: {
+      read: { status: "open" },            // фильтр строк; {} = все строки
+      read_fields: ["status", "total"],    // белый список полей на чтение
+      write: {},                           // {} = редактировать любые строки
+      write_fields: ["status", "comment"]  // белый список полей на запись
+    },
+    fullaccess: 1                          // единственный флаг: доступ ко всему
   }
 }
 ```
 
+При логине сервер сливает `access` групп пользователя в `user.access` и возвращает клиенту. В значениях фильтров работают `"$adminid"` (id пользователя) и `"$groupid"` (любая из его групп). Фильтры проверяет сама база: списки и `count` получают условие права прямо в Mongo-запрос, `load` и `sync` проверяют одним `findOne` с фильтром.
+
 Поля проверяются на сервере:
 
-- `read.fields` проецирует `load()`, `getUnique()` и sync changes.
-- `write.fields` валидирует `add()` и `update()`.
+- `read_fields` проецирует `load()` (Mongo projection), `getUnique()` и sync changes.
+- `write_fields` валидирует `add()` и `update()`; патч с чужим полем отклоняется.
 - `write` управляет insert, update и delete.
-- Delete log rows хранят `old`, поэтому audit и permission checks работают после удаления исходного документа.
+- Delete log rows хранят `old`, поэтому audit и проверки прав работают после удаления исходного документа.
 
 Если декларативных правил мало, используй code access hooks. Они могут решить доступ по user/table/log entry или лениво вызвать `ctx.loadDoc()` только когда нужен сам документ.
 
@@ -284,7 +281,6 @@ new WebSocketServer({ port: 8788, path: "/db-state/ws" })
 
 ```js
 await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
-await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
 await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 ```
 
@@ -379,6 +375,6 @@ viewer / viewer    // demo2
 
 ## Статус проекта
 
-Ранний релиз, `0.0.x`. API намеренно маленький, но это ещё pre-1.0. Изменения и текущие ограничения вынесены в [CHANGELOG.ru.md](CHANGELOG.ru.md).
+Текущая версия: `0.1.0`. API намеренно маленький и всё ещё pre-1.0, поэтому до `1.0` возможны ломающие изменения. Изменения и актуальные ограничения вынесены в [CHANGELOG.ru.md](CHANGELOG.ru.md).
 
 Лицензия: MIT.

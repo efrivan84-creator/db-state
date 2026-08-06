@@ -79,7 +79,7 @@ This is the canonical use case (see [demo2](../../demo2)).
 
 - Documents, blocks, projects, tasks → db-state handles
 - Comments, mentions, history → db-state handles
-- Sharing permissions → db-state's `_permission` table
+- Sharing permissions → db-state group `access` objects
 - Cursor positions, "X is typing", selection highlights → custom channel via `state.socket`
 
 The custom layer here is small because cursors are ephemeral — no need to persist every cursor move to Mongo.

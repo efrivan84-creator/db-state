@@ -60,19 +60,18 @@ await state.order.update({ id: "o1", set: { status: "closed" } })
 //                                          ^ "open" | "closed" — типизировано
 ```
 
-Служебные таблицы (`_user`, `_group`, `_permission`) типизированы автоматически с разумными дефолтами и могут быть переопределены в схеме.
+Служебные таблицы (`_user`, `_group`) типизированы автоматически с разумными дефолтами и могут быть переопределены в схеме.
 
 Укажи служебные таблицы явно, если они нужны UI:
 
 ```js
-createDbState({ tables: ["order", "_user", "_group", "_permission"] })
+createDbState({ tables: ["order", "_user", "_group"] })
 
 state._user.load(userId)
 state._group.getIds()
-state._permission.getIds()
 ```
 
-Сервер всё равно принимает решение о доступе через обычные permission-правила.
+Сервер всё равно принимает решение о доступе через `access` групп и code-правила.
 
 ## Использование на странице
 

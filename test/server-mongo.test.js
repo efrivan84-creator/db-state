@@ -5,7 +5,7 @@ import { join } from "node:path"
 import test from "node:test"
 
 import { setByPath, unsetByPath } from "../packages/core/src/index.js"
-import { createDbStateServer } from "../packages/server-mongo/src/index.js"
+import { accessAllows, createDbStateServer, mergeUserAccess } from "../packages/server-mongo/src/index.js"
 
 test("server update writes data, appends log, broadcasts to everyone, and sync excludes current session", async () => {
   const mongo = createMemoryMongo()
@@ -63,6 +63,78 @@ test("server update writes data, appends log, broadcasts to everyone, and sync e
   assert.deepEqual(remoteSync.changes.map((change) => change.id), ["u1"])
 })
 
+test("sync reads complete twelve-hour windows and tells the client when more time remains", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    now: () => "2026-05-02T00:00:00.000Z"
+  })
+  const log = mongo.collection("log")
+  for (const [logId, createdAt] of [
+    ["log1", "2026-05-01T06:00:00.000Z"],
+    ["log2", "2026-05-01T11:59:59.999Z"],
+    ["log3", "2026-05-01T18:00:00.000Z"]
+  ]) {
+    await log.insertOne({
+      _id: logId,
+      logId,
+      createdAt,
+      table: "order",
+      id: logId,
+      action: "insert",
+      obj: { _id: logId }
+    })
+  }
+  const req = { user: { _id: "u1", access: { fullaccess: 1 } } }
+
+  const first = await server.sync({
+    from: "2026-05-01T00:00:00.000Z",
+    sessionId: "reader",
+    req
+  })
+  const second = await server.sync({
+    from: first.to,
+    sessionId: "reader",
+    req
+  })
+
+  assert.equal(first.to, "2026-05-01T12:00:00.000Z")
+  assert.equal(first.hasMore, true)
+  assert.deepEqual(first.changes.map((change) => change.id), ["log1", "log2"])
+  assert.equal(second.to, "2026-05-02T00:00:00.000Z")
+  assert.equal(second.hasMore, undefined)
+  assert.deepEqual(second.changes.map((change) => change.id), ["log3"])
+})
+
+test("sync requests a cache reset only when the cursor is more than twenty days old", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    now: () => "2026-06-01T00:00:00.000Z"
+  })
+  const req = { user: { _id: "u1", access: { fullaccess: 1 } } }
+
+  const exactBoundary = await server.sync({
+    from: "2026-05-12T00:00:00.000Z",
+    req
+  })
+  const expired = await server.sync({
+    from: "2026-05-11T23:59:59.999Z",
+    req
+  })
+
+  assert.equal(exactBoundary.reset, undefined)
+  assert.equal(exactBoundary.hasMore, true)
+  assert.equal(exactBoundary.to, "2026-05-12T12:00:00.000Z")
+  assert.deepEqual(expired, {
+    to: "2026-06-01T00:00:00.000Z",
+    changes: [],
+    reset: true
+  })
+})
+
 test("server debounces change broadcasts", async () => {
   const mongo = createMemoryMongo()
   const sent = []
@@ -117,11 +189,10 @@ test("delete log stores old document and compact actor id", async () => {
   const mongo = createMemoryMongo()
   const server = createDbStateServer({
     mongo,
-    tables: ["order", "_user", "_group", "_permission"],
+    tables: ["order", "_user", "_group"],
     now: () => "2026-05-21T10:00:01.000Z",
     createLogId: () => "log1"
   })
-  await allowTable(mongo, "order", "admins")
   await mongo.collection("order").insertOne({
     _id: "o1",
     status: "open"
@@ -136,6 +207,7 @@ test("delete log stores old document and compact actor id", async () => {
         _id: "u-admin",
         login: "ivan",
         groups: ["admins"],
+        access: { order: { read: {}, write: {} } },
         hash: "secret-auth-hash",
         passwordHash: "secret-password-hash"
       }
@@ -244,10 +316,9 @@ test("internal writes without a user use system actor metadata", async () => {
     tables: ["order"],
     now: () => "2026-05-21T10:00:01.000Z",
     createLogId: () => "log1",
-    access: {
-      order: {
-        write: ({ req }) => req?.__internal === true ? true : undefined
-      }
+    // Системные записи сервера проходят без прав группы.
+    hooks: {
+      beforeWrite: (ctx) => (ctx.req?.__internal === true ? true : undefined)
     }
   })
 
@@ -319,7 +390,7 @@ test("socket RPC handles db-state methods over WebSocket", async () => {
     }
   }
 
-  server.socket.addClient(client, { user: { _id: "u1", groups: ["admins"] }, userId: "u1", sessionId: "s1" })
+  server.socket.addClient(client, { user: { _id: "u1", groups: ["admins"], access: { user: { read: {}, write: {} } } }, userId: "u1", sessionId: "s1" })
   await server.socket.handleMessage(client, JSON.stringify({
     type: "dbstate:rpc",
     id: "rpc1",
@@ -385,6 +456,7 @@ test("socket login returns user hash and auth enables RPC", async () => {
   const loginResult = sent.find((message) => message.type === "dbstate:login_result")
   assert.equal(loginResult.userId, "u1")
   assert.equal(loginResult.hash, "auth-hash-1")
+  assert.deepEqual(loginResult.access, { user: { read: {}, write: {} } })
 
   await server.socket.handleMessage(client, JSON.stringify({
     type: "dbstate:auth",
@@ -412,17 +484,12 @@ test("socket login returns user hash and auth enables RPC", async () => {
   assert.equal(rpcResult.result.ok, true)
 })
 
-test("socket RPC marks list and count responses filtered by read access", async () => {
+test("socket RPC never discloses how many rows read access hid", async () => {
   const sent = []
   const mongo = createMemoryMongo()
   const server = createDbStateServer({
     mongo,
-    tables: ["order"],
-    access: {
-      order: {
-        read: ({ obj }) => obj?.status === "open"
-      }
-    }
+    tables: ["order"]
   })
   await mongo.collection("order").insertOne({ _id: "o1", status: "open" })
   await mongo.collection("order").insertOne({ _id: "o2", status: "closed" })
@@ -432,7 +499,8 @@ test("socket RPC marks list and count responses filtered by read access", async 
     }
   }
 
-  server.socket.addClient(client, { user: { _id: "u1", groups: [] }, userId: "u1", sessionId: "s1" })
+  const user = { _id: "u1", groups: [], access: { order: { read: { status: "open" } } } }
+  server.socket.addClient(client, { user, userId: "u1", sessionId: "s1" })
   await server.socket.handleMessage(client, JSON.stringify({
     type: "dbstate:rpc",
     id: "ids1",
@@ -449,9 +517,10 @@ test("socket RPC marks list and count responses filtered by read access", async 
   const ids = sent.find((message) => message.id === "ids1")
   const count = sent.find((message) => message.id === "count1")
   assert.deepEqual(ids.result, ["o1"])
-  assert.deepEqual(ids.meta, { accessFiltered: true, denied: 1 })
   assert.equal(count.result, 1)
-  assert.deepEqual(count.meta, { accessFiltered: true, denied: 1 })
+  // Сколько строк скрыто — не дело клиента, и ради этого ничего не считается.
+  assert.equal(ids.meta, undefined)
+  assert.equal(count.meta, undefined)
 })
 
 test("socket RPC marks load responses with fields filtered by read fields", async () => {
@@ -460,9 +529,10 @@ test("socket RPC marks load responses with fields filtered by read fields", asyn
   const server = createDbStateServer({
     mongo,
     tables: ["order"],
-    access: {
-      order: {
-        read: () => ({ allowed: true, fields: ["status"] })
+    // Динамическое ограничение полей — ctx.fields в хуке.
+    hooks: {
+      beforeRead: (ctx) => {
+        if (ctx.table === "order") ctx.fields = ["status"]
       }
     }
   })
@@ -473,7 +543,8 @@ test("socket RPC marks load responses with fields filtered by read fields", asyn
     }
   }
 
-  server.socket.addClient(client, { user: { _id: "u1", groups: [] }, userId: "u1", sessionId: "s1" })
+  const user = { _id: "u1", groups: [], access: { order: { read: {} } } }
+  server.socket.addClient(client, { user, userId: "u1", sessionId: "s1" })
   await server.socket.handleMessage(client, JSON.stringify({
     type: "dbstate:rpc",
     id: "load1",
@@ -492,19 +563,15 @@ test("socket RPC marks sync responses with fields filtered by read fields", asyn
   const server = createDbStateServer({
     mongo,
     tables: ["order"],
-    access: {
-      order: {
-        read: () => ({ allowed: true, fields: ["status"] }),
-        write: () => true
-      }
-    }
+    now: clock(["2026-05-21T10:00:01.000Z", "2026-05-21T10:00:02.000Z"])
   })
   await mongo.collection("order").insertOne({ _id: "o1", status: "open", margin: 120 })
   await server.update({
     table: "order",
     id: "o1",
     set: { status: "done", margin: 180 },
-    sessionId: "writer"
+    sessionId: "writer",
+    req: adminReq()
   })
   const client = {
     send(message) {
@@ -512,12 +579,14 @@ test("socket RPC marks sync responses with fields filtered by read fields", asyn
     }
   }
 
-  server.socket.addClient(client, { user: { _id: "u1", groups: [] }, userId: "u1", sessionId: "reader" })
+  // Постоянный список видимых полей — read_fields в правах группы.
+  const user = { _id: "u1", groups: [], access: { order: { read: {}, read_fields: ["status"] } } }
+  server.socket.addClient(client, { user, userId: "u1", sessionId: "reader" })
   await server.socket.handleMessage(client, JSON.stringify({
     type: "dbstate:rpc",
     id: "sync1",
     method: "sync",
-    payload: { from: "1970-01-01T00:00:00.000Z", sessionId: "reader" }
+    payload: { from: "2026-05-21T10:00:00.000Z", sessionId: "reader" }
   }))
 
   const sync = sent.find((message) => message.id === "sync1")
@@ -799,26 +868,25 @@ test("socket RPC is denied before auth", async () => {
   assert.equal(error.error, "Unauthorized")
 })
 
-test("permissions default to deny when no code rule or _permission rule decides", async () => {
+test("permissions default to deny when neither code rules nor user access decide", async () => {
   const server = createDbStateServer({
     mongo: createMemoryMongo(),
     tables: ["user"]
   })
 
   await assert.rejects(
-    () => server.update({ table: "user", id: "u1", set: { name: "Ivan" }, req: adminReq() }),
+    () => server.update({ table: "user", id: "u1", set: { name: "Ivan" }, req: { user: { _id: "u1", groups: [] } } }),
     /Write denied/
   )
 })
 
-test("service tables are available through normal permissions when listed explicitly", async () => {
+test("service tables are readable when listed explicitly and granted", async () => {
   const mongo = createMemoryMongo()
   const server = createDbStateServer({
     mongo,
     tables: ["order", "_group"]
   })
 
-  await allowTable(mongo, "_group", "admins")
   await mongo.collection("_group").insertOne({
     _id: "g_admin",
     name: "Admins"
@@ -830,45 +898,168 @@ test("service tables are available through normal permissions when listed explic
   })
 })
 
-test("_permission if rules allow matching user groups and filter sync changes", async () => {
+test("mergeUserAccess merges group access and personal access additively", async () => {
+  const mongo = createMemoryMongo()
+  await mongo.collection("_group").insertOne({ _id: "managers", access: { order: { read: {} } } })
+  await mongo.collection("_group").insertOne({ _id: "cashiers", access: { pay: { read: {}, write: {} } } })
+
+  const access = await mergeUserAccess(
+    { mongo, groupTable: "_group" },
+    { _id: "u1", groups: ["managers", "cashiers"], access: { order: { write: {} } } }
+  )
+
+  assert.deepEqual(access, { order: { read: {}, write: {} }, pay: { read: {}, write: {} } })
+})
+
+test("access read filter limits rows and read_fields projects documents", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["admin"]
+  })
+  await mongo.collection("admin").insertOne({ _id: "a1", fio: "Иван", tel: "111", enable: true, pass: "x" })
+  await mongo.collection("admin").insertOne({ _id: "a2", fio: "Пётр", tel: "222", enable: false, pass: "y" })
+
+  const req = {
+    user: {
+      _id: "u1",
+      groups: [],
+      access: { admin: { read: { enable: true }, read_fields: ["fio", "tel"] } }
+    }
+  }
+
+  // Виден только включённый сотрудник и только разрешённые поля.
+  assert.deepEqual(await server.load({ table: "admin", id: "a1", req }), { _id: "a1", fio: "Иван", tel: "111" })
+  await assert.rejects(() => server.load({ table: "admin", id: "a2", req }), /Read denied/)
+  // Несуществующий id при фильтрованном праве — тоже отказ, а не null.
+  await assert.rejects(() => server.load({ table: "admin", id: "a3", req }), /Read denied/)
+  assert.deepEqual(await server.getIds({ table: "admin", filter: {}, req }), ["a1"])
+  assert.equal(await server.count({ table: "admin", filter: {}, req }), 1)
+})
+
+test("access write filter checks the existing document and write_fields limit writes", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["zad"]
+  })
+  await mongo.collection("zad").insertOne({ _id: 1, status: "open", fio: "A", comm: "" })
+  await mongo.collection("zad").insertOne({ _id: 2, status: "closed", fio: "B", comm: "" })
+
+  const req = {
+    user: {
+      _id: "u1",
+      groups: [],
+      access: { zad: { read: {}, write: { status: "open" }, write_fields: ["comm"] } }
+    }
+  }
+
+  // Открытую заявку можно комментировать, но только в разрешённое поле.
+  const ok = await server.update({ table: "zad", id: 1, set: { comm: "готово" }, req })
+  assert.equal(ok.ok, true)
+  await assert.rejects(
+    () => server.update({ table: "zad", id: 1, set: { fio: "X" }, req }),
+    /Write denied: field fio/
+  )
+  // Закрытая заявка не проходит write-фильтр.
+  await assert.rejects(
+    () => server.update({ table: "zad", id: 2, set: { comm: "нельзя" }, req }),
+    /Write denied/
+  )
+  await assert.rejects(() => server.remove({ table: "zad", id: 2, req }), /Write denied/)
+})
+
+test("access filter placeholders $adminid and $groupid match the current user", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["zad"]
+  })
+  await mongo.collection("zad").insertOne({ _id: 1, master: "u1", dep: "north" })
+  await mongo.collection("zad").insertOne({ _id: 2, master: "u2", dep: "south" })
+  await mongo.collection("zad").insertOne({ _id: 3, master: "u3", dep: "north" })
+
+  const mine = { user: { _id: "u1", groups: ["north"], access: { zad: { read: { master: "$adminid" } } } } }
+  assert.deepEqual(await server.getIds({ table: "zad", filter: {}, req: mine }), [1])
+
+  const myDep = { user: { _id: "u1", groups: ["north"], access: { zad: { read: { dep: "$groupid" } } } } }
+  assert.deepEqual(await server.getIds({ table: "zad", filter: {}, req: myDep }), [1, 3])
+})
+
+test("mergeUserAccess combines filters as any-of and drops field limits when one grant is unlimited", async () => {
+  const mongo = createMemoryMongo()
+  await mongo.collection("_group").insertOne({
+    _id: "a",
+    access: { zad: { read: { dep: "north" }, read_fields: ["fio"] } }
+  })
+  await mongo.collection("_group").insertOne({
+    _id: "b",
+    access: { zad: { read: { dep: "south" } } }
+  })
+
+  const access = await mergeUserAccess(
+    { mongo, groupTable: "_group" },
+    { _id: "u1", groups: ["a", "b"] }
+  )
+
+  // Два фильтра из разных групп = any-of; группа b читает без ограничения полей —
+  // ограничение снимается целиком.
+  assert.deepEqual(access, { zad: { read: [{ dep: "north" }, { dep: "south" }] } })
+
+  const server = createDbStateServer({ mongo, tables: ["zad"] })
+  await mongo.collection("zad").insertOne({ _id: 1, dep: "north" })
+  await mongo.collection("zad").insertOne({ _id: 2, dep: "south" })
+  await mongo.collection("zad").insertOne({ _id: 3, dep: "west" })
+  const req = { user: { _id: "u1", groups: ["a", "b"], access } }
+  assert.deepEqual(await server.getIds({ table: "zad", filter: {}, req }), [1, 2])
+})
+
+test("sync loads the changed document lazily for filtered access", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["zad"],
+    now: clock(["2026-05-21T10:00:01.000Z", "2026-05-21T10:00:02.000Z", "2026-05-21T10:00:03.000Z"]),
+    createLogId: idSeq()
+  })
+  const writer = { user: { _id: "w1", groups: [], access: { zad: { read: {}, write: {} } } } }
+  await server.add({ table: "zad", obj: { _id: 1, dep: "north" }, sessionId: "writer", req: writer })
+  await server.add({ table: "zad", obj: { _id: 2, dep: "south" }, sessionId: "writer", req: writer })
+
+  const sync = await server.sync({
+    from: "2026-05-21T10:00:00.000Z",
+    sessionId: "reader",
+    req: { user: { _id: "u1", groups: [], access: { zad: { read: { dep: "north" } } } } }
+  })
+
+  assert.deepEqual(sync.changes.map((change) => change.id), [1])
+})
+
+test("user access from groups gates read and write per action after login", async () => {
   const mongo = createMemoryMongo()
   const server = createDbStateServer({
     mongo,
     tables: ["order"],
-    now: clock(["2026-05-21T10:00:01.000Z", "2026-05-21T10:00:02.000Z", "2026-05-21T10:00:03.000Z"]),
-    createLogId: idSeq()
+    password: {
+      hash: async (password) => `p:${password}`,
+      verify: async (password, hash) => hash === `p:${password}`
+    }
   })
+  await mongo.collection("_group").insertOne({ _id: "managers", access: { order: { read: {} } } })
+  await mongo.collection("_user").insertOne({ _id: "m1", login: "manager", passwordHash: "p:secret", groups: ["managers"] })
+  await mongo.collection("order").insertOne({ _id: "o1", status: "open" })
 
-  await mongo.collection("_permission").insertOne({
-    _id: "perm_order_open",
-    table: "order",
-    priority: 10,
-    if: { status: "open" },
-    read: { groups: ["manager"] },
-    write: { groups: ["admin"] }
-  })
+  const sent = []
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { sessionId: "s1" })
+  await server.socket.handleMessage(client, JSON.stringify({ type: "dbstate:login", id: "l1", login: "manager", password: "secret" }))
+  assert.deepEqual(sent.find((message) => message.type === "dbstate:login_result").access, { order: { read: {} } })
 
-  await server.update({
-    table: "order",
-    id: "o1",
-    set: { status: "open" },
-    sessionId: "writer",
-    req: { user: { _id: "admin", groups: ["admin"] } }
-  })
+  await server.socket.handleMessage(client, JSON.stringify({ type: "dbstate:rpc", id: "r1", method: "load", payload: { table: "order", id: "o1" } }))
+  assert.deepEqual(sent.find((message) => message.type === "dbstate:rpc_result" && message.id === "r1").result, { _id: "o1", status: "open" })
 
-  const managerSync = await server.sync({
-    from: "2026-05-21T10:00:00.000Z",
-    sessionId: "reader",
-    req: { user: { _id: "m1", groups: ["manager"] } }
-  })
-  const guestSync = await server.sync({
-    from: "2026-05-21T10:00:00.000Z",
-    sessionId: "reader",
-    req: { user: { _id: "g1", groups: ["guest"] } }
-  })
-
-  assert.deepEqual(managerSync.changes.map((change) => change.id), ["o1"])
-  assert.deepEqual(guestSync.changes, [])
+  await server.socket.handleMessage(client, JSON.stringify({ type: "dbstate:rpc", id: "r2", method: "update", payload: { table: "order", id: "o1", set: { status: "done" } } }))
+  assert.match(sent.find((message) => message.type === "dbstate:rpc_error" && message.id === "r2").error, /Write denied/)
 })
 
 test("read fields project load and sync changes", async () => {
@@ -884,35 +1075,35 @@ test("read fields project load and sync changes", async () => {
     createLogId: idSeq()
   })
 
-  await mongo.collection("_permission").insertOne({
-    _id: "perm_order_manager",
-    table: "order",
-    read: { groups: ["manager"], fields: ["status", "total"] },
-    write: { groups: ["admin"] }
-  })
-
   await server.add({
     table: "order",
     obj: { _id: "o1", status: "open", total: 100, margin: 30 },
     sessionId: "writer",
-    req: { user: { _id: "admin", groups: ["admin"] } }
+    req: adminReq()
   })
   await server.update({
     table: "order",
     id: "o1",
     set: { status: "done", margin: 40 },
     sessionId: "writer",
-    req: { user: { _id: "admin", groups: ["admin"] } }
+    req: adminReq()
   })
   await server.update({
     table: "order",
     id: "o1",
     set: { margin: 50 },
     sessionId: "writer",
-    req: { user: { _id: "admin", groups: ["admin"] } }
+    req: adminReq()
   })
 
-  const req = { user: { _id: "m1", groups: ["manager"] } }
+  // Менеджер видит только status и total — read_fields в правах группы.
+  const req = {
+    user: {
+      _id: "m1",
+      groups: ["manager"],
+      access: { order: { read: {}, read_fields: ["status", "total"] } }
+    }
+  }
 
   assert.deepEqual(await server.load({ table: "order", id: "o1", req }), {
     _id: "o1",
@@ -938,7 +1129,7 @@ test("read fields project load and sync changes", async () => {
       obj: { _id: "o1", status: "open", total: 100 },
       old: undefined,
       sessionId: "writer",
-      userId: "admin"
+      userId: "u-admin"
     },
     {
       logId: "log2",
@@ -951,9 +1142,62 @@ test("read fields project load and sync changes", async () => {
       obj: undefined,
       old: undefined,
       sessionId: "writer",
-      userId: "admin"
+      userId: "u-admin"
     }
   ])
+})
+
+test("access rights only accept filter objects, other values deny", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({ mongo, tables: ["zad"] })
+  await mongo.collection("zad").insertOne({ _id: "z1", ownerId: "u1" })
+
+  for (const read of [false, 0, 1, true, "yes", [], [1, "x"], null]) {
+    const req = { user: { _id: "u1", groups: [], access: { zad: { read } } } }
+    assert.deepEqual(
+      await server.getIds({ table: "zad", filter: {}, req }),
+      [],
+      `read: ${JSON.stringify(read)} must not grant access`
+    )
+    assert.equal(accessAllows({ zad: { read } }, "zad", "read"), false)
+  }
+
+  const granted = { user: { _id: "u1", groups: [], access: { zad: { read: {} } } } }
+  assert.deepEqual(await server.getIds({ table: "zad", filter: {}, req: granted }), ["z1"])
+})
+
+test("merging groups ignores non-filter rights", async () => {
+  const mongo = createMemoryMongo()
+  await mongo.collection("_group").insertOne({ _id: "g1", access: { zad: { read: true, write: 1 } } })
+  await mongo.collection("_group").insertOne({ _id: "g2", access: { zad: { read: { city: "msk" } } } })
+
+  const access = await mergeUserAccess(
+    { mongo, groupTable: "_group" },
+    { _id: "u1", groups: ["g1", "g2"] }
+  )
+
+  assert.deepEqual(access, { zad: { read: { city: "msk" } } })
+  assert.equal(accessAllows(access, "zad", "write"), false)
+})
+
+test("reads resolve the user once regardless of row count", async () => {
+  const mongo = createMemoryMongo()
+  let userCalls = 0
+  const server = createDbStateServer({
+    mongo,
+    tables: ["zad"],
+    access: { zad: { read: () => true } },
+    getUser: async ({ req }) => {
+      userCalls += 1
+      return req?.user
+    }
+  })
+  for (const id of ["z1", "z2", "z3"]) await mongo.collection("zad").insertOne({ _id: id })
+
+  const ids = await server.getIds({ table: "zad", filter: {}, req: adminReq() })
+
+  assert.deepEqual(ids, ["z1", "z2", "z3"])
+  assert.equal(userCalls, 1)
 })
 
 test("getIds applies skip before limit", async () => {
@@ -980,7 +1224,7 @@ test("getIds applies skip before limit", async () => {
   assert.deepEqual(ids, ["o2", "o3"])
 })
 
-test("sync does not load changed documents when permission rules have no if", async () => {
+test("sync does not load changed documents for table-level access decisions", async () => {
   const mongo = createMemoryMongo()
   const server = createDbStateServer({
     mongo,
@@ -988,13 +1232,12 @@ test("sync does not load changed documents when permission rules have no if", as
     now: () => "2026-05-21T10:00:01.000Z",
     createLogId: () => "log1"
   })
-  await allowTable(mongo, "order", "manager")
 
   await server.add({
     table: "order",
     obj: { _id: "o1", status: "open", total: 100 },
     sessionId: "writer",
-    req: { user: { _id: "m1", groups: ["manager"] } }
+    req: { user: { _id: "m1", groups: [], access: { order: { read: {}, write: {} } } } }
   })
 
   mongo.collection("order").findOneCalls = 0
@@ -1002,40 +1245,26 @@ test("sync does not load changed documents when permission rules have no if", as
   const sync = await server.sync({
     from: "2026-05-21T10:00:00.000Z",
     sessionId: "reader",
-    req: { user: { _id: "m2", groups: ["manager"] } }
+    req: { user: { _id: "m2", groups: [], access: { order: { read: {} } } } }
   })
 
   assert.deepEqual(sync.changes.map((change) => change.id), ["o1"])
   assert.equal(mongo.collection("order").findOneCalls, 0)
 })
 
-test("code access can lazily load a sync document", async () => {
+test("sync loads a filtered document from the database once", async () => {
   const mongo = createMemoryMongo()
   const server = createDbStateServer({
     mongo,
     tables: ["order"],
     now: () => "2026-05-21T10:00:01.000Z",
-    createLogId: () => "log1",
-    access: {
-      order: {
-        read: async ({ loadDoc }) => {
-          const doc = await loadDoc()
-          return doc?.status === "open"
-        }
-      }
-    }
+    createLogId: () => "log1"
   })
-  await mongo.collection("_permission").insertOne({
-    _id: "perm_order_admin_write",
-    table: "order",
-    write: { groups: ["admin"] }
-  })
-
   await server.add({
     table: "order",
     obj: { _id: "o1", status: "open" },
     sessionId: "writer",
-    req: { user: { _id: "admin", groups: ["admin"] } }
+    req: { user: { _id: "admin", groups: ["admin"], access: { order: { write: {} } } } }
   })
 
   mongo.collection("order").findOneCalls = 0
@@ -1043,53 +1272,51 @@ test("code access can lazily load a sync document", async () => {
   const sync = await server.sync({
     from: "2026-05-21T10:00:00.000Z",
     sessionId: "reader",
-    req: { user: { _id: "m1", groups: ["manager"] } }
+    req: { user: { _id: "m1", groups: [], access: { order: { read: { status: "open" } } } } }
   })
 
   assert.deepEqual(sync.changes.map((change) => change.id), ["o1"])
   assert.equal(mongo.collection("order").findOneCalls, 1)
 })
 
-test("code access supports direct table and global rules", async () => {
+test("hooks allow and deny across tables without group access", async () => {
   const mongo = createMemoryMongo()
   const server = createDbStateServer({
     mongo,
     tables: ["order", "product"],
-    access: {
-      read: async () => true,
-      order: {
-        write: async () => false
+    hooks: {
+      // Один хук на весь сервер, таблица разбирается внутри.
+      beforeRead: (ctx) => (ctx.table === "product" ? true : undefined),
+      beforeWrite: (ctx) => {
+        if (ctx.table !== "order") return
+        return { allowed: false, reason: "Заказы правит только менеджер" }
       }
     }
   })
 
-  await mongo.collection("_permission").insertOne({
-    _id: "perm_order",
-    table: "order",
-    write: { groups: ["admin"] }
-  })
-  await mongo.collection("product").insertOne({
-    _id: "p1",
-    title: "Box"
-  })
+  await mongo.collection("product").insertOne({ _id: "p1", title: "Box" })
 
-  assert.deepEqual(await server.load({
-    table: "product",
-    id: "p1",
-    req: { user: { _id: "guest", groups: [] } }
-  }), {
-    _id: "p1",
-    title: "Box"
-  })
+  // beforeRead вернул true — access группы не нужен.
+  assert.deepEqual(
+    await server.load({ table: "product", id: "p1", req: { user: { _id: "guest", groups: [] } } }),
+    { _id: "p1", title: "Box" }
+  )
 
+  // Хук молчит на order — решает access группы, которого нет.
+  await assert.rejects(
+    () => server.load({ table: "order", id: "o1", req: { user: { _id: "guest", groups: [] } } }),
+    /Read denied: order/
+  )
+
+  // Явный запрет с причиной доходит до клиента.
   await assert.rejects(
     () => server.update({
       table: "order",
       id: "o1",
       set: { status: "open" },
-      req: { user: { _id: "admin", groups: ["admin"] } }
+      req: { user: { _id: "admin", groups: [], access: { fullaccess: 1 } } }
     }),
-    /Write denied/
+    /Заказы правит только менеджер/
   )
 })
 
@@ -1101,22 +1328,12 @@ test("read hooks can prefilter queries and observe results", async () => {
     tables: ["order"],
     hooks: {
       beforeRead: async (ctx) => {
-        events.push(`global:${ctx.method}`)
-        ctx.filter = { ...ctx.filter, status: "open" }
+        events.push(`before:${ctx.table}:${ctx.method}`)
+        // Правка фильтра применяется, хотя решение оставлено access группы.
+        ctx.filter = { ...ctx.filter, status: "open", ownerId: ctx.user._id }
       },
       afterRead: async (ctx) => {
         events.push(`after:${ctx.result.length}`)
-      },
-      order: {
-        beforeRead: async (ctx) => {
-          events.push(`table:${ctx.method}`)
-          ctx.filter = { ...ctx.filter, ownerId: ctx.user._id }
-        }
-      }
-    },
-    access: {
-      order: {
-        read: async () => true
       }
     }
   })
@@ -1127,11 +1344,11 @@ test("read hooks can prefilter queries and observe results", async () => {
   const ids = await server.getIds({
     table: "order",
     filter: {},
-    req: { user: { _id: "u1", groups: [] } }
+    req: { user: { _id: "u1", groups: [], access: { order: { read: {} } } } }
   })
 
   assert.deepEqual(ids, ["o1"])
-  assert.deepEqual(events, ["global:getIds", "table:getIds", "after:1"])
+  assert.deepEqual(events, ["before:order:getIds", "after:1"])
 })
 
 test("write hooks can mutate writes and observe appended changes", async () => {
@@ -1144,22 +1361,12 @@ test("write hooks can mutate writes and observe appended changes", async () => {
     createLogId: idSeq(),
     hooks: {
       beforeWrite: async (ctx) => {
-        events.push(`global:${ctx.method}`)
+        events.push(`before:${ctx.table}:${ctx.action}`)
         ctx.set.status = String(ctx.set.status).toLowerCase()
+        ctx.set.hook = true
       },
-      order: {
-        beforeWrite: async (ctx) => {
-          events.push(`table:${ctx.action}`)
-          ctx.set.hook = true
-        },
-        afterWrite: async (ctx) => {
-          events.push(`after:${ctx.change.action}:${ctx.change.id}`)
-        }
-      }
-    },
-    access: {
-      order: {
-        write: async () => true
+      afterWrite: async (ctx) => {
+        events.push(`after:${ctx.change.action}:${ctx.change.id}`)
       }
     }
   })
@@ -1168,7 +1375,7 @@ test("write hooks can mutate writes and observe appended changes", async () => {
     table: "order",
     id: "o1",
     set: { status: "OPEN" },
-    req: { user: { _id: "u1", groups: [] } }
+    req: { user: { _id: "u1", groups: [], access: { order: { write: {} } } } }
   })
 
   assert.deepEqual(await mongo.collection("order").findOne({ _id: "o1" }), {
@@ -1180,7 +1387,7 @@ test("write hooks can mutate writes and observe appended changes", async () => {
       editdata: "2026-05-21T10:00:01.000Z"
     }
   })
-  assert.deepEqual(events, ["global:update", "table:update", "after:update:o1"])
+  assert.deepEqual(events, ["before:order:update", "after:update:o1"])
 })
 
 test("error hooks run for failed reads and writes without swallowing errors", async () => {
@@ -1191,15 +1398,7 @@ test("error hooks run for failed reads and writes without swallowing errors", as
     tables: ["order"],
     hooks: {
       errorRead: async (ctx) => events.push(`read:${ctx.method}:${ctx.error.message}`),
-      order: {
-        errorWrite: async (ctx) => events.push(`write:${ctx.method}:${ctx.error.message}`)
-      }
-    },
-    access: {
-      order: {
-        read: async () => false,
-        write: async () => false
-      }
+      errorWrite: async (ctx) => events.push(`write:${ctx.method}:${ctx.error.message}`)
     }
   })
 
@@ -1217,7 +1416,17 @@ test("error hooks run for failed reads and writes without swallowing errors", as
     /Write denied/
   )
 
-  assert.deepEqual(events, ["read:load:Read denied", "write:update:Write denied"])
+  // Обращение к таблице вне tables тоже доходит до error-хука.
+  await assert.rejects(
+    () => server.getIds({ table: "hack", req: { user: { _id: "u1", groups: [] } } }),
+    /Unknown db-state table/
+  )
+
+  assert.deepEqual(events, [
+    "read:load:Read denied: order",
+    "write:update:Write denied: order",
+    "read:getIds:Unknown db-state table: hack"
+  ])
 })
 
 test("write fields reject forbidden update fields", async () => {
@@ -1228,13 +1437,15 @@ test("write fields reject forbidden update fields", async () => {
     now: clock(["2026-05-21T10:00:01.000Z", "2026-05-21T10:00:02.000Z"]),
     createLogId: idSeq()
   })
+  // Менеджеру разрешена только колонка status — списком полей в правах группы.
+  const manager = {
+    user: {
+      _id: "m1",
+      groups: ["manager"],
+      access: { order: { read: {}, write: {}, write_fields: ["status"] } }
+    }
+  }
 
-  await mongo.collection("_permission").insertOne({
-    _id: "perm_order_manager",
-    table: "order",
-    read: { groups: ["manager"] },
-    write: { groups: ["manager"], fields: ["status"] }
-  })
   await mongo.collection("order").insertOne({
     _id: "o1",
     status: "open",
@@ -1243,14 +1454,14 @@ test("write fields reject forbidden update fields", async () => {
   await server.add({
     table: "order",
     obj: { _id: "o2", status: "open" },
-    req: { user: { _id: "m1", groups: ["manager"] } }
+    req: manager
   })
 
   await server.update({
     table: "order",
     id: "o1",
     set: { status: "done" },
-    req: { user: { _id: "m1", groups: ["manager"] } }
+    req: manager
   })
 
   await assert.rejects(
@@ -1258,7 +1469,7 @@ test("write fields reject forbidden update fields", async () => {
       table: "order",
       id: "o1",
       set: { margin: 40 },
-      req: { user: { _id: "m1", groups: ["manager"] } }
+      req: manager
     }),
     /Write denied: field margin/
   )
@@ -1266,7 +1477,7 @@ test("write fields reject forbidden update fields", async () => {
     () => server.add({
       table: "order",
       obj: { _id: "o3", status: "open", margin: 40 },
-      req: { user: { _id: "m1", groups: ["manager"] } }
+      req: manager
     }),
     /Write denied: field margin/
   )
@@ -1276,32 +1487,25 @@ test("write fields reject forbidden update fields", async () => {
   assert.equal(await mongo.collection("order").findOne({ _id: "o3" }), null)
 })
 
-test("code access rules decide before _permission table", async () => {
+test("a hook decides before the user's group access", async () => {
   const mongo = createMemoryMongo()
   const server = createDbStateServer({
     mongo,
     tables: ["order"],
-    access: {
-      order: {
-        write: async () => false
-      }
+    hooks: {
+      beforeWrite: (ctx) => (ctx.table === "order" ? false : undefined)
     }
   })
 
-  await mongo.collection("_permission").insertOne({
-    _id: "perm_order",
-    table: "order",
-    write: { groups: ["admin"] }
-  })
-
+  // Право группы полное, но хук запретил раньше.
   await assert.rejects(
     () => server.update({
       table: "order",
       id: "o1",
       set: { status: "open" },
-      req: { user: { _id: "admin", groups: ["admin"] } }
+      req: { user: { _id: "admin", groups: ["admin"], access: { order: { read: {}, write: {} } } } }
     }),
-    /Write denied/
+    /Write denied: order/
   )
 })
 
@@ -1527,19 +1731,21 @@ class MemoryCollection {
 }
 
 async function allowTable(mongo, table, group) {
-  await mongo.collection("_permission").insertOne({
-    _id: `perm_${table}_${group}`,
-    table,
-    read: { groups: [group] },
-    write: { groups: [group] }
+  await mongo.collection("_group").insertOne({
+    _id: group,
+    access: { [table]: { read: {}, write: {} } }
   })
 }
 
 function adminReq() {
-  return { user: { _id: "u-admin", groups: ["admins"] } }
+  return { user: { _id: "u-admin", groups: ["admins"], access: { fullaccess: 1 } } }
 }
 
 function matches(item, filter = {}) {
+  if (filter.$and) {
+    const { $and, ...rest } = filter
+    return matches(item, rest) && $and.every((part) => matches(item, part))
+  }
   if (filter.$or) {
     const { $or, ...rest } = filter
     return matches(item, rest) && $or.some((part) => matches(item, part))
@@ -1548,6 +1754,7 @@ function matches(item, filter = {}) {
   return Object.entries(filter).every(([key, expected]) => {
     const value = item[key]
     if (expected && typeof expected === "object" && !Array.isArray(expected)) {
+      if ("$in" in expected) return expected.$in.includes(value)
       if ("$gt" in expected && !(value > expected.$gt)) return false
       if ("$lte" in expected && !(value <= expected.$lte)) return false
       if ("$ne" in expected && value === expected.$ne) return false

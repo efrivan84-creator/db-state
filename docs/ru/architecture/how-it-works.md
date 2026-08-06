@@ -25,7 +25,7 @@ MongoDB
   app tables
   log
   _user
-  _permission
+  _group
 ```
 
 Транспорт один: WebSocket. Через него идут библиотечные RPC (`load`, `sync`, `update`, `login`) и custom events приложения.
@@ -42,7 +42,7 @@ MongoDB
 
 ### `@db-state/server-mongo`
 
-Node-сервер: CRUD, auth, `_permission`, code access rules, field projection, append-only log, WebSocket hub и broadcast `changes_available`.
+Node-сервер: CRUD, auth, права по `access` групп, хуки, field projection, append-only log, WebSocket hub и broadcast `changes_available`.
 
 ### File modules
 
@@ -53,7 +53,7 @@ Node-сервер: CRUD, auth, `_permission`, code access rules, field projectio
 1. Клиент вызывает `state.order.update({ id: "o1", set: { status: "closed" } })`.
 2. Клиент отправляет WebSocket RPC `dbstate:rpc` с методом `update` и своим `sessionId`.
 3. Сервер находит пользователя на socket и текущий документ.
-4. Сервер проверяет `write` через code access rules и `_permission`.
+4. Сервер проверяет `write` через хук `beforeWrite` и `user.access` (слитый из групп при логине).
 5. Сервер применяет MongoDB update.
 6. Сервер добавляет строку в `log`.
 7. Сервер планирует broadcast `dbstate:changes_available`.
@@ -80,9 +80,9 @@ Sync-запрос просит изменения `createdAt > time1` до се�
 
 До `login`/`authByHash` обычный RPC отклоняется как unauthorized. После успешной авторизации socket содержит `client.user`, `client.userId`, `client.sessionId`, а все RPC проходят через permissions этого пользователя.
 
-## Permission cache во время sync
+## Проверка прав во время sync
 
-Во время одного sync сервер кэширует `_permission` rules по таблицам. Документы подгружаются только если правило или code access rule реально требует документ (`if` или `ctx.loadDoc()`). Это уменьшает число Mongo round-trips на больших batch.
+`user.access` уже висит на сокете (слит при логине), поэтому фильтрация sync-изменений не читает права из базы вовсе. `{}`-права решаются без чтения документов; фильтр строк проверяет сама база — один `findOne` на изменение сразу с фильтром; delete-изменения используют snapshot `old` из лога. Code-правила подгружают документ лениво через `ctx.loadDoc()`.
 
 ## Почему append-only log
 

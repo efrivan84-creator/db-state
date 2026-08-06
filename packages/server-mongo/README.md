@@ -2,21 +2,20 @@
 
 > **English** · [Русский](README.ru.md)
 
-MongoDB-backed server for [db-state](https://github.com/efrivan84-creator/db-state): CRUD, append-only log, sync, WebSocket RPC, declarative permissions with field-level rules.
+MongoDB-backed server for [db-state](https://github.com/efrivan84-creator/db-state): CRUD, append-only log, sync, WebSocket RPC, group-based permissions (an `access` object) with row filters and field whitelists, plus lifecycle hooks.
 
 It exposes CRUD/sync behavior through WebSocket RPC only. There are no HTTP handlers in this package.
 
 ## What you get
 
 - WebSocket RPC server for `load`, `getIds`, `getUnique`, `count`, `sync`, `add`, `update`, and `remove`.
-- Mongo-backed app tables plus service tables `_user`, `_group`, and `_permission`.
+- Mongo-backed app tables plus service tables `_user` and `_group`.
 - Password login and hash-based reconnect over the same WebSocket.
 - Append-only `log` collection for realtime sync, audit trail, delete recovery, and time-travel reconstruction.
 - Sync by `(time1, to]` log windows with session echo suppression.
-- Read/write permission checks for every RPC, including service tables.
+- Read/write permission checks for every RPC from the `access` object of the user's groups; row filters are pushed into the Mongo query.
 - Field-level permissions for reads, sync changes, inserts, and updates.
-- Code access rules that can override or extend `_permission` rows and lazily load documents only when needed.
-- Server read/write hooks for prefilters, normalization, side effects, and error audit.
+- Hooks around every read and write: rewrite the query, narrow the fields, allow or deny with a reason, audit errors.
 - Built-in socket hub plus an adapter hook for Redis/NATS-style multi-process broadcasts.
 
 ## Install
@@ -38,7 +37,7 @@ const dbState = createDbStateServer({
 })
 ```
 
-`_user`, `_group`, and `_permission` are not exposed through CRUD/RPC automatically. Add them to `tables` explicitly when an admin UI needs them; access is still denied unless code rules or `_permission` rules allow it.
+`_user` and `_group` are not exposed through CRUD/RPC automatically. List them in `tables` explicitly when the admin UI needs them; access is still denied until a hook or the group `access` allows it.
 
 Attach WebSocket clients from your own `ws` server:
 
@@ -59,7 +58,6 @@ Create these indexes in production:
 
 ```js
 await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
-await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
 await mongo.collection("_user").createIndex({ login: 1 }, { unique: true, sparse: true })
 await mongo.collection("_user").createIndex({ email: 1 }, { unique: true, sparse: true })
 await mongo.collection("_user").createIndex({ phone: 1 }, { unique: true, sparse: true })
@@ -96,11 +94,11 @@ Server response:
   type: "dbstate:rpc_result",
   id: "rpc1",
   result: { ok: true, change },
-  meta: { accessFiltered: true, fieldsFiltered: true, denied: 2 } // optional
+  meta: { fieldsFiltered: true } // optional
 }
 ```
 
-`meta` is only present when the server has extra response information. `accessFiltered: true` means read permissions hid whole rows or log changes. `fieldsFiltered: true` means read field whitelists hid individual object/change fields. The normal `result` shape stays unchanged.
+`meta` carries only what the server already knows — nothing is counted or re-queried to fill it. `fieldsFiltered: true` means a read field whitelist applies, so the returned fields are limited. How many rows or changes a read permission hid is never reported: the client has no use for it, and counting it would cost an extra query. The normal `result` shape stays unchanged.
 
 Supported methods:
 
@@ -121,16 +119,16 @@ RPC is denied until the socket is authorized.
 
 | Method | Purpose |
 |---|---|
-| `load` | Reads one permitted document, projected by `read.fields`. |
+| `load` | Reads one permitted document, projected by `read_fields`. |
 | `getIds` | Returns permitted ids after `filter`, `sort`, `skip`, and `limit`. |
 | `getUnique` | Returns unique permitted values for one field. |
 | `count` | Counts permitted documents for a filter. |
 | `sync` | Returns visible log changes newer than the client's cursor. |
-| `add` | Inserts a document after `write` and `write.fields` checks. |
-| `update` | Applies `set` / `unset` after `write` and `write.fields` checks. |
+| `add` | Inserts a document after `write` and `write_fields` checks. |
+| `update` | Applies `set` / `unset` after `write` and `write_fields` checks. |
 | `remove` | Deletes after document-level `write`; stores deleted object in `change.old`. |
 
-For read RPCs, the WebSocket `dbstate:rpc_result` envelope may include diagnostic metadata without changing `result`: `meta.accessFiltered = true` / `meta.denied = N` when whole rows or log changes were hidden, and `meta.fieldsFiltered = true` when field-level read rules removed properties from returned documents or changes.
+For read RPCs, the WebSocket `dbstate:rpc_result` envelope may include `meta.fieldsFiltered = true` without changing `result`, meaning field-level read rules limit the returned properties. Hidden rows are not reported.
 
 ## Custom RPC methods
 
@@ -154,8 +152,8 @@ Clients call them with the same RPC envelope: `{ type: "dbstate:rpc", method: "z
 - A handler receives `{ body, client, userId, sessionId }` and decides what to read and write itself.
 - RPC is rejected until the socket is authorized, same as the built-in methods.
 - Names that collide with built-ins (`load`, `sync`, ...) are forbidden — the server throws at startup.
-- Modules (`files`) can contribute methods through a `methods` field, like `access` and `hooks`.
-- `access`/`_permission` checks and the change log only apply to the standard CRUD: if a named method writes to the database directly, permissions, audit log and broadcast are its own responsibility (or call `api.add`/`api.update` from inside the method).
+- Modules (`files`) can contribute methods through a `methods` field, like `hooks`.
+- Permission checks and the change log only apply to the standard CRUD: if a named method writes to the database directly, permissions, audit log and broadcast are its own responsibility (or call `api.add`/`api.update` from inside the method).
 
 ### File-based methods: `methodsDir`
 
@@ -225,7 +223,8 @@ Login response:
   ok: true,
   userId: "u1",
   hash: "auth-secret",
-  groups: ["manager"]
+  groups: ["manager"],
+  access: { order: { read: {} } }
 }
 ```
 
@@ -306,157 +305,161 @@ createDbStateServer({
 })
 ```
 
-## Permission Tables
+## Permissions: group `access`
 
 Access is denied by default.
 
-The server checks access in this order:
-
-1. Code rule for `table + docId`.
-2. Code rule for `table`.
-3. `_permission` rule for matching `table` and `if`.
-4. Deny.
-
-Permission document:
+Permissions are stored as data on a group (`_group`), an object of arbitrary nesting:
 
 ```js
 {
-  _id: "perm_order_open",
-  table: "order",
-  priority: 10,
-
-  if: {
-    status: "open"
-  },
-
-  read: {
-    users: ["u1"],
-    groups: ["manager"],
-    action: true,
-    fields: ["_id", "status", "total"]
-  },
-
-  write: {
-    users: [],
-    groups: ["admin"],
-    action: true,
-    fields: ["status", "comment"]
+  _id: "montaj",
+  name: "Installers",
+  access: {
+    zad: { read: {}, write: {} },    // full table access ({} = all rows)
+    bill: { read: {} },              // read only, all rows and fields
+    admin: {
+      read: { enable: true },        // filter: only matching documents are visible
+      read_fields: ["fio", "tel"],   // and only these fields
+      write: {},                     // {} = edit any row
+      write_fields: ["tel"]          //   but only these fields
+    },
+    fullaccess: 1                    // special key: access to everything
   }
 }
 ```
 
-If `if` is missing, the rule applies to the whole table.
+At login the server merges the `access` of all the user's groups (plus a
+personal `access` on the `_user` document, if any) and attaches the result as
+`user.access`. Merging is additive only, there are no deny rules: filters from different
+groups combine into an any-of set, `{}` (all rows) beats any filter. The object is returned in `login_result`/`auth_result`, so the
+client can hide UI sections without extra requests. Changing a group's rights
+applies on the next login or reconnect.
 
-If `action` is missing, matching users/groups resolve to `true`.
+The server checks permissions in this order:
 
-Use `action: false` for explicit deny.
+1. Code rule for the table (`access[table][action]`).
+2. Global code rule (`access[action]`).
+3. `user.access`: `fullaccess`, then the `<table>.<action>` filter.
+4. Deny.
 
-If `fields` is missing, all fields are allowed. If `fields` is present:
+Action mapping: `read` — `load`, `getIds`, `getUnique`, `count` and change
+visibility in `sync`; `write` — `add`, `update`, `remove`.
 
-- `read.fields` projects `load()` results.
-- `read.fields` also projects `insert`, `update`, and `delete.old` changes returned by `sync()`.
-- `write.fields` validates fields on `add()` and `update()`.
-- `remove()` is controlled by document-level `write`; use a code rule with `action === "delete"` when delete needs a stricter rule.
+### Filters and fields
 
-Forbidden write fields reject the whole operation.
+A `read`/`write` value is a **document filter** (dot paths): `{}` matches
+everything, i.e. grants the action on the whole table; after group merge it
+may be an array of filters (a document passes when at least one matches).
 
-## Code Access Rules
+Placeholders in filter values:
 
-Code rules can override database permissions:
-
-```js
-const dbState = createDbStateServer({
-  mongo,
-  tables: ["order"],
-  access: {
-    order: {
-      read: async ({ user, loadDoc, id }) => {
-        if (id === "public-order") return true
-        const obj = await loadDoc()
-        return obj.ownerId === user._id
-      },
-      write: async ({ user, obj, set }) => false
-    }
-  }
-})
-```
-
-During `sync()`, changed documents are loaded lazily. If `_permission` rules for a table have no `if`, sync can decide access from `table + user/groups` without reading the changed document. Code rules that need the document should call `ctx.loadDoc()`; this performs the Mongo `findOne` only when the rule actually asks for it.
-
-`write` covers all mutating operations:
-
-```text
-insert
-update
-delete
-```
-
-Use the `action` field in code rules when an operation needs a stricter decision:
+- `"$adminid"` — the current user's id;
+- `"$groupid"` — matches any of the user's groups.
 
 ```js
-const dbState = createDbStateServer({
-  mongo,
-  tables: ["order"],
-  access: {
-    order: {
-      write: async ({ action, user }) => {
-        if (action === "insert") return true
-        if (action === "update") return true
-        if (action === "delete") return user.groups.includes("admin")
-        return undefined
-      }
-    }
-  }
-})
+{ zad: { read: { master: "$adminid" } } }   // a technician sees only their tickets
+{ zad: { read: { dep: "$groupid" } } }      // a department sees its own area
 ```
 
-Return values:
+The `write` filter is checked against the **existing** document for
+`update`/`remove` and the **new** one for `add`. `read_fields`/`write_fields`
+are field whitelists: reads project documents and sync changes, writes reject
+other paths. On merge field lists are united, and a grant without a field
+limit removes the limit entirely.
 
-- `true` - allow.
-- `false` - deny.
-- `{ action: true, fields: ["status"] }` - allow with field restrictions.
-- `undefined` or `null` - no decision, continue to the next layer.
+**Filters are evaluated by the database itself, in a single query:**
 
-## Server Hooks
+- lists (`getIds`, `count`, `getUnique`) put the access filter straight into
+  the Mongo query (`$or` for several), so the database returns only permitted
+  rows, and `getIds` requests only `_id` (projection); `count` uses `countDocuments` without fetching data (when the table
+  has no code read rules — otherwise the per-row path is used);
+- `load` checks the access filter with the same `findOne`, and with
+  `read_fields` asks Mongo only for the allowed fields (projection);
+  `getUnique` fetches only the requested field;
+- `sync` checks a changed document with one `findOne` that already includes
+  the access filter;
+- `{}` grants are decided without touching the database at all;
+- `"$groupid"` becomes `{ $in: groups }` in the query.
 
-Hooks are separate from `access`: access decides **allow/deny/fields**, hooks run lifecycle logic around server operations.
+Check the object manually (e.g. inside a named method):
+
+```js
+import { accessAllows } from "@db-state/server-mongo"
+
+accessAllows(user.access, "bill", "write")            // any access at all
+accessAllows(user.access, "zad", "read", doc, user)   // check a concrete document
+```
+
+Field-level rights and row-level conditions are expressed with code rules
+(next section) — they can return `{ fields: [...] }` or inspect the document.
+
+## Hooks
+
+Hooks are where your application steps into the built-in commands: rewrite the
+query, narrow the fields, allow or deny, enrich the response.
 
 ```js
 const dbState = createDbStateServer({
   mongo,
   tables: ["order"],
   hooks: {
-    beforeRead: async (ctx) => {
-      // Global read prefilter.
+    beforeRead: (ctx) => {
+      // Applies to every table.
       ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
+      if (ctx.table === "order" && ctx.method === "getIds") ctx.limit = Math.min(ctx.limit || 200, 200)
     },
-    order: {
-      beforeWrite: async (ctx) => {
-        if (ctx.action === "update") ctx.set.updatedBy = ctx.user._id
-      },
-      afterWrite: async ({ change }) => {
-        // change is already appended to log here.
-      },
-      errorWrite: async ({ error, method }) => {
-        console.warn("write failed", method, error.message)
+    beforeWrite: (ctx) => {
+      if (ctx.table !== "order") return
+      if (ctx.method === "remove" && !ctx.user.groups.includes("admin")) {
+        return { allowed: false, reason: "Only an admin can delete orders" }
       }
+      if (ctx.method === "update") ctx.set.updatedBy = ctx.user._id
+    },
+    afterWrite: ({ change }) => {
+      // change is already in the log.
+    },
+    errorWrite: ({ error, method }) => {
+      console.warn("write failed", method, error.message)
     }
   }
 })
 ```
 
-Available hook names:
+Hook names:
 
 ```text
 beforeRead   afterRead   errorRead
 beforeWrite  afterWrite  errorWrite
 ```
 
-Global hooks run first, then table hooks: `hooks.beforeRead` -> `hooks.order.beforeRead`.
+Each is declared once for the whole server; branch on `ctx.table` inside. There
+is no per-table nesting such as `hooks: { order: { beforeRead } }`.
 
-`beforeRead` can mutate `ctx.filter`, `ctx.sort`, `ctx.skip`, `ctx.limit`, `ctx.from`, and similar request fields before Mongo reads. `beforeWrite` can mutate `ctx.obj`, `ctx.set`, and `ctx.unset` before access checks and persistence. `afterWrite` runs after Mongo write + append-log; `ctx.change` and `ctx.result` are available.
+### What to return
 
-`errorRead` / `errorWrite` receive `ctx.error`. They do not swallow the error; the original error is still thrown to the caller.
+| Return | Effect |
+| --- | --- |
+| `undefined` | No decision — the user's group access decides |
+| `true` | Allowed; group access is skipped |
+| `false` | Denied with `Read denied: <table>` |
+| `{ allowed: false, reason }` | Denied; the reason is sent to the client |
+
+Mutations of `ctx` apply regardless of the returned value, so a hook can rewrite
+the query and still leave the decision to the group access.
+
+`beforeRead` may change `ctx.filter`, `ctx.sort`, `ctx.skip`, `ctx.limit` and
+`ctx.fields` (field projection) before Mongo is queried. `beforeWrite` may change
+`ctx.obj`, `ctx.set` and `ctx.unset` before the permission check and the save.
+
+`afterWrite` runs after the Mongo write, the append-log and the broadcast, so it
+cannot deny; `ctx.change` and `ctx.result` are available.
+
+`errorRead` / `errorWrite` receive `ctx.error` and do not swallow it — the
+original error still reaches the caller.
+
+Hooks contributed by mounted modules run before the application hook of the same
+name; the first explicit decision stops the chain.
 
 ## Delete Logs
 
@@ -516,9 +519,9 @@ Every successful write appends one compact log row:
 }
 ```
 
-Clients call `sync({ from, sessionId })`. The server reads `createdAt > from && createdAt <= to`, excludes the caller session, applies read permissions, filters forbidden fields, and returns `{ to, changes }`.
+Clients call `sync({ from, sessionId })`. The server reads at most 12 hours of log time, excludes the caller session, applies read permissions, filters forbidden fields, and returns `{ to, changes, hasMore? }`. The client follows `hasMore` windows automatically.
 
-For high-write systems, keep `syncLimit` high enough for one sync window or add cursor continuation by `{ createdAt, logId }`.
+When `from` is more than 20 days old, the server returns `reset: true`; the client clears its local cache and reloads current state instead of replaying old log rows.
 
 ## Useful links
 
@@ -530,7 +533,7 @@ For high-write systems, keep `syncLimit` high enough for one sync window or add 
 ## Internal Files
 
 - `index.js` - CRUD, sync, log writing, public factory.
-- `access.js` - code rules and `_permission` resolution.
+- `access.js` - code rules, `accessAllows` and field-level filtering.
 - `hooks.js` - server read/write lifecycle hook runner.
 - `rpc.js` - WebSocket RPC method dispatch.
 - `socket.js` - WebSocket client registry and broadcast.

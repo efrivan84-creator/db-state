@@ -23,23 +23,19 @@ const mongo = createMemoryMongo({
     }
   ],
   _group: [
-    { _id: "admin", name: "Admin" },
-    { _id: "manager", name: "Manager" }
-  ],
-  _permission: [
+    { _id: "admin", name: "Admin", access: { order: { read: {}, write: {} } } },
     {
-      _id: "perm_order_admin",
-      table: "order",
-      priority: 10,
-      read: { groups: ["admin"] },
-      write: { groups: ["admin"] }
-    },
-    {
-      _id: "perm_order_manager",
-      table: "order",
-      priority: 1,
-      read: { groups: ["manager"], fields: ["_id", "status", "total", "comment"] },
-      write: { groups: ["manager"], fields: ["status", "comment"] }
+      _id: "manager",
+      name: "Manager",
+      // Те же строки, но не все поля: margin менеджеру не виден и не правится.
+      access: {
+        order: {
+          read: {},
+          read_fields: ["status", "total", "comment"],
+          write: {},
+          write_fields: ["status", "comment"]
+        }
+      }
     }
   ],
   order: [
@@ -56,6 +52,8 @@ const mongo = createMemoryMongo({
 const dbState = createDbStateServer({
   mongo,
   tables: ["order"],
+  // Права целиком в access групп (см. seed _group): admin видит всё,
+  // manager — те же строки без поля margin.
   password: {
     hash: async (password) => `demo:${password}`,
     verify: async (password, passwordHash) => passwordHash === `demo:${password}`

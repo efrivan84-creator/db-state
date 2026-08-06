@@ -42,11 +42,13 @@ export function createAuth(config) {
       }
 
       attachUser(client, { ...user, hash })
+      client.user.access = await mergeUserAccess(config, user)
       send(client, DB_STATE_MESSAGES.loginResult, message.id, {
         ok: true,
         userId: user._id,
         hash,
-        groups: user.groups ?? []
+        groups: user.groups ?? [],
+        access: client.user.access
       })
     },
 
@@ -68,10 +70,12 @@ export function createAuth(config) {
       }
 
       attachUser(client, user)
+      client.user.access = await mergeUserAccess(config, user)
       send(client, DB_STATE_MESSAGES.authResult, message.id, {
         ok: true,
         userId: user._id,
-        groups: user.groups ?? []
+        groups: user.groups ?? [],
+        access: client.user.access
       })
     },
 
@@ -106,6 +110,100 @@ export function defaultAuthHash() {
 
 export function hashValue(value) {
   return createHash("sha256").update(String(value)).digest("hex")
+}
+
+// Merges access objects of the user's groups, then the user's own access on
+// top. Merging is additive only, there are no deny rules:
+//   filters from different groups combine into an any-of array,
+//   {} (all rows) beats any filter;
+//   *_fields lists are united; a grant without a fields limit removes the limit.
+export async function mergeUserAccess(config, user) {
+  const access = {}
+  for (const groupId of user.groups ?? []) {
+    const group = await config.mongo.collection(config.groupTable).findOne({ _id: groupId })
+    mergeAccess(access, group?.access)
+  }
+  mergeAccess(access, user.access)
+  return access
+}
+
+function mergeAccess(target, extra) {
+  for (const [key, value] of Object.entries(extra ?? {})) {
+    if (key === "fullaccess") {
+      if (flag(value)) target.fullaccess = 1
+      continue
+    }
+    target[key] = mergeTableEntry(target[key], value)
+  }
+  return target
+}
+
+function mergeTableEntry(current, extra) {
+  if (extra == null || typeof extra !== "object") return current
+  const base = current && typeof current === "object" ? current : undefined
+
+  const out = {}
+  for (const action of ["read", "write"]) {
+    const merged = mergeAction(base, extra, action)
+    if (merged.value !== undefined) out[action] = merged.value
+    if (merged.fields) out[`${action}_fields`] = merged.fields
+  }
+  return Object.keys(out).length > 0 ? out : current
+}
+
+function mergeAction(a, b, action) {
+  // Право даёт только объект-фильтр; всё остальное игнорируется.
+  const af = toFilters(a?.[action])
+  const bf = toFilters(b?.[action])
+  if (af.length === 0 && bf.length === 0) return { value: undefined }
+
+  const fields = mergeActionFields(a, b, action, { aGrants: af.length > 0, bGrants: bf.length > 0 })
+  const filters = dedupeFilters([...af, ...bf])
+  if (filters.some(isEmptyFilter)) return { value: {}, fields }
+  return { value: filters.length === 1 ? filters[0] : filters, fields }
+}
+
+// Источник, дающий право без ограничения полей, снимает ограничение целиком.
+function mergeActionFields(a, b, action, { aGrants, bGrants }) {
+  const af = a?.[`${action}_fields`]
+  const bf = b?.[`${action}_fields`]
+  if ((aGrants && !isFieldList(af)) || (bGrants && !isFieldList(bf))) return undefined
+  if (!aGrants) return isFieldList(bf) ? [...bf] : undefined
+  if (!bGrants) return isFieldList(af) ? [...af] : undefined
+  return [...new Set([...af, ...bf])]
+}
+
+function isFieldList(value) {
+  return Array.isArray(value) && value.length > 0
+}
+
+function toFilters(value) {
+  if (isFilter(value)) return [value]
+  return Array.isArray(value) ? value.filter(isFilter) : []
+}
+
+function isFilter(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+}
+
+function isEmptyFilter(filter) {
+  return isFilter(filter) && Object.keys(filter).length === 0
+}
+
+function dedupeFilters(filters) {
+  const seen = new Set()
+  const out = []
+  for (const filter of filters) {
+    const key = JSON.stringify(filter)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(filter)
+  }
+  return out
+}
+
+function flag(value) {
+  return value === 1 || value === true
 }
 
 function loginFilter(config, login) {

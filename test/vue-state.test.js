@@ -258,6 +258,104 @@ test("sync refreshes query refs once per changed table after applying the batch"
   ])
 })
 
+test("sync follows twelve-hour windows until the server is caught up", async () => {
+  const storage = testStorage()
+  storage.metaStorage.setItem("db-state.time1", "2026-05-01T00:00:00.000Z")
+  const state = createDbState({
+    autoConnect: false,
+    cache: createMemoryCache(),
+    safetySyncInterval: 0,
+    ...storage,
+    tables: ["order"]
+  })
+  const calls = []
+  const responses = [
+    {
+      to: "2026-05-01T12:00:00.000Z",
+      hasMore: true,
+      changes: [{ table: "order", id: "o1", action: "insert", obj: { _id: "o1" } }]
+    },
+    {
+      to: "2026-05-01T18:00:00.000Z",
+      changes: [{ table: "order", id: "o2", action: "insert", obj: { _id: "o2" } }]
+    }
+  ]
+  state.socket.rpc = async (method, payload) => {
+    calls.push({ method, payload })
+    return responses.shift()
+  }
+  state.auth.status = "authorized"
+
+  await state.syncNow()
+
+  assert.deepEqual(calls, [
+    {
+      method: "sync",
+      payload: { from: "2026-05-01T00:00:00.000Z", sessionId: state.sync.sessionId }
+    },
+    {
+      method: "sync",
+      payload: { from: "2026-05-01T12:00:00.000Z", sessionId: state.sync.sessionId }
+    }
+  ])
+  assert.deepEqual(Object.keys(state.order.items), ["o1", "o2"])
+  assert.equal(state.sync.time1, "2026-05-01T18:00:00.000Z")
+  assert.equal(storage.metaStorage.getItem("db-state.time1"), state.sync.time1)
+})
+
+test("sync reset clears cached state, reloads active reads and resumes from the reset time", async () => {
+  const cache = createMemoryCache()
+  const storage = testStorage()
+  storage.metaStorage.setItem("db-state.time1", "2026-04-01T00:00:00.000Z")
+  const state = createDbState({
+    autoConnect: false,
+    cache,
+    countRefreshDelay: 0,
+    idsRefreshDelay: 0,
+    safetySyncInterval: 0,
+    ...storage,
+    tables: ["order"]
+  })
+  state.auth.status = "authorized"
+  await state.applyChange({
+    table: "order",
+    id: "o1",
+    action: "insert",
+    obj: { _id: "o1", status: "stale" }
+  })
+  let resetStarted = false
+  let syncCalls = 0
+  state.socket.rpc = async (method, payload) => {
+    if (method === "sync") {
+      syncCalls += 1
+      if (syncCalls === 1) {
+        resetStarted = true
+        return { to: "2026-05-01T00:00:00.000Z", changes: [], reset: true }
+      }
+      return { to: "2026-05-01T00:00:01.000Z", changes: [] }
+    }
+    if (method === "load") return { _id: payload.id, status: "fresh" }
+    if (method === "count") return resetStarted ? 1 : 9
+    if (method === "getIds") return resetStarted ? ["o1"] : ["old"]
+    return undefined
+  }
+  const doc = state.order.load("o1")
+  const count = state.order.countRef({})
+  const ids = state.order.idsRef({ sort: { _id: 1 } })
+  await waitFor(() => count.value === 9 && ids.value[0] === "old")
+
+  await state.syncNow()
+
+  assert.equal(syncCalls, 2)
+  assert.equal(state.order.load("o1"), doc)
+  assert.equal(doc.status, "fresh")
+  assert.deepEqual(await cache.get("order", "o1"), { _id: "o1", status: "fresh" })
+  assert.equal(count.value, 1)
+  assert.deepEqual(ids.value, ["o1"])
+  assert.equal(state.sync.time1, "2026-05-01T00:00:01.000Z")
+  assert.equal(storage.metaStorage.getItem("db-state.time1"), state.sync.time1)
+})
+
 test("countRef refreshes after login but hash auth without table changes keeps cached value", async () => {
   const cache = createMemoryCache()
   const state = createDbState({
@@ -667,7 +765,7 @@ test("socket rpc emits the result envelope for diagnostics", async () => {
         type: DB_STATE_MESSAGES.rpcResult,
         id: request.id,
         result: ["o1"],
-        meta: { accessFiltered: true, denied: 1 }
+        meta: { fieldsFiltered: true }
       })
     })
 
@@ -676,7 +774,7 @@ test("socket rpc emits the result envelope for diagnostics", async () => {
       type: DB_STATE_MESSAGES.rpcResult,
       id: request.id,
       result: ["o1"],
-      meta: { accessFiltered: true, denied: 1 }
+      meta: { fieldsFiltered: true }
     }])
   } finally {
     globalThis.WebSocket = OriginalWebSocket

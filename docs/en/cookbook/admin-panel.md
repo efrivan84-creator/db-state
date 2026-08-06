@@ -24,7 +24,7 @@ Create one state object and use it across the app:
 import { createDbState } from "@db-state/vue"
 
 export const state = createDbState({
-  tables: ["order", "_user", "_group", "_permission"],
+  tables: ["order", "_user", "_group"],
   wsUrl: "ws://127.0.0.1:8788/db-state/ws",
   sessionKey: "admin.sessionId",
   syncKey: "admin.time1",
@@ -38,7 +38,6 @@ Service tables are listed explicitly to expose them in the admin UI:
 ```js
 state._user
 state._group
-state._permission
 ```
 
 Access is still controlled by the server.
@@ -51,8 +50,7 @@ Use `listRef` for visible rows and `countRef` for counters:
 const tabs = [
   { label: "Orders", table: "order" },
   { label: "Users", table: "_user" },
-  { label: "Groups", table: "_group" },
-  { label: "Permissions", table: "_permission" }
+  { label: "Groups", table: "_group" }   // групповой access редактируется здесь
 ]
 
 const query = { sort: { _id: 1 } }
@@ -60,15 +58,13 @@ const query = { sort: { _id: 1 } }
 const lists = {
   order: state.order.listRef(query, "admin"),
   _user: state._user.listRef(query, "admin"),
-  _group: state._group.listRef(query, "admin"),
-  _permission: state._permission.listRef(query, "admin")
+  _group: state._group.listRef(query, "admin")
 }
 
 const counts = {
   order: state.order.countRef({}),
   _user: state._user.countRef({}),
-  _group: state._group.countRef({}),
-  _permission: state._permission.countRef({})
+  _group: state._group.countRef({})
 }
 ```
 
@@ -90,8 +86,7 @@ Keep selection as page state:
 const selected = reactive({
   order: "",
   _user: "",
-  _group: "",
-  _permission: ""
+  _group: ""
 })
 
 const currentRows = computed(() => lists[activeTable.value].value)
@@ -167,43 +162,40 @@ If a manager is allowed to write only `status` and `comment`, trying to send `to
 
 ## Server permissions
 
-Seed service-table access for admins:
+Rights are `access` objects on groups — seed the groups themselves:
 
 ```js
-await db.collection("_permission").insertMany([
-  { _id: "perm_user_admin", table: "_user", read: { groups: ["admin"] }, write: { groups: ["admin"] } },
-  { _id: "perm_group_admin", table: "_group", read: { groups: ["admin"] }, write: { groups: ["admin"] } },
-  { _id: "perm_permission_admin", table: "_permission", read: { groups: ["admin"] }, write: { groups: ["admin"] } }
-])
-```
-
-Add table rules:
-
-```js
-await db.collection("_permission").insertMany([
+await db.collection("_group").insertMany([
   {
-    _id: "perm_order_admin",
-    table: "order",
-    priority: 100,
-    read: { groups: ["admin"] },
-    write: { groups: ["admin"] }
+    _id: "admin",
+    name: "Administrators",
+    access: {
+      order:  { read: {}, write: {} },
+      _user:  { read: {}, write: {} },
+      _group: { read: {}, write: {} }
+    }
   },
   {
-    _id: "perm_order_manager",
-    table: "order",
-    priority: 20,
-    read: { groups: ["manager"], fields: ["_id", "status", "total", "comment", "ownerId"] },
-    write: { groups: ["manager"], fields: ["status", "comment"] }
+    _id: "manager",
+    name: "Order managers",
+    access: {
+      order: {
+        read: {}, read_fields: ["status", "total", "comment", "ownerId"],
+        write: {}, write_fields: ["status", "comment"]
+      }
+    }
   },
   {
-    _id: "perm_order_viewer",
-    table: "order",
-    priority: 10,
-    read: { groups: ["viewer"], fields: ["_id", "status", "total"] },
-    write: { groups: ["viewer"], action: false }
+    _id: "viewer",
+    name: "Read only",
+    access: {
+      order: { read: {}, read_fields: ["status", "total"] }
+    }
   }
 ])
 ```
+
+The admin UI edits these `access` objects directly in the Groups tab (a JSON editor works well — see demo2). Changes apply to each user at their next login or reconnect.
 
 ## Refresh button
 
@@ -227,10 +219,10 @@ async function refreshTable(table) {
 
 ## Production checklist
 
-- Create indexes: `log({ createdAt: 1, logId: 1 })` and `_permission({ table: 1, priority: -1 })`.
+- Create indexes: `log({ createdAt: 1, logId: 1 })` plus normal Mongo indexes for fields used in access filters.
 - Keep `state` as a singleton.
 - Prefer `listRef` for tables and `load(id)` for details.
 - Keep drafts separate from database docs.
 - Save diffs, not full documents.
-- Give admins access to `_user`, `_group`, and `_permission`.
-- Do not expose service tables without explicit permissions.
+- Give admins access to `_user` and `_group`.
+- Do not expose service tables without explicit access grants.

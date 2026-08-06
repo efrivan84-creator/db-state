@@ -1,4 +1,4 @@
-import type { BaseDoc, Change, PermissionPart, ServiceGroup, ServicePermission, ServiceUser } from "@db-state/core"
+import type { BaseDoc, Change, ServiceGroup, ServiceUser } from "@db-state/core"
 import type { DbStateCache } from "./cache"
 import type { LoadingKeyRef } from "./keys"
 import type { DbStateSocketFacade } from "./socket"
@@ -28,9 +28,7 @@ export type {
   BaseDoc,
   Change,
   ChangeAction,
-  PermissionPart,
   ServiceGroup,
-  ServicePermission,
   ServiceUser
 } from "@db-state/core"
 
@@ -44,7 +42,7 @@ export { createIndexedDbCache, createMemoryCache, createStorageCache } from "./c
  * Shape of the schema generic accepted by {@link createDbState}.
  *
  * Map your table names to document types. Service tables (`_user`,
- * `_group`, `_permission`) are inferred automatically with reasonable
+ * `_group`) are inferred automatically with reasonable
  * defaults but can be overridden by including them here explicitly.
  *
  * @example
@@ -60,7 +58,6 @@ export type DbStateSchema = Record<string, BaseDoc>
 export interface DefaultServiceTables {
   _user: ServiceUser
   _group: ServiceGroup
-  _permission: ServicePermission
 }
 
 /** Combined map = user schema + service tables (user schema wins on overlap). */
@@ -180,7 +177,7 @@ export type DbState<TSchema extends DbStateSchema = DbStateSchema> =
     /** Registers an extension table at runtime. Used by optional modules such as @db-state/vue-files. */
     registerTable<K extends string>(table: K): TableApi<BaseDoc>
 
-    /** Pulls the next batch of log changes from the server and applies them. */
+    /** Catches up all pending 12-hour sync windows and handles server-requested cache resets. */
     syncNow(): Promise<void>
 
     /** Applies a single change locally (used internally by RPCs and sync). */

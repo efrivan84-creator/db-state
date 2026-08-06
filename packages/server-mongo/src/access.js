@@ -3,37 +3,190 @@ import { getByPath, setByPath } from "@db-state/core"
 export async function assertAccess(config, action, ctx) {
   const access = await resolveAccess(config, action, ctx)
   if (!access.allowed) {
-    throw new Error(`${action === "read" ? "Read" : "Write"} denied`)
+    throw new Error(`${action === "read" ? "Read" : "Write"} denied: ${ctx.table}`)
   }
 
   return access
 }
 
-export async function canAccess(config, action, ctx) {
-  return (await resolveAccess(config, action, ctx)).allowed
-}
-
+// Права берутся только из access групп пользователя (слитого при логине).
+// Динамические решения — дело хуков beforeRead / beforeWrite.
 export async function resolveAccess(config, action, ctx) {
-  const user = await resolveUser(config, ctx)
-  const fullCtx = { ...ctx, user, docId: ctx.id }
+  // Пользователь мог быть разрешён вызывающим методом — не спрашиваем повторно.
+  const user = "user" in ctx ? ctx.user : await resolveUser(config, ctx)
+  const decision = await userAccessDecision(user?.access, action, { ...ctx, user, docId: ctx.id })
 
-  const codeDecision = await codeAccessDecision(config.access, action, fullCtx)
-  if (codeDecision !== undefined && codeDecision !== null) return normalizeDecision(codeDecision)
-
-  const permissionDecision = await permissionDecisionFromDb(config, action, fullCtx)
-  if (permissionDecision !== undefined && permissionDecision !== null) return permissionDecision
-
-  return { allowed: false }
+  return decision ?? { allowed: false }
 }
 
-export async function filterReadable(config, req, table, rows) {
-  const out = []
-  for (const obj of rows) {
-    if (await canAccess(config, "read", { req, table, id: obj._id ?? obj.id, obj })) {
-      out.push(obj)
-    }
+// user.access is merged from the user's groups at login, e.g.
+// {
+//   fullaccess: 1,                 — special key: everything
+//   zad: { read: {}, write: {} },  — full table access ({} matches all rows)
+//   bill: {
+//     read: { needact: true },     — a filter: only matching documents;
+//                                    after merge it can be an array (any-of)
+//     read_fields: ["fio"],        — field whitelist for reads
+//     write: {},
+//     write_fields: ["comm"]       — field whitelist for writes
+//   }
+// }
+// Filter values support placeholders:
+//   "$adminid" — the current user's id;
+//   "$groupid" — matches any of the current user's group ids.
+// The write filter is checked against the existing document for
+// update/remove and against the new document for add.
+async function userAccessDecision(access, action, ctx) {
+  if (!access) return undefined
+  if (flag(access.fullaccess)) return { allowed: true }
+
+  const entry = access[ctx.table]
+  if (entry == null || typeof entry !== "object") return undefined
+
+  const filters = accessFilters(entry[action])
+  if (!filters) return undefined
+
+  const fields = entry[`${action}_fields`]
+  const decision = { allowed: true, fields: Array.isArray(fields) && fields.length > 0 ? fields : undefined }
+
+  // {} совпадает со всем — решаем без чтения документа.
+  if (filters.some(isEmptyFilter)) return decision
+
+  // Документ уже в руках (load, update/remove) — проверяем его.
+  const doc = action === "write" ? ctx.old ?? ctx.obj : ctx.obj ?? ctx.old
+  if (doc !== undefined && doc !== null) {
+    return filters.some((filter) => matchesAccessFilter(doc, filter, ctx.user)) ? decision : undefined
+  }
+
+  // Документа нет (sync) — база отвечает одним запросом сразу с фильтром права.
+  if (typeof ctx.matchAccessFilters === "function") {
+    return (await ctx.matchAccessFilters(filters, ctx.user)) ? decision : undefined
+  }
+  if (typeof ctx.loadDoc === "function") {
+    const loaded = await ctx.loadDoc()
+    return filters.some((filter) => matchesAccessFilter(loaded, filter, ctx.user)) ? decision : undefined
+  }
+  return undefined
+}
+
+// План чтения по user.access: право уходит прямо в Mongo-запрос, чтобы база
+// сама вернула только разрешённые строки и только разрешённые поля.
+// ctx.fields (из хука beforeRead) сужает набор полей поверх права.
+export async function userReadPlan(config, ctx) {
+  // Пользователь уже разрешён вызывающим методом — второй раз не спрашиваем.
+  const user = "user" in ctx ? ctx.user : await resolveUser(config, ctx)
+  const access = user?.access
+  const hookFields = fieldList(ctx.fields)
+  if (!access) return { mode: "none" }
+  if (flag(access.fullaccess)) return { mode: "all", fields: hookFields }
+
+  const entry = access[ctx.table]
+  if (entry == null || typeof entry !== "object") return { mode: "none" }
+
+  const filters = accessFilters(entry.read)
+  if (!filters) return { mode: "none" }
+  const fields = narrowFields(fieldList(entry.read_fields), hookFields)
+
+  if (filters.some(isEmptyFilter)) return { mode: "all", fields }
+  return { mode: "filter", query: accessFiltersQuery(filters, user), fields }
+}
+
+// Хук может только сузить список полей, но не расширить право.
+function narrowFields(accessFields, hookFields) {
+  if (!hookFields) return accessFields
+  if (!accessFields) return hookFields
+  return hookFields.filter((field) => isAllowedField(field, accessFields))
+}
+
+function fieldList(value) {
+  return Array.isArray(value) && value.length > 0 ? value : undefined
+}
+
+// Условие Mongo из фильтров права: один фильтр — как есть, несколько — $or.
+export function accessFiltersQuery(filters, user) {
+  const resolved = filters.map((filter) => resolveFilterForQuery(filter, user))
+  return resolved.length === 1 ? resolved[0] : { $or: resolved }
+}
+
+function resolveFilterForQuery(filter, user) {
+  const out = {}
+  for (const [path, value] of Object.entries(filter)) {
+    out[path] = resolveQueryValue(value, user)
   }
   return out
+}
+
+function resolveQueryValue(value, user) {
+  if (value === "$adminid") return user?._id
+  if (value === "$groupid") return { $in: user?.groups ?? [] }
+  if (Array.isArray(value)) return value.map((item) => resolveQueryValue(item, user))
+  if (value && typeof value === "object") {
+    const out = {}
+    for (const [key, nested] of Object.entries(value)) out[key] = resolveQueryValue(nested, user)
+    return out
+  }
+  return value
+}
+
+// Право — это документ-фильтр. Всё, что не объект, игнорируется:
+// read: false / 0 / "" / 1 — не право, а значит полный запрет.
+function isFilter(filter) {
+  return Boolean(filter) && typeof filter === "object" && !Array.isArray(filter)
+}
+
+// Список фильтров права: объект — один фильтр, массив — any-of.
+// Возвращает undefined, если права нет вообще.
+function accessFilters(value) {
+  if (isFilter(value)) return [value]
+  if (!Array.isArray(value)) return undefined
+
+  const filters = value.filter(isFilter)
+  return filters.length > 0 ? filters : undefined
+}
+
+function isEmptyFilter(filter) {
+  return isFilter(filter) && Object.keys(filter).length === 0
+}
+
+// Quick check for named methods and UI: without a document a filter counts as
+// "has some access"; pass a document (and user for placeholders) to test rows.
+export function accessAllows(access, table, action, doc, user) {
+  if (!access) return false
+  if (flag(access.fullaccess)) return true
+  const entry = access[table]
+  if (entry == null || typeof entry !== "object") return false
+  const filters = accessFilters(entry[action])
+  if (!filters) return false
+  if (filters.some(isEmptyFilter)) return true
+  if (doc === undefined) return true
+  return filters.some((filter) => matchesAccessFilter(doc, filter, user))
+}
+
+export function matchesAccessFilter(doc, filter, user) {
+  if (!filter || typeof filter !== "object" || Array.isArray(filter)) return false
+  const entries = Object.entries(filter)
+  if (entries.length === 0) return true
+  if (!doc) return false
+
+  return entries.every(([path, expected]) => {
+    return valuesMatch(getByPath(doc, path), resolvePlaceholder(expected, user))
+  })
+}
+
+function resolvePlaceholder(expected, user) {
+  if (expected === "$adminid") return user?._id
+  if (expected === "$groupid") return user?.groups ?? []
+  return expected
+}
+
+function valuesMatch(value, expected) {
+  if (Array.isArray(expected)) return expected.some((item) => valuesMatch(value, item))
+  if (Array.isArray(value)) return value.includes(expected)
+  return value === expected
+}
+
+function flag(value) {
+  return value === 1 || value === true
 }
 
 export function assertFieldsAccess(access, paths, label = "Write") {
@@ -59,14 +212,6 @@ export function projectFields(obj, fields) {
   }
 
   return out
-}
-
-export function hasHiddenFields(obj, fields) {
-  if (!obj || !fields) return false
-
-  return objectPaths(obj)
-    .filter((path) => path !== "_id" && path !== "id")
-    .some((path) => !isAllowedField(path, fields))
 }
 
 export function changeWritePaths({ set, unset, obj }) {
@@ -105,77 +250,8 @@ export function filterChangeFields(change, fields) {
   return change
 }
 
-export function hasHiddenChangeFields(change, fields) {
-  if (!fields) return false
-
-  if (change.action === "insert") return hasHiddenFields(change.obj, fields)
-  if (change.action === "delete") return hasHiddenFields(change.old, fields)
-  if (change.action === "update") {
-    return [
-      ...Object.keys(change.set ?? {}),
-      ...(change.unset ?? [])
-    ].some((path) => !isAllowedField(path, fields))
-  }
-
-  return false
-}
-
 export function resolveUser(config, ctx) {
   return config.getUser(ctx)
-}
-
-function codeAccessDecision(access, action, ctx) {
-  const tableRule = access?.[ctx.table]?.[action]
-  const globalRule = access?.[action]
-
-  return Promise.resolve(tableRule?.(ctx)).then((tableDecision) => {
-    if (tableDecision !== undefined && tableDecision !== null) return tableDecision
-    return globalRule?.(ctx)
-  })
-}
-
-async function permissionDecisionFromDb(config, action, ctx) {
-  const rules = ctx.permissionRules ?? await config.mongo
-    .collection(config.permissionTable)
-    .find({ table: ctx.table })
-    .sort({ priority: -1 })
-    .toArray()
-
-  for (const rule of rules) {
-    if (!matchesIf(ctx.obj ?? ctx.old, rule.if)) continue
-    const decision = permissionPartDecision(rule[action], ctx.user)
-    if (decision !== undefined && decision !== null) return decision
-  }
-
-  return undefined
-}
-
-function permissionPartDecision(part, user) {
-  if (!part || !user) return undefined
-
-  const users = part.users ?? []
-  const groups = part.groups ?? []
-  const userMatch = users.includes(user._id)
-  const groupMatch = groups.some((group) => user.groups?.includes(group))
-
-  if (!userMatch && !groupMatch) return undefined
-  if ("action" in part && part.action === false) return { allowed: false }
-  return { allowed: true, fields: part.fields }
-}
-
-function matchesIf(obj, condition) {
-  if (!condition) return true
-  if (!obj) return false
-
-  return Object.entries(condition).every(([path, expected]) => getByPath(obj, path) === expected)
-}
-
-function normalizeDecision(decision) {
-  if (typeof decision === "boolean") return { allowed: decision }
-  if (typeof decision !== "object") return { allowed: Boolean(decision) }
-  if ("action" in decision) return { allowed: decision.action !== false, fields: decision.fields }
-  if ("allowed" in decision) return decision
-  return { allowed: true, fields: decision.fields }
 }
 
 export function isAllowedField(path, fields) {

@@ -60,16 +60,15 @@ await state.order.update({ id: "o1", set: { status: "closed" } })
 //                                          ^ "open" | "closed" — typed
 ```
 
-Service tables (`_user`, `_group`, `_permission`) are typed automatically with sensible defaults and can be overridden in the schema.
+Service tables (`_user`, `_group`) are typed automatically with sensible defaults and can be overridden in the schema.
 
 List service tables explicitly when your UI needs them:
 
 ```js
-createDbState({ tables: ["order", "_user", "_group", "_permission"] })
+createDbState({ tables: ["order", "_user", "_group"] })
 
 state._user.load(userId)
 state._group.getIds()
-state._permission.getIds()
 ```
 
 The server still decides access through the normal permission rules.

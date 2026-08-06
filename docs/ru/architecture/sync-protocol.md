@@ -24,7 +24,7 @@ createdAt <= to
 sessionId != callerSessionId
 ```
 
-`to` - серверное время на момент запроса. Клиент записывает `to` как новый `time1` только после успешного применения всех changes.
+`to` — минимум из серверного времени и `from + 12 часов`. Клиент записывает `to` как новый `time1` только после успешного применения всех changes. При `hasMore: true` он сразу запрашивает следующее окно.
 
 ## RPC shape
 
@@ -37,8 +37,7 @@ sessionId != callerSessionId
   "method": "sync",
   "payload": {
     "from": "2026-05-22T17:30:42.123Z",
-    "sessionId": "u1_abcd",
-    "limit": 1000
+    "sessionId": "u1_abcd"
   }
 }
 ```
@@ -51,17 +50,16 @@ sessionId != callerSessionId
   "id": "rpc1",
   "result": {
     "to": "2026-05-22T17:30:42.456Z",
+    "hasMore": true,
     "changes": []
   },
   "meta": {
-    "accessFiltered": true,
-    "fieldsFiltered": true,
-    "denied": 3
+    "fieldsFiltered": true
   }
 }
 ```
 
-`meta` optional. Он сообщает, что сервер скрыл целые rows/changes (`accessFiltered`) или отдельные поля (`fieldsFiltered`), не меняя форму `result`.
+`meta` optional и содержит только то, что серверу известно и так — ради него ничего не считается. `fieldsFiltered` означает, что действует белый список полей на чтение. Сколько строк или changes скрыли права, сервер не сообщает.
 
 ## Notifications
 
@@ -102,7 +100,7 @@ server -> { type: "dbstate:auth_error", id, error }
 
 ## Permission filtering в sync
 
-Сервер не отдает все log rows вслепую. Для каждой записи он проверяет read access по таблице, пользователю, группам, `if`-условиям и code access rules.
+Сервер не отдает все log rows вслепую. Для каждой записи он проверяет read access по таблице, пользователю и его группам, а хук `beforeRead` может решить раньше.
 
 Field-level read rules фильтруют:
 
@@ -124,9 +122,16 @@ Field-level read rules фильтруют:
 
 `logId` нужен как tie-breaker для записей с одинаковым `createdAt`. Текущая базовая модель использует timestamp window, но индекс `{ createdAt: 1, logId: 1 }` уже готовит путь к continuation cursor.
 
-## Limit handling
+## Временные окна
 
-`syncLimit` должен быть достаточно высоким, чтобы один response покрывал окно `(from, to]`. Если пишешь очень часто, добавь продолжение страницы по `{ createdAt, logId }`, иначе клиент может продвинуть `time1` и пропустить хвост окна.
+Лимит задаётся временем, а не количеством строк:
+
+- один response покрывает не более 12 часов;
+- сервер обрабатывает все подходящие изменения внутри окна;
+- `hasMore: true` запускает следующее 12-часовое окно;
+- cursor старше 20 дней получает `{ reset: true, to, changes: [] }`.
+
+При reset Vue-клиент очищает persistent и reactive cache, сохраняя авторизацию, перечитывает активные объекты/count/id queries и затем ещё раз синхронизируется от `to`.
 
 ## Echo suppression
 
@@ -134,7 +139,7 @@ Field-level read rules фильтруют:
 
 ## Force resync
 
-`dbstate:force_resync` используется после bulk import, миграций или ручной правки log/cache. Клиент должен сбросить `time1` и выполнить полный sync. Это дорогая операция, поэтому ее не стоит использовать как обычный refresh.
+`dbstate:force_resync` используется после bulk import, миграций или ручной правки log/cache. Клиент сбрасывает `time1`; сервер отвечает reset-маркером, после чего клиент очищает cache и перечитывает текущее состояние вместо воспроизведения всего журнала.
 
 ## Background safety sync
 
@@ -158,4 +163,4 @@ state.onChange((change) => {
 })
 ```
 
-Для типичных проблем смотри `state.sync.status`, `state.sync.time1`, `state.auth.status`, network frames и `meta.accessFiltered`.
+Для типичных проблем смотри `state.sync.status`, `state.sync.time1`, `state.auth.status` и network frames.

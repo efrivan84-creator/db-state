@@ -21,7 +21,7 @@
 import { createDbState } from "@db-state/vue"
 
 export const state = createDbState({
-  tables: ["order", "user", "_permission"],
+  tables: ["order", "_user", "_group"],
   wsUrl: "ws://127.0.0.1:8788/db-state/ws"
 })
 ```
@@ -108,26 +108,33 @@ Diff-based save уменьшает конфликтность и лучше ра
 
 ## Server permissions
 
+Права — объекты `access` на группах, сидируются сами группы:
+
 ```js
-await mongo.collection("_permission").insertMany([
+await mongo.collection("_group").insertMany([
   {
-    _id: "perm_order_admin",
-    table: "order",
-    priority: 10,
-    read: { groups: ["admin"], action: true },
-    write: { groups: ["admin"], action: true }
+    _id: "admin",
+    name: "Администраторы",
+    access: {
+      order:  { read: {}, write: {} },
+      _user:  { read: {}, write: {} },
+      _group: { read: {}, write: {} }
+    }
   },
   {
-    _id: "perm_order_manager",
-    table: "order",
-    priority: 5,
-    read: { groups: ["manager"], fields: ["_id", "status", "total"], action: true },
-    write: { groups: ["manager"], fields: ["status"], action: true }
+    _id: "manager",
+    name: "Менеджеры",
+    access: {
+      order: {
+        read: {}, read_fields: ["status", "total"],
+        write: {}, write_fields: ["status"]
+      }
+    }
   }
 ])
 ```
 
-UI может скрывать поля, но безопасность обеспечивает только сервер.
+Админка редактирует `access` прямо во вкладке групп (удобен JSON-редактор — см. demo2). Изменения применяются при следующем логине/reconnect пользователя. UI может скрывать поля, но безопасность обеспечивает только сервер.
 
 ## Refresh button
 
@@ -143,7 +150,7 @@ async function refresh() {
 
 - `state` singleton.
 - Mongo indexes под все table queries.
-- `_permission` seed для каждой таблицы.
+- `access` на группах для каждой таблицы.
 - Diff-based save вместо отправки всего документа.
 - Loading keys для крупных страниц.
 - Error states на форму.

@@ -183,13 +183,11 @@ The library defaults to PBKDF2 on the server. If you want different hashing (bcr
 
 ## Anonymous reads
 
-If you have permissions that allow anonymous reads (e.g. public catalog):
+The default RPC handler rejects unauthenticated calls with `"Unauthorized"`. For a public catalog the simplest approach is a dedicated `_user` row (e.g. `_id: "anonymous"`) whose group grants read-only access:
 
 ```js
-// _permission row:
-{ table: "product", read: { users: ["__anonymous__"] } }
+// _group row:
+{ _id: "public", access: { product: { read: {} } } }
 ```
 
-— then the client can call RPCs **without** logging in. But the default RPC handler rejects unauthenticated calls with `"Unauthorized"`. To allow it, you need a custom RPC dispatcher (see [server/api-reference.md](../server/api-reference.md#custom-handlers)) or a server middleware that injects an anonymous user.
-
-For most apps the simpler approach is to have a `_user._id = "anonymous"` row and log in to it automatically on first visit.
+— and log in to it automatically on first visit.

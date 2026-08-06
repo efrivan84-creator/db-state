@@ -187,39 +187,36 @@ Access is denied by default. The server checks every RPC:
 ```text
 code rule for table: access[table].read/write
   -> global code rule: access.read/write
-  -> _permission rules
+  -> user.access (merged from the user's groups at login)
   -> deny
 ```
 
-Permission rows live in `_permission`:
+Rights are `access` objects stored on groups (`_group`):
 
 ```js
 {
-  _id: "perm_order_manager",
-  table: "order",
-  priority: 10,
-  if: { status: "open" },
-
-  read: {
-    groups: ["manager"],
-    fields: ["_id", "status", "total"],
-    action: true
-  },
-
-  write: {
-    groups: ["admin"],
-    fields: ["status", "comment"],
-    action: true
+  _id: "manager",
+  name: "Order managers",
+  access: {
+    order: {
+      read: { status: "open" },            // row filter; {} = all rows
+      read_fields: ["status", "total"],    // field whitelist for reads
+      write: {},                           // {} = edit any row
+      write_fields: ["status", "comment"]  // field whitelist for writes
+    },
+    fullaccess: 1                          // the only flag: access to everything
   }
 }
 ```
 
+At login the server merges the `access` of the user's groups into `user.access` and returns it to the client. Filter values support `"$adminid"` (the user's id) and `"$groupid"` (any of their groups). Filters are evaluated by the database itself: lists and `count` get the access condition merged into the Mongo query, `load` and `sync` check with a single filtered `findOne`.
+
 Field rules are enforced on the server:
 
-- `read.fields` projects `load()`, `getUnique()`, and sync changes.
-- `write.fields` validates `add()` and `update()`.
-- `write` controls insert, update, and delete.
-- Delete log rows store `old`, so audit and permission checks still work after the source document is gone.
+- `read_fields` projects `load()` (Mongo projection), `getUnique()`, and sync changes.
+- `write_fields` validates `add()` and `update()`; a patch touching another field is rejected.
+- `write` covers insert, update, and delete.
+- Delete log rows store `old`, so audit and access checks still work after the source document is gone.
 
 For rules that cannot be expressed declaratively, use code access hooks. They can decide from the user/table/log entry or lazily call `ctx.loadDoc()` only when the document is needed.
 
@@ -284,7 +281,6 @@ Recommended MongoDB indexes:
 
 ```js
 await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
-await mongo.collection("_permission").createIndex({ table: 1, priority: -1 })
 await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 ```
 
@@ -379,6 +375,6 @@ viewer / viewer    // demo2
 
 ## Project status
 
-Early release, `0.0.x`. The API is intentionally small, but still pre-1.0. See [CHANGELOG.md](CHANGELOG.md) for release notes and current limitations.
+Current release line: `0.1.0`. The API is intentionally small and still pre-1.0, so breaking changes remain possible before `1.0`. See [CHANGELOG.md](CHANGELOG.md) for release notes and current limitations.
 
 License: MIT.

@@ -1,10 +1,11 @@
 import type { BaseDoc, Change, Filter, ListQuery, UpdatePatch } from "@db-state/core"
-import type { AccessConfig, AccessUser } from "./access"
+import type { AccessUser } from "./access"
 import type { AuthRateLimitContext, AuthWarning, PasswordHasher } from "./auth"
 import type { RpcHandler } from "./rpc"
 import type { SocketHub } from "./socket"
 
-export type { AccessConfig, AccessContext, AccessDecision, AccessRule, AccessUser, ServerPermissionRule, PermissionPart } from "./access"
+export type { AccessContext, AccessDecision, AccessFilter, AccessTableEntry, AccessUser, UserAccess } from "./access"
+export { accessAllows, matchesAccessFilter } from "./access"
 export type { PasswordHasher, AuthHandlers, LoginMessage, AuthMessage, LogoutMessage, AuthRateLimitContext, AuthWarning } from "./auth"
 export type { BroadcastOptions, ClientMeta, DetachClient, SocketAdapter, SocketClient, SocketHub } from "./socket"
 export type { RpcHandler, RpcMeta, RpcRequest, RpcRouter } from "./rpc"
@@ -24,8 +25,9 @@ export interface MongoCursorLike<T = unknown> {
 
 /** Minimum subset of a Mongo collection used by the library. */
 export interface MongoCollectionLike<T = unknown> {
-  findOne(filter?: Record<string, unknown>): Promise<T | null>
-  find(filter?: Record<string, unknown>): MongoCursorLike<T>
+  findOne(filter?: Record<string, unknown>, options?: { projection?: Record<string, 0 | 1> }): Promise<T | null>
+  find(filter?: Record<string, unknown>, options?: { projection?: Record<string, 0 | 1> }): MongoCursorLike<T>
+  countDocuments?(filter?: Record<string, unknown>): Promise<number>
   insertOne(doc: T): Promise<{ insertedId: unknown }>
   insertMany?(docs: T[]): Promise<{ insertedCount: number }>
   updateOne(
@@ -60,10 +62,11 @@ export interface DbStateServerConfig {
   /** Tables exposed through CRUD/RPC. Service tables must be listed explicitly when you want to expose them. */
   tables: ReadonlyArray<string>
 
-  /** Optional code-level access rules; checked before `_permission` rows. */
-  access?: AccessConfig
-
-  /** Optional lifecycle hooks around server reads and writes. */
+  /**
+   * Lifecycle hooks around server reads and writes. Declared once per name for
+   * the whole server; a `before*` hook may also allow or deny the request.
+   * Permissions themselves live in the `access` object of the user's groups.
+   */
   hooks?: ServerHooks
 
   /**
@@ -106,14 +109,11 @@ export interface DbStateServerConfig {
   /** Name of the log collection. Default `"log"`. */
   logCollection?: string
 
-  /** Prefix for service collections (`"cfg"` -> `cfg_user`, `cfg_group`, `cfg_permission`, `cfg_log`). */
+  /** Prefix for service collections (`"cfg"` -> `cfg_user`, `cfg_group`, `cfg_log`). */
   servicePrefix?: string
 
   /** Alias for `servicePrefix`. */
   prefix?: string
-
-  /** Name of the permissions table. Default `"_permission"`. */
-  permissionTable?: string
 
   /** Name of the users table. Default `"_user"`. */
   userTable?: string
@@ -138,9 +138,6 @@ export interface DbStateServerConfig {
 
   /** Returns the current ISO timestamp. Default: `new Date().toISOString()`. */
   now?: () => string
-
-  /** Maximum number of changes returned by a single `sync`. Default `1000`. */
-  syncLimit?: number
 
   /** Optional out-of-process broadcast adapter (e.g. Redis pubsub). */
   socket?: import("./socket").SocketAdapter
@@ -171,9 +168,15 @@ export interface ServerHookContext<T extends BaseDoc = BaseDoc> {
   skip?: number
   limit?: number
   field?: string
+  /**
+   * Field whitelist for this request. `beforeRead` may set it to narrow the
+   * returned fields; it can only narrow the group's `read_fields`.
+   */
+  fields?: string[]
   from?: string
   to?: string
   sessionId?: string
+  actorId?: string
   now?: string
   rows?: T[]
   change?: Change<T>
@@ -181,10 +184,34 @@ export interface ServerHookContext<T extends BaseDoc = BaseDoc> {
   error?: Error
 }
 
-export type ServerHook<T extends BaseDoc = BaseDoc> =
-  (ctx: ServerHookContext<T>) => void | Promise<void>
+/**
+ * What a hook may return:
+ * - `false` / `{ allowed: false, reason }` — deny; the chain stops and the
+ *   reason (when given) is sent to the client instead of the generic message;
+ * - `true` / `{ allowed: true }` — allow; the user's group access is skipped;
+ * - `undefined` / `null` — no decision; the user's group access decides.
+ *
+ * Mutations of `ctx` apply regardless of the returned value, so a hook can
+ * rewrite the query and still leave the decision to the group access.
+ *
+ * `afterWrite` runs after the document, the change log and the broadcast are
+ * already committed, so denying from it has no effect.
+ */
+export type ServerHookDecision =
+  | boolean
+  | { allowed: boolean; reason?: string }
+  | void
+  | null
+  | undefined
 
-export interface ServerHookSet<T extends BaseDoc = BaseDoc> {
+export type ServerHook<T extends BaseDoc = BaseDoc> =
+  (ctx: ServerHookContext<T>) => ServerHookDecision | Promise<ServerHookDecision>
+
+/**
+ * Hooks are declared once per name for the whole server; branch on `ctx.table`
+ * inside the hook when a rule applies to one table only.
+ */
+export interface ServerHooks<T extends BaseDoc = BaseDoc> {
   beforeRead?: ServerHook<T>
   afterRead?: ServerHook<T>
   errorRead?: ServerHook<T>
@@ -193,13 +220,13 @@ export interface ServerHookSet<T extends BaseDoc = BaseDoc> {
   errorWrite?: ServerHook<T>
 }
 
-export type ServerHooks =
-  ServerHookSet & Record<string, ServerHookSet | ServerHook | undefined>
-
 export interface DbStateServerModule {
   table?: string
   tables?: ReadonlyArray<string>
-  access?: AccessConfig
+  /**
+   * Module hooks run before the application's hook of the same name; the first
+   * explicit decision stops the chain.
+   */
   hooks?: ServerHooks
   methods?: Record<string, RpcHandler>
   bind?(context: {
@@ -264,7 +291,6 @@ export interface CountRequest<T extends BaseDoc = BaseDoc> extends RequestContex
 
 export interface SyncRequest extends RequestContext {
   from: string
-  limit?: number
 }
 
 export interface MutationResult<T extends BaseDoc = BaseDoc> {
@@ -278,6 +304,10 @@ export interface SyncResult {
   to: string
   /** Permission-filtered list of changes the caller may see. */
   changes: Change[]
+  /** More 12-hour windows are waiting; the client should call `sync` again immediately. */
+  hasMore?: true
+  /** The cursor is over 20 days old; discard local data and reload current state. */
+  reset?: true
 }
 
 /** Object returned by {@link createDbStateServer}. */
@@ -302,7 +332,7 @@ export interface DbStateServer {
   /** Deletes a document, appends to the log, and broadcasts the change. */
   remove<T extends BaseDoc>(input: RemoveRequest): Promise<MutationResult<T>>
 
-  /** Returns log entries after `from` filtered by the caller's read access. */
+  /** Returns the next <=12-hour log window, or a reset marker when `from` is over 20 days old. */
   sync(input: SyncRequest): Promise<SyncResult>
 
   /**

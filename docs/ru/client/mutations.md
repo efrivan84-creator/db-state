@@ -17,7 +17,7 @@ const result = await state.order.add({
 Сервер:
 
 1. Удаляет client-supplied `info`.
-2. Проверяет `write` и `write.fields`.
+2. Проверяет `write` и `write_fields`.
 3. Добавляет `info.makeid` и `info.makedata`.
 4. Вставляет документ в MongoDB.
 5. Пишет `insert` change в log.
@@ -62,7 +62,7 @@ await state.order.update({ id: draft._id, set })
 
 ### Permissions
 
-`write.fields` проверяет каждое поле в `set`, `unset` и insert object. Если хотя бы одно поле запрещено, вся операция отклоняется.
+`write_fields` проверяет каждое поле в `set`, `unset` и insert object. Если хотя бы одно поле запрещено, вся операция отклоняется.
 
 ## `remove`
 
