@@ -32,7 +32,7 @@ test("setByPath creates nested objects and getByPath reads them", () => {
 test("applyChange updates, inserts, and deletes table records", () => {
   const tables = {
     user: {
-      u1: { id: "u1", name: "Ivan", profile: { city: "Moscow" } }
+      u1: { _id: "u1", name: "Ivan", profile: { city: "Moscow" } }
     }
   }
 
@@ -47,7 +47,7 @@ test("applyChange updates, inserts, and deletes table records", () => {
     table: "user",
     id: "u2",
     action: "insert",
-    obj: { id: "u2", name: "Pavel" }
+    obj: { _id: "u2", name: "Pavel" }
   })
 
   applyChange(tables, {
@@ -58,7 +58,23 @@ test("applyChange updates, inserts, and deletes table records", () => {
 
   assert.deepEqual(tables, {
     user: {
-      u2: { id: "u2", name: "Pavel" }
+      u2: { _id: "u2", name: "Pavel" }
+    }
+  })
+})
+
+test("applyChange keys records by _id when the change carries no object", () => {
+  const tables = {}
+
+  // insert без obj и update по отсутствующей записи — обе ветки создают
+  // документ сами; ключ должен быть _id, как требует BaseDoc.
+  applyChange(tables, { table: "order", id: "o1", action: "insert" })
+  applyChange(tables, { table: "order", id: "o2", action: "update", set: { status: "new" } })
+
+  assert.deepEqual(tables, {
+    order: {
+      o1: { _id: "o1" },
+      o2: { _id: "o2", status: "new" }
     }
   })
 })

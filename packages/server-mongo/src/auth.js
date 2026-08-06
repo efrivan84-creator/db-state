@@ -41,7 +41,7 @@ export function createAuth(config) {
         )
       }
 
-      attachUser(client, { ...user, hash })
+      attachUser(client, { ...user, hash }, config)
       client.user.access = await mergeUserAccess(config, user)
       send(client, DB_STATE_MESSAGES.loginResult, message.id, {
         ok: true,
@@ -70,7 +70,7 @@ export function createAuth(config) {
         return
       }
 
-      attachUser(client, user)
+      attachUser(client, user, config)
       client.user.access = await mergeUserAccess(config, user)
       send(client, DB_STATE_MESSAGES.authResult, message.id, {
         ok: true,
@@ -229,15 +229,25 @@ async function isRateLimited(config, ctx) {
   return await config.authRateLimit(ctx) === false
 }
 
-function attachUser(client, user) {
+function attachUser(client, user, config) {
   client.user = {
     _id: user._id,
-    login: user.login,
+    login: userLogin(user, config),
     groups: user.groups ?? [],
     emailVerified: user.emailVerified,
     phoneVerified: user.phoneVerified
   }
   client.userId = user._id
+}
+
+// Пользователь может входить по любому из authLoginFields — берём первое
+// заполненное поле, чтобы клиент показал, под кем вошли.
+function userLogin(user, config) {
+  for (const field of config?.authLoginFields ?? ["login"]) {
+    if (user[field]) return String(user[field])
+  }
+
+  return user.login ?? undefined
 }
 
 function send(client, type, id, payload) {

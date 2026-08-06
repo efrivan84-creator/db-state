@@ -220,6 +220,73 @@ test("delete log stores old document and compact actor id", async () => {
   assert.equal("user" in log, false)
 })
 
+test("legacy id is used as the key but never stored in the document", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    now: () => "2026-05-21T10:00:01.000Z",
+    createLogId: () => "log1"
+  })
+
+  const result = await server.add({
+    table: "order",
+    obj: { id: "o1", status: "новый" },
+    req: adminReq()
+  })
+
+  assert.equal(result.id, "o1")
+  assert.deepEqual(await mongo.collection("order").findOne({ _id: "o1" }), {
+    _id: "o1",
+    status: "новый",
+    info: { makeid: "u-admin", makedata: "2026-05-21T10:00:01.000Z" }
+  })
+})
+
+test("login result carries the login field the user signed in with", async () => {
+  const mongo = createMemoryMongo()
+  await mongo.collection("_user").insertOne({
+    _id: "u1",
+    email: "ivan@example.com",
+    passwordHash: "demo:secret",
+    hash: "h1",
+    groups: []
+  })
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    authLoginFields: ["login", "email"],
+    password: {
+      hash: async (password) => `demo:${password}`,
+      verify: async (password, stored) => stored === `demo:${password}`
+    }
+  })
+  const sent = []
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, {})
+
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:login",
+    id: "L1",
+    login: "ivan@example.com",
+    password: "secret"
+  }))
+
+  // У пользователя нет поля login — подставляется email, по которому он вошёл.
+  const login = sent.find((message) => message.id === "L1")
+  assert.equal(login.type, "dbstate:login_result")
+  assert.equal(login.login, "ivan@example.com")
+
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:auth",
+    id: "A1",
+    userId: "u1",
+    hash: "h1"
+  }))
+
+  assert.equal(sent.find((message) => message.id === "A1").login, "ivan@example.com")
+})
+
 test("add strips client info and writes server create info", async () => {
   const mongo = createMemoryMongo()
   const server = createDbStateServer({

@@ -140,7 +140,10 @@ export function createDbStateServer(options) {
     return runWrite(ctx, {
       prepare: async () => {
         ctx.id = obj._id ?? obj.id ?? config.createLogId()
-        ctx.clientObj = stripInfoObject(obj)
+        // id принимается как источник ключа, но в документ не попадает:
+        // ключ документа — только _id.
+        const { id, ...clientObj } = stripInfoObject(obj)
+        ctx.clientObj = clientObj
         ctx.obj = {
           ...ctx.clientObj,
           _id: ctx.id,
@@ -151,7 +154,8 @@ export function createDbStateServer(options) {
         }
       },
       apply: () => {
-        ctx.id = ctx.id ?? ctx.obj._id ?? ctx.obj.id
+        // Хук мог подменить документ целиком — берём его _id, если он задан.
+        ctx.id = ctx.obj._id ?? ctx.id
         ctx.obj._id = ctx.id
       },
       paths: () => changeWritePaths({ obj: ctx.clientObj }),

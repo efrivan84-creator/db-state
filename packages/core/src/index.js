@@ -98,13 +98,13 @@ export function applyChange(tables, change) {
   }
 
   if (change.action === "insert") {
-    table[change.id] = clone(change.obj ?? { id: change.id })
+    table[change.id] = clone(change.obj ?? { _id: change.id })
     return
   }
 
   if (change.action === "update") {
     if (!table[change.id]) {
-      table[change.id] = { id: change.id }
+      table[change.id] = { _id: change.id }
     }
 
     applyPatch(table[change.id], change)
