@@ -64,7 +64,7 @@ It does **not** give you any seeded data — you must add a user and a group wit
 The library doesn't create indices automatically. For a healthy production server:
 
 ```js
-await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await mongo.collection("log").createIndex({ createdAt: 1, _id: 1 })
 ```
 
 With `servicePrefix: "cfg"`, create the same index on `cfg_log`.

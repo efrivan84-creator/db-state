@@ -15,7 +15,7 @@ Append-only log - центральный механизм sync, аудита и 
 
 ```js
 {
-  logId: "log_1",
+  _id: "log_1",
   createdAt: "2026-05-22T10:00:00.000Z",
   table: "order",
   id: "o1",
@@ -53,7 +53,7 @@ Update log хранит только patch:
 ```js
 {
   action: "update",
-  set: { status: "closed", "info.editid": "u1" },
+  set: { status: "closed" },
   unset: ["draft"]
 }
 ```
@@ -76,7 +76,7 @@ Delete log хранит old document:
 ## Обязательные индексы
 
 ```js
-await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await mongo.collection("log").createIndex({ createdAt: 1, _id: 1 })
 ```
 
 Для audit views полезны:
@@ -95,7 +95,7 @@ Sync не отдает log rows, которые пользователь не и
 Чтобы восстановить документ на момент времени:
 
 1. Найди все changes для `table/id` с `createdAt <= targetTime`.
-2. Отсортируй по `{ createdAt, logId }`.
+2. Отсортируй по `{ createdAt, _id }`.
 3. Примени `insert`, `update`, `delete` по порядку.
 
 Пример:

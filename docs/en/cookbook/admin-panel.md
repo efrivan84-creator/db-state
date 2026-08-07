@@ -218,7 +218,7 @@ async function refreshTable(table) {
 
 ## Production checklist
 
-- Create indexes: `log({ createdAt: 1, logId: 1 })` plus normal Mongo indexes for fields used in access filters.
+- Create indexes: `log({ createdAt: 1, _id: 1 })` plus normal Mongo indexes for fields used in access filters.
 - Keep `state` as a singleton.
 - Prefer `listRef` for tables and `load(id)` for details.
 - Keep drafts separate from database docs.

@@ -56,7 +56,7 @@ const dbState = createDbStateServer({
 ## Обязательные индексы MongoDB
 
 ```js
-await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await mongo.collection("log").createIndex({ createdAt: 1, _id: 1 })
 ```
 
 С `servicePrefix: "cfg"` используй соответственно `cfg_log`.

@@ -18,7 +18,7 @@ All writes are normalized into a `Change`:
 
 ```js
 {
-  logId: "uuid-or-custom-id",
+  _id: "uuid-or-custom-id",
   createdAt: "2026-05-22T17:30:42.456Z",
   table: "order",
   id: "o1",
@@ -104,7 +104,7 @@ This is required for:
 Create the sync index:
 
 ```js
-await db.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await db.collection("log").createIndex({ createdAt: 1, _id: 1 })
 ```
 
 The sync query is:
@@ -115,7 +115,7 @@ db.collection("log")
     createdAt: { $gt: from, $lte: to },
     sessionId: { $ne: currentSessionId }
   })
-  .sort({ createdAt: 1, logId: 1 })
+  .sort({ createdAt: 1, _id: 1 })
 ```
 
 `to` covers at most 12 hours after `from`; the client follows `hasMore` windows until caught up. Cursors older than 20 days receive a cache-reset marker instead of a historical replay.
@@ -144,7 +144,7 @@ If an update contains no allowed fields after projection, it is dropped from the
 To reconstruct a document at a point in time:
 
 1. Find log entries for `{ table, id }` with `createdAt <= targetTime`.
-2. Sort by `{ createdAt: 1, logId: 1 }`.
+2. Sort by `{ createdAt: 1, _id: 1 }`.
 3. Apply changes in order:
    - `insert`: replace state with `obj`;
    - `update`: apply `set` and `unset`;
@@ -158,7 +158,7 @@ import { applyPatch } from "@db-state/core"
 async function documentAt(db, table, id, at) {
   const changes = await db.collection("log")
     .find({ table, id, createdAt: { $lte: at } })
-    .sort({ createdAt: 1, logId: 1 })
+    .sort({ createdAt: 1, _id: 1 })
     .toArray()
 
   let doc = null
@@ -203,4 +203,4 @@ If you prune aggressively, have a fallback:
 - emit `dbstate:force_resync`;
 - or rebuild from a server snapshot.
 
-For most admin tools, keeping the log for months or years is practical with the `{ createdAt, logId }` index.
+For most admin tools, keeping the log for months or years is practical with the `{ createdAt, _id }` index.

@@ -130,7 +130,10 @@ export function createDbStateServer(options) {
           table,
           id,
           action: "update",
-          set: ctx.set,
+          // info.editid / info.editdata в журнал не пишем: кто и когда —
+          // это userId и createdAt самой записи журнала, теми же значениями.
+          // В документе info остаётся, там оно читается вместе с записью.
+          set: stripInfoSet(ctx.set),
           unset: ctx.unset?.length ? ctx.unset : undefined,
           sessionId,
           userId: ctx.actorId,
@@ -348,12 +351,11 @@ export function createDbStateServer(options) {
           createdAt: { $gt: readCtx.from, $lte: readCtx.to },
           ...(readCtx.sessionId ? { sessionId: { $ne: readCtx.sessionId } } : {})
         })
-        .sort({ createdAt: 1, logId: 1 })
+        .sort({ createdAt: 1, _id: 1 })
         .toArray()
 
       const allowed = []
-      for (const row of changes) {
-        const change = publicChange(row)
+      for (const change of changes) {
         let didLoadDoc = change.action === "delete"
         const ctx = {
           req,
@@ -446,17 +448,12 @@ function createSyncWindow(from, now) {
 async function appendLog(config, change) {
   const item = createChange({
     ...change,
-    logId: config.createLogId(),
+    _id: config.createLogId(),
     createdAt: change.createdAt ?? config.now()
   })
 
-  await config.mongo.collection(config.logCollection).insertOne({ _id: item.logId, ...item })
+  await config.mongo.collection(config.logCollection).insertOne(item)
   return item
-}
-
-function publicChange(change) {
-  const { _id, ...rest } = change
-  return rest
 }
 
 function getDoc(config, table, id) {

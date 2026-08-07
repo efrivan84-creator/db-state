@@ -71,19 +71,18 @@ test("sync reads complete twelve-hour windows and tells the client when more tim
     now: () => "2026-05-02T00:00:00.000Z"
   })
   const log = mongo.collection("log")
-  for (const [logId, createdAt] of [
+  for (const [changeId, createdAt] of [
     ["log1", "2026-05-01T06:00:00.000Z"],
     ["log2", "2026-05-01T11:59:59.999Z"],
     ["log3", "2026-05-01T18:00:00.000Z"]
   ]) {
     await log.insertOne({
-      _id: logId,
-      logId,
+      _id: changeId,
       createdAt,
       table: "order",
-      id: logId,
+      id: changeId,
       action: "insert",
-      obj: { _id: logId }
+      obj: { _id: changeId }
     })
   }
   const req = { user: { _id: "u1", access: { fullaccess: 1 } } }
@@ -454,11 +453,11 @@ test("update strips client info and writes server edit info", async () => {
       editdata: "2026-05-21T10:00:01.000Z"
     }
   })
-  assert.deepEqual(result.change.set, {
-    status: "done",
-    "info.editid": "u-admin",
-    "info.editdata": "2026-05-21T10:00:01.000Z"
-  })
+  // В журнале только изменённые данные: кто и когда — это userId и createdAt
+  // самой записи журнала, дублировать их через info не нужно.
+  assert.deepEqual(result.change.set, { status: "done" })
+  assert.equal(result.change.userId, "u-admin")
+  assert.equal(result.change.createdAt, "2026-05-21T10:00:01.000Z")
   assert.equal(result.change.unset, undefined)
 })
 
@@ -503,7 +502,8 @@ test("internal writes without a user use system actor metadata", async () => {
   assert.equal(add.change.userId, "system")
   assert.equal(add.change.obj.info.makeid, "system")
   assert.equal(update.change.userId, "system")
-  assert.equal(update.change.set["info.editid"], "system")
+  // info в журнал не пишется — автор берётся из userId записи журнала.
+  assert.equal(update.change.set["info.editid"], undefined)
 })
 
 test("socket hub exposes custom events without sending reserved dbstate messages from users", () => {
@@ -1404,7 +1404,7 @@ test("read fields project load and sync changes", async () => {
 
   assert.deepEqual(sync.changes, [
     {
-      logId: "log1",
+      _id: "log1",
       createdAt: "2026-05-21T10:00:01.000Z",
       table: "order",
       id: "o1",
@@ -1417,7 +1417,7 @@ test("read fields project load and sync changes", async () => {
       userId: "u-admin"
     },
     {
-      logId: "log2",
+      _id: "log2",
       createdAt: "2026-05-21T10:00:02.000Z",
       table: "order",
       id: "o1",

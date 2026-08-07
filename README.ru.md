@@ -139,7 +139,7 @@ client update()
 
 ```js
 {
-  logId,
+  _id,
   createdAt,
   table: "order",
   id: "o1",
@@ -280,7 +280,7 @@ new WebSocketServer({ port: 8788, path: "/db-state/ws" })
 Рекомендуемые индексы MongoDB:
 
 ```js
-await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await mongo.collection("log").createIndex({ createdAt: 1, _id: 1 })
 await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 ```
 
@@ -375,6 +375,6 @@ viewer / viewer    // demo2
 
 ## Статус проекта
 
-Текущая версия: `0.1.4`. API намеренно маленький и всё ещё pre-1.0, поэтому до `1.0` возможны ломающие изменения. Изменения и актуальные ограничения вынесены в [CHANGELOG.ru.md](CHANGELOG.ru.md).
+Текущая версия: `0.2.0`. API намеренно маленький и всё ещё pre-1.0, поэтому до `1.0` возможны ломающие изменения. Изменения и актуальные ограничения вынесены в [CHANGELOG.ru.md](CHANGELOG.ru.md).
 
 Лицензия: MIT.

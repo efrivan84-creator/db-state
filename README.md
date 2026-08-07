@@ -139,7 +139,7 @@ Every write creates one immutable log row:
 
 ```js
 {
-  logId,
+  _id,
   createdAt,
   table: "order",
   id: "o1",
@@ -280,7 +280,7 @@ new WebSocketServer({ port: 8788, path: "/db-state/ws" })
 Recommended MongoDB indexes:
 
 ```js
-await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await mongo.collection("log").createIndex({ createdAt: 1, _id: 1 })
 await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 ```
 
@@ -375,6 +375,6 @@ viewer / viewer    // demo2
 
 ## Project status
 
-Current release line: `0.1.4`. The API is intentionally small and still pre-1.0, so breaking changes remain possible before `1.0`. See [CHANGELOG.md](CHANGELOG.md) for release notes and current limitations.
+Current release line: `0.2.0`. The API is intentionally small and still pre-1.0, so breaking changes remain possible before `1.0`. See [CHANGELOG.md](CHANGELOG.md) for release notes and current limitations.
 
 License: MIT.

@@ -75,7 +75,7 @@ The Node server.
       - Checks `user.access.order.write` (merged from the user's groups at login): the row filter against the existing document.
       - Validates every dot-path in `set`/`unset` against `write_fields`.
    4. `mongo.collection("order").updateOne({ _id: "o1" }, { $set: ... })`.
-   5. Appends to `log` collection: `{ logId, createdAt, table: "order", id: "o1", action: "update", set, unset, userId, sessionId }`.
+   5. Appends to `log` collection: `{ _id, createdAt, table: "order", id: "o1", action: "update", set, unset, userId, sessionId }`.
    6. Schedules a debounced/rate-limited `{ type: "dbstate:changes_available" }` broadcast to all sockets, including the writer.
    7. Sends `{ type: "dbstate:rpc_result", id: "rpc1", result: { ok: true, change } }` back to the originator.
 4. **Client (originator)**: receives `rpc_result`, runs `applyChange(change)` locally → reactive store and IndexedDB updated → `countRef`/`idsRef` for the table are debounce-scheduled for refresh.

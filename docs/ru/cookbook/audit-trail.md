@@ -8,7 +8,7 @@ db-state уже пишет append-only log для каждой успешной 
 
 ```js
 {
-  logId,
+  _id,
   createdAt,
   table,
   id,
@@ -32,7 +32,7 @@ await mongo.collection("log").createIndex({ table: 1, id: 1, createdAt: -1 })
 await mongo.collection("log").createIndex({ userId: 1, createdAt: -1 })
 ```
 
-Основной sync index `{ createdAt: 1, logId: 1 }` тоже обязателен.
+Основной sync index `{ createdAt: 1, _id: 1 }` тоже обязателен.
 
 ## Recent activity feed
 
@@ -51,7 +51,7 @@ const rows = await mongo.collection("log")
 ```js
 const history = await mongo.collection("log")
   .find({ table: "order", id: "o1" })
-  .sort({ createdAt: -1, logId: -1 })
+  .sort({ createdAt: -1, _id: -1 })
   .limit(100)
   .toArray()
 ```
@@ -92,7 +92,7 @@ function describe(change) {
 ```js
 const changes = await mongo.collection("log")
   .find({ table, id, createdAt: { $lte: targetTime } })
-  .sort({ createdAt: 1, logId: 1 })
+  .sort({ createdAt: 1, _id: 1 })
   .toArray()
 ```
 

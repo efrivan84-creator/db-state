@@ -57,7 +57,7 @@ dbState.socket.addClient(ws, {
 В production создай:
 
 ```js
-await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await mongo.collection("log").createIndex({ createdAt: 1, _id: 1 })
 ```
 
 Для запросов приложения добавляй обычные Mongo-индексы под `getIds`, `count`, `getUnique`:
@@ -445,7 +445,7 @@ beforeWrite  afterWrite  errorWrite
 }
 ```
 
-Эти поля сохраняются в MongoDB и append-only log, поэтому клиент не может подделать create/edit metadata.
+Эти поля сохраняются в документе MongoDB, поэтому клиент не может подделать create/edit metadata. В журнал они не пишутся: кто и когда — это `userId` и `createdAt` самой записи журнала.
 
 ## Sync и audit log
 
@@ -453,7 +453,7 @@ beforeWrite  afterWrite  errorWrite
 
 ```js
 {
-  logId,
+  _id,
   createdAt,
   table,
   id,

@@ -17,7 +17,7 @@ const result = await state.order.add({
 
 // result.ok === true
 // result.id === "o_..."
-// result.change === { logId, createdAt, table, id, action: "insert", obj, sessionId, userId }
+// result.change === { _id, createdAt, table, id, action: "insert", obj, sessionId, userId }
 ```
 
 Notes:

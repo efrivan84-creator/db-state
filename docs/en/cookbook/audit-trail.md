@@ -8,7 +8,7 @@ Every write creates one entry in `log`:
 
 ```js
 {
-  logId: "77c1...",
+  _id: "77c1...",
   createdAt: "2026-05-22T17:30:42.456Z",
   table: "order",
   id: "o1",
@@ -38,7 +38,7 @@ The log stores `userId`, not a full user snapshot. Join to `_user` when you need
 Use at least:
 
 ```js
-await db.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await db.collection("log").createIndex({ createdAt: 1, _id: 1 })
 await db.collection("log").createIndex({ table: 1, id: 1, createdAt: -1 })
 await db.collection("log").createIndex({ userId: 1, createdAt: -1 })
 ```
@@ -51,7 +51,7 @@ The first index is for sync. The others are for audit screens.
 async function recentActivity(db, limit = 100) {
   return db.collection("log")
     .find({})
-    .sort({ createdAt: -1, logId: -1 })
+    .sort({ createdAt: -1, _id: -1 })
     .limit(limit)
     .toArray()
 }
@@ -78,7 +78,7 @@ function describe(change) {
 async function historyFor(db, table, id) {
   return db.collection("log")
     .find({ table, id })
-    .sort({ createdAt: 1, logId: 1 })
+    .sort({ createdAt: 1, _id: 1 })
     .toArray()
 }
 ```
@@ -94,7 +94,7 @@ async function activityByUser(db, userId, from, to) {
       userId,
       createdAt: { $gt: from, $lte: to }
     })
-    .sort({ createdAt: -1, logId: -1 })
+    .sort({ createdAt: -1, _id: -1 })
     .toArray()
 }
 ```
@@ -155,7 +155,7 @@ import { applyPatch } from "@db-state/core"
 async function documentAt(db, table, id, at) {
   const changes = await db.collection("log")
     .find({ table, id, createdAt: { $lte: at } })
-    .sort({ createdAt: 1, logId: 1 })
+    .sort({ createdAt: 1, _id: 1 })
     .toArray()
 
   let doc = null
@@ -178,7 +178,7 @@ This is useful for "what did the customer see yesterday?" support questions.
 async function restoreDeletedOrder(state, db, id) {
   const entry = await db.collection("log").findOne(
     { table: "order", id, action: "delete" },
-    { sort: { createdAt: -1, logId: -1 } }
+    { sort: { createdAt: -1, _id: -1 } }
   )
 
   if (!entry?.old) throw new Error("No deleted document found")
@@ -199,7 +199,7 @@ Recommended pattern:
 - check permissions before returning log entries;
 - redact sensitive fields;
 - never expose password hashes or auth hashes;
-- paginate by `{ createdAt, logId }`.
+- paginate by `{ createdAt, _id }`.
 
 ## Retention strategy
 

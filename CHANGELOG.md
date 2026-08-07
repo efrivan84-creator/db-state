@@ -4,6 +4,12 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.2.0
+
+- **Breaking: `change.logId` is renamed to `change._id`.** The log document carried the same value twice — `logId` in the payload and `_id` as the Mongo key — because the protocol field and the storage key were kept separate. They never diverged, so the duplicate is gone: the log entry's own `_id` is the change id. Update anything that reads `change.logId` from `sync` and recreate the log index as `{ createdAt: 1, _id: 1 }` (the old `{ createdAt: 1, logId: 1 }` no longer matches the sort). `createLogId` keeps its name and role — it generates the value.
+- `info.editid` / `info.editdata` are no longer written into `change.set` for updates. They repeated what the log entry already states in `userId` and `createdAt`, and the client applied them to its cache on every sync. Documents still carry `info` — it is read together with the record; only the log stops duplicating it. `insert` and `delete` are unaffected: their `obj` / `old` are full document snapshots, where `info` is part of the document rather than a repeated log field.
+- Log entries no longer store `null` for the fields an action does not use. The entry used to be spread over an explicit `_id` at insert time, which materialized every absent field; a plain `update` wrote `unset`, `obj`, `old` and `sessionId` as `null` alongside the one field that changed.
+
 ## 0.1.4
 
 - **Security: `read_fields` now also restricts what a filter may reference.** A read whose filter touched a hidden field used to run normally: the field never reached the response, but whether rows came back revealed whether the guess was right, so the value could be recovered by trial — `read_fields` protected the output and not the query. Filter paths are now checked against the same whitelist and the read is rejected with `Read denied: field <path>`. Paths nested in `$and` / `$or` are checked too, and the operator makes no difference. `getUnique` already checked its `field` argument this way; the filter itself was not checked anywhere.

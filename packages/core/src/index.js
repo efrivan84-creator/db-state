@@ -56,7 +56,8 @@ export function createSessionId(userId = "user", random = defaultRandom) {
 
 export function createChange(change) {
   return {
-    logId: change.logId ?? defaultId(),
+    // Ключ записи журнала — _id, как у всякого документа Mongo.
+    _id: change._id ?? defaultId(),
     createdAt: change.createdAt ?? new Date().toISOString(),
     table: change.table,
     id: change.id,
@@ -82,7 +83,7 @@ export function compareChanges(a, b) {
     return a.createdAt < b.createdAt ? -1 : 1
   }
 
-  return String(a.logId ?? "").localeCompare(String(b.logId ?? ""))
+  return String(a._id ?? "").localeCompare(String(b._id ?? ""))
 }
 
 export function applyChange(tables, change) {

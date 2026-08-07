@@ -28,7 +28,7 @@ You normally don't install this directly — `@db-state/vue` and `@db-state/serv
 
 ```js
 {
-  logId: "log1",
+  _id: "log1",
   createdAt: "2026-05-22T10:00:00.000Z",
   table: "user",
   id: "u1",

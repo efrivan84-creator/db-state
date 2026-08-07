@@ -116,11 +116,11 @@ Field-level read rules фильтруют:
 
 ### Clock drift
 
-Если clock уехал назад, changes могут получить `createdAt` меньше уже выданного `to`. Для высоконагруженных систем лучше перейти к cursor continuation по `{ createdAt, logId }`.
+Если clock уехал назад, changes могут получить `createdAt` меньше уже выданного `to`. Для высоконагруженных систем лучше перейти к cursor continuation по `{ createdAt, _id }`.
 
-## `logId` ordering
+## `_id` ordering
 
-`logId` нужен как tie-breaker для записей с одинаковым `createdAt`. Текущая базовая модель использует timestamp window, но индекс `{ createdAt: 1, logId: 1 }` уже готовит путь к continuation cursor.
+`_id` нужен как tie-breaker для записей с одинаковым `createdAt`. Текущая базовая модель использует timestamp window, но индекс `{ createdAt: 1, _id: 1 }` уже готовит путь к continuation cursor.
 
 ## Временные окна
 

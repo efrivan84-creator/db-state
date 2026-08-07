@@ -10,7 +10,7 @@ db-state is the boilerplate, extracted into a library that fits in ~5.4 KB brotl
 
 ### Is it production-ready?
 
-The current release line is `0.1.4`. The core behavior is covered by the test suite, but the API is still pre-1.0 and may have breaking changes before `1.0`. Audit trail and time-travel work by design; the lack of optimistic concurrency control is intentional (see [next question](#what-about-conflicts-between-concurrent-edits)).
+The current release line is `0.2.0`. The core behavior is covered by the test suite, but the API is still pre-1.0 and may have breaking changes before `1.0`. Audit trail and time-travel work by design; the lack of optimistic concurrency control is intentional (see [next question](#what-about-conflicts-between-concurrent-edits)).
 
 ### What about conflicts between concurrent edits?
 
@@ -104,7 +104,7 @@ If you're hitting this today, look at [advanced patterns](cookbook/advanced-patt
 
 ### How big can the log get?
 
-One row per change forever, with full `old` snapshot on deletes. For a typical CRUD app this is a few KB per change. Set `{ createdAt: 1, logId: 1 }` index (the demo seed does it) and reads stay fast for millions of entries.
+One row per change forever, with full `old` snapshot on deletes. For a typical CRUD app this is a few KB per change. Set `{ createdAt: 1, _id: 1 }` index (the demo seed does it) and reads stay fast for millions of entries.
 
 If retention matters, you can periodically prune `log` entries older than N days that are also outside any current client's `time1` window. The library doesn't prune automatically — that's a policy decision.
 

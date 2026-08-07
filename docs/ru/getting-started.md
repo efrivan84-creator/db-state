@@ -53,7 +53,7 @@ await mongo.collection("_group").updateOne(
   { upsert: true }
 )
 
-await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await mongo.collection("log").createIndex({ createdAt: 1, _id: 1 })
 await mongo.collection("order").createIndex({ status: 1, createdAt: -1 })
 
 const dbState = createDbStateServer({

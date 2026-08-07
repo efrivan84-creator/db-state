@@ -588,7 +588,7 @@ For real Mongo: `npm install mongodb` and use `new MongoClient(uri).db("name")`.
 ```ts
 interface SyncResult {
   to: string                // ISO timestamp; client writes this as new time1
-  changes: Change[]         // permission-filtered, ordered by createdAt + logId
+  changes: Change[]         // permission-filtered, ordered by createdAt + _id
 }
 ```
 

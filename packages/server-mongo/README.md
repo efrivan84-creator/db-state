@@ -57,7 +57,7 @@ dbState.socket.addClient(ws, {
 Create these indexes in production:
 
 ```js
-await mongo.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await mongo.collection("log").createIndex({ createdAt: 1, _id: 1 })
 await mongo.collection("_user").createIndex({ login: 1 }, { unique: true, sparse: true })
 await mongo.collection("_user").createIndex({ email: 1 }, { unique: true, sparse: true })
 await mongo.collection("_user").createIndex({ phone: 1 }, { unique: true, sparse: true })
@@ -497,7 +497,7 @@ On `update`, the server strips `info` / `info.*` from client `set` and `unset`, 
 }
 ```
 
-These fields are stored in MongoDB and in the append-only log, so create/edit metadata cannot be forged by the client.
+These fields are stored in the MongoDB document, so create/edit metadata cannot be forged by the client. They are not written to the log: who and when are the log entry's own `userId` and `createdAt`.
 
 ## Sync and audit log
 
@@ -505,7 +505,7 @@ Every successful write appends one compact log row:
 
 ```js
 {
-  logId,
+  _id,
   createdAt,
   table,
   id,

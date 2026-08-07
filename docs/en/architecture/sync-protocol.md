@@ -57,7 +57,7 @@ Server → client:
     "to": "2026-05-22T17:30:42.456Z",
     "hasMore": true,
     "changes": [
-      { "logId": "...", "createdAt": "...", "table": "order", "id": "o1", "action": "update", "set": { ... }, ... }
+      { "_id": "...", "createdAt": "...", "table": "order", "id": "o1", "action": "update", "set": { ... }, ... }
     ]
   },
   "meta": {
@@ -184,17 +184,17 @@ If two clients connect to two servers behind a load balancer, and the servers' c
 
 Fix: keep server clocks synced via NTP (typical drift on EC2/GCP: <10ms). For paranoid setups, use a single time-authority server (`now: () => fetchAuthoritativeTime()`).
 
-## logId ordering
+## _id ordering
 
-Two changes can share the same `createdAt` (millisecond precision). The library adds `logId` as a tiebreaker:
+Two changes can share the same `createdAt` (millisecond precision). The library adds `_id` as a tiebreaker:
 
 ```js
-.sort({ createdAt: 1, logId: 1 })
+.sort({ createdAt: 1, _id: 1 })
 ```
 
 So the order is **deterministic** across sync calls: same `time1`, same `to` window → same change order.
 
-`logId` is `crypto.randomUUID()` by default — UUIDs sort lexically, giving a stable order even for simultaneous changes from different sources.
+`_id` is `crypto.randomUUID()` by default — UUIDs sort lexically, giving a stable order even for simultaneous changes from different sources.
 
 ## Time-window handling
 

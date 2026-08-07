@@ -216,7 +216,7 @@ const tableConfigs = {
     rawJson: true,
     query: {
       searchPlaceholder: "ID записи, таблица, документ или пользователь",
-      searchFields: ["_id", "logId", "table", "id", "userId"],
+      searchFields: ["_id", "table", "id", "userId"],
       filters: [
         { key: "table", label: "Таблица", field: "table", all: "Все таблицы", options: ["order", "file", "_user", "_group"] },
         { key: "action", label: "Действие", field: "action", all: "Все действия", options: ["insert", "update", "delete"] }

@@ -246,7 +246,7 @@ Use the built-in IndexedDB cache unless you have a strong reason to replace it.
 For production, create:
 
 ```js
-await db.collection("log").createIndex({ createdAt: 1, logId: 1 })
+await db.collection("log").createIndex({ createdAt: 1, _id: 1 })
 ```
 
 Add app indexes for list queries:

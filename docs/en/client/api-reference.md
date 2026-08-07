@@ -135,7 +135,7 @@ Used internally and by tests. You generally don't call this directly.
 
 ```ts
 await state.applyChange({
-  logId: "...",
+  _id: "...",
   table: "order",
   id: "o1",
   action: "update",
@@ -389,7 +389,7 @@ interface BaseDoc {
 type ChangeAction = "insert" | "update" | "delete"
 
 interface Change<T = BaseDoc> {
-  logId: string
+  _id: string
   createdAt: string
   table: string
   id: string

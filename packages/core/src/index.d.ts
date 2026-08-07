@@ -152,8 +152,8 @@ export type ChangeAction = "insert" | "update" | "delete"
  * @template T  Shape of the document the change relates to.
  */
 export interface Change<T extends BaseDoc = BaseDoc> {
-  /** Unique change id. Generated server-side. */
-  logId: string
+  /** Unique change id — the log document's own key. Generated server-side. */
+  _id: string
   /** ISO timestamp the server assigned when writing the log entry. */
   createdAt: string
   /** Table the change applies to. */
@@ -209,7 +209,7 @@ export function createSessionId(
 ): string
 
 /**
- * Fills in missing fields on a partial change object (logId, createdAt).
+ * Fills in missing fields on a partial change object (_id, createdAt).
  * Used by the server when appending to the log.
  */
 export function createChange<T extends BaseDoc>(change: Partial<Change<T>> & Pick<Change<T>, "table" | "id" | "action">): Change<T>
@@ -220,7 +220,7 @@ export function filterSyncChanges(
   options: { from: string; to: string; sessionId?: string }
 ): Change[]
 
-/** Stable change comparator: primary by `createdAt`, secondary by `logId`. */
+/** Stable change comparator: primary by `createdAt`, secondary by `_id`. */
 export function compareChanges(a: Change, b: Change): number
 
 /**
