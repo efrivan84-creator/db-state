@@ -4,6 +4,10 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.1.4
+
+- **Security: `read_fields` now also restricts what a filter may reference.** A read whose filter touched a hidden field used to run normally: the field never reached the response, but whether rows came back revealed whether the guess was right, so the value could be recovered by trial — `read_fields` protected the output and not the query. Filter paths are now checked against the same whitelist and the read is rejected with `Read denied: field <path>`. Paths nested in `$and` / `$or` are checked too, and the operator makes no difference. `getUnique` already checked its `field` argument this way; the filter itself was not checked anywhere.
+
 ## 0.1.3
 
 - **Breaking: the saved sign-in is stored as one JSON object.** `userIdKey` and `authHashKey` are replaced by a single `authKey` (default `"db-state.auth"`) holding `{ userId, hash }`. Storages only hold strings, so the flat value lost its type: with `numericIds` a numeric `_id` came back as `"1"`, `authByHash()` asked the server for `_id: "1"`, got `Unauthorized`, and then cleared the saved credentials — "remember me" silently stopped working and could not retry. JSON keeps the type, and writing the pair as one value also removes the "id saved, hash missing" state. A damaged or foreign value is treated as no sign-in at all. The old two-key format is not read: anyone signed in before the upgrade signs in once more.

@@ -199,6 +199,44 @@ export function assertFieldsAccess(access, paths, label = "Write") {
   }
 }
 
+// Поля, по которым фильтрует клиентский запрос.
+//
+// read_fields скрывает поле в ответе, но фильтровать по нему до сих пор было
+// можно: запрос { secret: "x" } не возвращает поле, зато по наличию строки в
+// результате его значение подбирается перебором. Поэтому пути фильтра
+// проверяются тем же списком, что и вывод.
+//
+// Ключи-операторы ($and, $or, $in, ...) — не поля: у логических операторов
+// разбираем вложенные условия, у остальных значение полем не является.
+export function filterFields(filter, prefix = "") {
+  if (Array.isArray(filter)) return filter.flatMap((item) => filterFields(item, prefix))
+  if (!isPlainObject(filter)) return []
+
+  const paths = []
+  for (const [key, value] of Object.entries(filter)) {
+    if (key.startsWith("$")) {
+      // $and/$or/$nor содержат условия, у остальных операторов — значения.
+      paths.push(...filterFields(value, prefix))
+      continue
+    }
+
+    const path = prefix ? `${prefix}.${key}` : key
+    // { addr: { $regex: ... } } — поле addr, а не вложенный документ.
+    const nested = isPlainObject(value) && !hasOperatorKey(value)
+      ? filterFields(value, path)
+      : []
+
+    if (nested.length > 0) paths.push(...nested)
+    else paths.push(path)
+  }
+
+  return paths
+}
+
+function hasOperatorKey(value) {
+  return Object.keys(value).some((key) => key.startsWith("$"))
+}
+
 export function projectFields(obj, fields) {
   if (!obj || !fields) return obj
 

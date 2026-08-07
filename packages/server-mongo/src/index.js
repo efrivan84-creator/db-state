@@ -13,6 +13,7 @@ import {
   assertFieldsAccess,
   changeWritePaths,
   filterChangeFields,
+  filterFields,
   isAllowedField,
   projectFields,
   resolveAccess,
@@ -264,6 +265,13 @@ export function createDbStateServer(options) {
       const plan = before?.allowed === true
         ? { mode: "all", fields: ctx.fields?.length ? ctx.fields : undefined }
         : await userReadPlan(config, ctx)
+
+      // Фильтровать можно только по тем полям, которые разрешено читать:
+      // иначе значение скрытого поля подбирается перебором по наличию строк
+      // в результате, в обход read_fields.
+      if (plan.fields && ctx.filter) {
+        assertFieldsAccess({ fields: plan.fields }, filterFields(ctx.filter), "Read")
+      }
 
       ctx.result = await read(plan)
       if (plan.fields) markFieldsFiltered(ctx.req)

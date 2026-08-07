@@ -96,6 +96,8 @@ The `write` filter is checked against the **existing** document for `update` / `
 
 `read_fields` projects `load` results and filters `sync` changes per field. `write_fields` validates the field paths of `add` / `update` — a patch touching a path outside the whitelist **rejects the whole operation** with `Write denied: field <path>` (nothing is silently dropped).
 
+`read_fields` also closes a field to **filtering**: a query with a condition on a hidden field is rejected with `Read denied: field <path>`. Otherwise the value could be guessed by trial — the field never appears in the response, but whether the query returns rows tells you if you got it right. Every filter path is checked, including ones nested in `$and` / `$or`, and the operator makes no difference: `{ pass: "x" }` and `{ pass: { $regex: "^x" } }` are rejected alike.
+
 ## The database evaluates filters
 
 Access checks are pushed into Mongo instead of being applied per row in JS:

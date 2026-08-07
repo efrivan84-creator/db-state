@@ -1090,6 +1090,52 @@ test("access read filter limits rows and read_fields projects documents", async 
   assert.equal(await server.count({ table: "admin", filter: {}, req }), 1)
 })
 
+test("read_fields also blocks filtering by a hidden field", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({ mongo, tables: ["admin"] })
+  await mongo.collection("admin").insertOne({ _id: "a1", fio: "Иван", enable: true, pass: "secret" })
+
+  const req = {
+    user: {
+      _id: "u1",
+      groups: [],
+      access: { admin: { read: {}, read_fields: ["fio"] } }
+    }
+  }
+
+  // pass не отдаётся в ответе — и фильтровать по нему тоже нельзя:
+  // иначе значение подбирается перебором по наличию строк в результате.
+  await assert.rejects(
+    () => server.getIds({ table: "admin", filter: { pass: "secret" }, req }),
+    /Read denied: field pass/
+  )
+  await assert.rejects(
+    () => server.count({ table: "admin", filter: { pass: "secret" }, req }),
+    /Read denied: field pass/
+  )
+  // Оператор сравнения ничего не меняет.
+  await assert.rejects(
+    () => server.getIds({ table: "admin", filter: { pass: { $regex: "^s" } }, req }),
+    /Read denied: field pass/
+  )
+  // Как и вложенность в логический оператор.
+  await assert.rejects(
+    () => server.getIds({ table: "admin", filter: { $or: [{ fio: "Иван" }, { pass: "secret" }] }, req }),
+    /Read denied: field pass/
+  )
+  await assert.rejects(
+    () => server.getUnique({ table: "admin", field: "fio", filter: { pass: "secret" }, req }),
+    /Read denied: field pass/
+  )
+
+  // По разрешённому полю фильтр работает как раньше.
+  assert.deepEqual(await server.getIds({ table: "admin", filter: { fio: "Иван" }, req }), ["a1"])
+  assert.deepEqual(await server.getIds({ table: "admin", filter: { fio: { $in: ["Иван"] } }, req }), ["a1"])
+  // Право без ограничения полей фильтруется по чему угодно.
+  const full = { user: { _id: "u2", groups: [], access: { admin: { read: {} } } } }
+  assert.deepEqual(await server.getIds({ table: "admin", filter: { pass: "secret" }, req: full }), ["a1"])
+})
+
 test("access write filter checks the existing document and write_fields limit writes", async () => {
   const mongo = createMemoryMongo()
   const server = createDbStateServer({
