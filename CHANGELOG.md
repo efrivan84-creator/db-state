@@ -7,6 +7,8 @@ Release notes and project status for db-state.
 ## 0.1.4
 
 - **Security: `read_fields` now also restricts what a filter may reference.** A read whose filter touched a hidden field used to run normally: the field never reached the response, but whether rows came back revealed whether the guess was right, so the value could be recovered by trial — `read_fields` protected the output and not the query. Filter paths are now checked against the same whitelist and the read is rejected with `Read denied: field <path>`. Paths nested in `$and` / `$or` are checked too, and the operator makes no difference. `getUnique` already checked its `field` argument this way; the filter itself was not checked anywhere.
+- `getIds.sort` is covered by the same rule because ordering also leaks hidden values. Opaque root operators whose field dependencies cannot be determined safely (`$expr`, `$where`, `$text`, `$jsonSchema`, and similar) are rejected whenever `read_fields` is active. `_id` remains available because it is always returned.
+- Empty field whitelists are no longer mistaken for a missing limit: `read_fields: []` exposes only the always-visible `_id`, while `write_fields: []` rejects every client field.
 
 ## 0.1.3
 

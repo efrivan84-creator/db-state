@@ -1090,7 +1090,71 @@ test("access read filter limits rows and read_fields projects documents", async 
   assert.equal(await server.count({ table: "admin", filter: {}, req }), 1)
 })
 
-test("read_fields also blocks filtering by a hidden field", async () => {
+test("empty field whitelists expose only ids and deny client writes", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({ mongo, tables: ["admin"] })
+  await mongo.collection("_group").insertOne({
+    _id: "limited",
+    access: {
+      admin: {
+        read: {},
+        read_fields: [],
+        write: {},
+        write_fields: []
+      }
+    }
+  })
+  await mongo.collection("admin").insertOne({ _id: "a1", id: "legacy-a1", fio: "Иван", pass: "secret" })
+
+  const access = await mergeUserAccess(
+    { mongo, groupTable: "_group" },
+    { _id: "u1", groups: ["limited"] }
+  )
+  assert.deepEqual(access.admin.read_fields, [])
+  assert.deepEqual(access.admin.write_fields, [])
+  const req = { user: { _id: "u1", groups: ["limited"], access } }
+
+  assert.deepEqual(await server.load({ table: "admin", id: "a1", req }), { _id: "a1" })
+  assert.deepEqual(await server.getIds({ table: "admin", filter: { _id: "a1" }, req }), ["a1"])
+  await assert.rejects(
+    () => server.getIds({ table: "admin", filter: { fio: "Иван" }, req }),
+    /Read denied: field fio/
+  )
+  await assert.rejects(
+    () => server.update({ table: "admin", id: "a1", set: { fio: "Пётр" }, req }),
+    /Write denied: field fio/
+  )
+})
+
+test("beforeRead can explicitly narrow visible fields to an empty list", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["admin"],
+    hooks: {
+      beforeRead(ctx) {
+        ctx.fields = []
+        return true
+      }
+    }
+  })
+  await mongo.collection("admin").insertOne({ _id: "a1", fio: "Иван" })
+
+  assert.deepEqual(
+    await server.load({ table: "admin", id: "a1", req: { user: { _id: "u1" } } }),
+    { _id: "a1" }
+  )
+  await assert.rejects(
+    () => server.getIds({
+      table: "admin",
+      filter: { fio: "Иван" },
+      req: { user: { _id: "u1" } }
+    }),
+    /Read denied: field fio/
+  )
+})
+
+test("read_fields blocks filtering and sorting by hidden fields", async () => {
   const mongo = createMemoryMongo()
   const server = createDbStateServer({ mongo, tables: ["admin"] })
   await mongo.collection("admin").insertOne({ _id: "a1", fio: "Иван", enable: true, pass: "secret" })
@@ -1110,6 +1174,10 @@ test("read_fields also blocks filtering by a hidden field", async () => {
     /Read denied: field pass/
   )
   await assert.rejects(
+    () => server.getIds({ table: "admin", filter: { id: "a1" }, req }),
+    /Read denied: field id/
+  )
+  await assert.rejects(
     () => server.count({ table: "admin", filter: { pass: "secret" }, req }),
     /Read denied: field pass/
   )
@@ -1127,10 +1195,28 @@ test("read_fields also blocks filtering by a hidden field", async () => {
     () => server.getUnique({ table: "admin", field: "fio", filter: { pass: "secret" }, req }),
     /Read denied: field pass/
   )
+  await assert.rejects(
+    () => server.getIds({ table: "admin", filter: {}, sort: { pass: 1 }, req }),
+    /Read denied: field pass/
+  )
+  // Operators whose field dependencies cannot be derived statically are
+  // rejected instead of being mistaken for field-free filters.
+  for (const [operator, filter] of [
+    ["$expr", { $expr: { $eq: ["$pass", "secret"] } }],
+    ["$where", { $where: "this.pass === 'secret'" }],
+    ["$text", { $text: { $search: "secret" } }],
+    ["$jsonSchema", { $jsonSchema: { required: ["pass"] } }]
+  ]) {
+    await assert.rejects(
+      () => server.getIds({ table: "admin", filter, req }),
+      new RegExp(`Read denied: field \\${operator}`)
+    )
+  }
 
   // По разрешённому полю фильтр работает как раньше.
   assert.deepEqual(await server.getIds({ table: "admin", filter: { fio: "Иван" }, req }), ["a1"])
   assert.deepEqual(await server.getIds({ table: "admin", filter: { fio: { $in: ["Иван"] } }, req }), ["a1"])
+  assert.deepEqual(await server.getIds({ table: "admin", filter: { _id: "a1" }, sort: { _id: 1 }, req }), ["a1"])
   // Право без ограничения полей фильтруется по чему угодно.
   const full = { user: { _id: "u2", groups: [], access: { admin: { read: {} } } } }
   assert.deepEqual(await server.getIds({ table: "admin", filter: { pass: "secret" }, req: full }), ["a1"])

@@ -182,6 +182,7 @@ export interface ServerHookContext<T extends BaseDoc = BaseDoc> {
   /**
    * Field whitelist for this request. `beforeRead` may set it to narrow the
    * returned fields; it can only narrow the group's `read_fields`.
+   * An empty list keeps only `_id`.
    */
   fields?: string[]
   from?: string

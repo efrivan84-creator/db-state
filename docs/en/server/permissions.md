@@ -96,7 +96,9 @@ The `write` filter is checked against the **existing** document for `update` / `
 
 `read_fields` projects `load` results and filters `sync` changes per field. `write_fields` validates the field paths of `add` / `update` — a patch touching a path outside the whitelist **rejects the whole operation** with `Write denied: field <path>` (nothing is silently dropped).
 
-`read_fields` also closes a field to **filtering**: a query with a condition on a hidden field is rejected with `Read denied: field <path>`. Otherwise the value could be guessed by trial — the field never appears in the response, but whether the query returns rows tells you if you got it right. Every filter path is checked, including ones nested in `$and` / `$or`, and the operator makes no difference: `{ pass: "x" }` and `{ pass: { $regex: "^x" } }` are rejected alike.
+An empty list is still a whitelist, not an omitted limit: `read_fields: []` exposes only `_id`, which is always visible, and `write_fields: []` rejects every client field.
+
+`read_fields` also closes a field to **filtering and sorting**: a query with a condition or `getIds.sort` entry on a hidden field is rejected with `Read denied: field <path>`. Otherwise the value could be guessed from whether rows match or from their order. Every ordinary filter path is checked, including ones nested in `$and` / `$or`, and field operators make no difference: `{ pass: "x" }` and `{ pass: { $regex: "^x" } }` are rejected alike. Opaque root operators whose field dependencies cannot be determined safely (`$expr`, `$where`, `$text`, `$jsonSchema`, and similar) are rejected while `read_fields` is active. `_id` is still allowed because it is always returned.
 
 ## The database evaluates filters
 

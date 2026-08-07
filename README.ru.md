@@ -213,7 +213,7 @@ code rule for table: access[table].read/write
 
 Поля проверяются на сервере:
 
-- `read_fields` проецирует `load()` (Mongo projection), `getUnique()` и sync changes.
+- `read_fields` проецирует `load()` (Mongo projection), `getUnique()` и sync changes, а клиентские фильтры и `getIds.sort` по скрытым полям отклоняет.
 - `write_fields` валидирует `add()` и `update()`; патч с чужим полем отклоняется.
 - `write` управляет insert, update и delete.
 - Delete log rows хранят `old`, поэтому audit и проверки прав работают после удаления исходного документа.

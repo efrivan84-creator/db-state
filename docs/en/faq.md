@@ -86,7 +86,7 @@ For deployments, you can also bump a "cache version" prefix in `cache` options s
 
 **Server only**. The client receives the merged `access` object for UI decisions, but it is not trusted for enforcement. Every built-in RPC method (`load`, `update`, `add`, `remove`, `sync`, `count`, `getIds`, `getUnique`) enforces the `beforeRead`/`beforeWrite` hooks and the server-side `user.access`; declarative row filters are pushed into Mongo queries.
 
-A malicious client cannot bypass permissions by editing JavaScript. `read_fields` is enforced through projection/change filtering, while `write_fields` validates `add` objects and `update` paths. Code rules can also return a `{ fields: [...] }` decision.
+A malicious client cannot bypass permissions by editing JavaScript. `read_fields` is enforced through projection/change filtering and also rejects filters or sorts that depend on hidden fields; `write_fields` validates `add` objects and `update` paths. A `beforeRead` hook may narrow the result further through `ctx.fields`.
 
 ### How are passwords stored?
 

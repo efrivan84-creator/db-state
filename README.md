@@ -213,7 +213,7 @@ At login the server merges the `access` of the user's groups into `user.access` 
 
 Field rules are enforced on the server:
 
-- `read_fields` projects `load()` (Mongo projection), `getUnique()`, and sync changes.
+- `read_fields` projects `load()` (Mongo projection), `getUnique()`, and sync changes, and rejects client filters or `getIds.sort` entries that depend on hidden fields.
 - `write_fields` validates `add()` and `update()`; a patch touching another field is rejected.
 - `write` covers insert, update, and delete.
 - Delete log rows store `old`, so audit and access checks still work after the source document is gone.

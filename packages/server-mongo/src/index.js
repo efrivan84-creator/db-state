@@ -263,14 +263,18 @@ export function createDbStateServer(options) {
       // Хук разрешил явно — право группы не спрашиваем, но поля из ctx.fields
       // всё равно применяем.
       const plan = before?.allowed === true
-        ? { mode: "all", fields: ctx.fields?.length ? ctx.fields : undefined }
+        ? { mode: "all", fields: Array.isArray(ctx.fields) ? ctx.fields : undefined }
         : await userReadPlan(config, ctx)
 
-      // Фильтровать можно только по тем полям, которые разрешено читать:
-      // иначе значение скрытого поля подбирается перебором по наличию строк
-      // в результате, в обход read_fields.
-      if (plan.fields && ctx.filter) {
-        assertFieldsAccess({ fields: plan.fields }, filterFields(ctx.filter), "Read")
+      // Фильтровать и сортировать можно только по видимым полям: иначе
+      // скрытое значение восстанавливается по наличию или порядку строк.
+      // _id всегда входит в проекцию и поэтому остаётся доступным.
+      if (plan.fields) {
+        const queryPaths = [
+          ...filterFields(ctx.filter),
+          ...Object.keys(ctx.sort ?? {})
+        ]
+        assertFieldsAccess({ fields: ["_id", ...plan.fields] }, queryPaths, "Read")
       }
 
       ctx.result = await read(plan)
@@ -377,7 +381,7 @@ export function createDbStateServer(options) {
 
         // Хук разрешил sync целиком — права по таблицам не спрашиваем.
         const access = before?.allowed === true
-          ? { allowed: true, fields: readCtx.fields?.length ? readCtx.fields : undefined }
+          ? { allowed: true, fields: Array.isArray(readCtx.fields) ? readCtx.fields : undefined }
           : await resolveAccess(config, "read", ctx)
         if (!access.allowed) continue
 
@@ -568,9 +572,9 @@ function actorId(user, config) {
   return user?._id ?? config.systemUserId
 }
 
-// Mongo-projection из белого списка полей (плюс всегда _id/id).
+// Mongo-projection из белого списка полей (плюс всегда _id).
 function fieldsProjection(fields) {
-  const projection = { _id: 1, id: 1 }
+  const projection = { _id: 1 }
   for (const field of fields) projection[field] = 1
   return projection
 }

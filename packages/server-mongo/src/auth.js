@@ -176,7 +176,7 @@ function mergeActionFields(a, b, action, { aGrants, bGrants }) {
 }
 
 function isFieldList(value) {
-  return Array.isArray(value) && value.length > 0
+  return Array.isArray(value)
 }
 
 function toFilters(value) {

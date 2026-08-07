@@ -11,14 +11,14 @@ export type AccessFilter = Record<string, unknown>
 export interface AccessTableEntry {
   /** Row filter for reads: `{}` — all rows, a filter — only matching rows. */
   read?: AccessFilter | AccessFilter[]
-  /** Field whitelist for reads (load projection, sync change filtering). */
+  /** Field whitelist for reads. An empty list exposes only `_id`. */
   read_fields?: string[]
   /**
    * Row filter for writes: `{}` — all rows. Checked against the existing
    * document for update/remove and the new document for add.
    */
   write?: AccessFilter | AccessFilter[]
-  /** Field whitelist for writes (add/update field paths). */
+  /** Field whitelist for writes. An empty list permits no client field paths. */
   write_fields?: string[]
 }
 
@@ -82,7 +82,7 @@ export interface AccessContext<T extends BaseDoc = BaseDoc> {
   /**
    * Field whitelist for this request. A `beforeRead` hook may set it to narrow
    * the returned fields; it can only narrow the group's `read_fields`, never
-   * widen them.
+   * widen them. An empty list keeps only `_id`.
    */
   fields?: string[]
   /** Rows returned by the query (`getIds`), available in `afterRead`. */
@@ -148,7 +148,7 @@ export function assertFieldsAccess(
   label?: string
 ): void
 
-/** Projects an object to the supplied field whitelist (always keeps `_id` / `id`). */
+/** Projects an object to the supplied field whitelist (always keeps `_id`). */
 export function projectFields<T extends BaseDoc>(obj: T | null | undefined, fields?: string[]): T | null | undefined
 
 /** Extracts every dot-path that a change touches. Used for field-level write checks. */

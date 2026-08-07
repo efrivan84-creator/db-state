@@ -47,7 +47,7 @@ async function userAccessDecision(access, action, ctx) {
   if (!filters) return undefined
 
   const fields = entry[`${action}_fields`]
-  const decision = { allowed: true, fields: Array.isArray(fields) && fields.length > 0 ? fields : undefined }
+  const decision = { allowed: true, fields: Array.isArray(fields) ? fields : undefined }
 
   // {} совпадает со всем — решаем без чтения документа.
   if (filters.some(isEmptyFilter)) return decision
@@ -99,7 +99,7 @@ function narrowFields(accessFields, hookFields) {
 }
 
 function fieldList(value) {
-  return Array.isArray(value) && value.length > 0 ? value : undefined
+  return Array.isArray(value) ? value : undefined
 }
 
 // Условие Mongo из фильтров права: один фильтр — как есть, несколько — $or.
@@ -193,7 +193,9 @@ export function assertFieldsAccess(access, paths, label = "Write") {
   if (!access.fields) return
 
   for (const path of paths) {
-    if (!isAllowedField(path, access.fields)) {
+    // A top-level Mongo operator is an opaque query dependency rather than a
+    // document path. It must never become allow-listable as if it were a field.
+    if (path.startsWith("$") || !isAllowedField(path, access.fields)) {
       throw new Error(`${label} denied: field ${path}`)
     }
   }
@@ -206,8 +208,12 @@ export function assertFieldsAccess(access, paths, label = "Write") {
 // результате его значение подбирается перебором. Поэтому пути фильтра
 // проверяются тем же списком, что и вывод.
 //
-// Ключи-операторы ($and, $or, $in, ...) — не поля: у логических операторов
-// разбираем вложенные условия, у остальных значение полем не является.
+// $and/$or/$nor содержат обычные вложенные фильтры. Остальные корневые
+// операторы ($expr/$where/$text/$jsonSchema/...) могут зависеть от полей,
+// которые не представлены обычными ключами. Возвращаем сам оператор как
+// непроницаемый путь: assertFieldsAccess всегда отклоняет такие маркеры.
+const LOGICAL_FILTER_OPERATORS = new Set(["$and", "$or", "$nor"])
+
 export function filterFields(filter, prefix = "") {
   if (Array.isArray(filter)) return filter.flatMap((item) => filterFields(item, prefix))
   if (!isPlainObject(filter)) return []
@@ -215,8 +221,11 @@ export function filterFields(filter, prefix = "") {
   const paths = []
   for (const [key, value] of Object.entries(filter)) {
     if (key.startsWith("$")) {
-      // $and/$or/$nor содержат условия, у остальных операторов — значения.
-      paths.push(...filterFields(value, prefix))
+      if (LOGICAL_FILTER_OPERATORS.has(key)) {
+        paths.push(...filterFields(value, prefix))
+      } else {
+        paths.push(key)
+      }
       continue
     }
 
@@ -242,7 +251,6 @@ export function projectFields(obj, fields) {
 
   const out = {}
   copyMetaField(obj, out, "_id")
-  copyMetaField(obj, out, "id")
 
   for (const field of fields) {
     const value = getByPath(obj, field)
