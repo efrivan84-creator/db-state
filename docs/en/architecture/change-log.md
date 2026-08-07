@@ -25,12 +25,13 @@ All writes are normalized into a `Change`:
   action: "update",       // "insert" | "update" | "delete"
   set: { status: "done" },
   unset: ["draft"],
-  obj: undefined,         // full inserted doc for insert
-  old: undefined,         // full deleted doc for delete
   sessionId: "u1_abc123",
   userId: "u1"
 }
 ```
+
+Unused optional fields are absent rather than stored as `null`: `insert` adds
+the full `obj`, while `delete` adds the full `old` document.
 
 `userId` is intentionally compact. The user document can change over time, so the log stores the actor id, not a duplicated user snapshot.
 

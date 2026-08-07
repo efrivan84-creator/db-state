@@ -355,7 +355,11 @@ export function createDbStateServer(options) {
         .toArray()
 
       const allowed = []
-      for (const change of changes) {
+      for (const row of changes) {
+        // Normalize both new rows and pre-0.2 rows at the public boundary:
+        // legacy logId/unknown fields are dropped and nullish payload fields
+        // stay absent. Existing rows already have the same Mongo _id.
+        const change = createChange({ ...row, _id: row._id ?? row.logId })
         let didLoadDoc = change.action === "delete"
         const ctx = {
           req,

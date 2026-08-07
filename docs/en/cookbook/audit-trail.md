@@ -14,13 +14,12 @@ Every write creates one entry in `log`:
   id: "o1",
   action: "update",
   set: { status: "packed" },
-  unset: undefined,
-  obj: undefined,
-  old: undefined,
   sessionId: "u_admin_w8k2p9d2aa",
   userId: "u_admin"
 }
 ```
+
+Fields unused by the action are absent instead of being stored as `null`.
 
 For `delete`, `old` contains the full deleted document:
 

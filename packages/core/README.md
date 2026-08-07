@@ -35,12 +35,13 @@ You normally don't install this directly — `@db-state/vue` and `@db-state/serv
   action: "update", // insert | update | delete
   set: { fio: "Ivan" },
   unset: ["oldField"],
-  obj: null,
-  old: null,
   sessionId: "u1_abcd",
   userId: "u1"
 }
 ```
+
+Action-specific fields are omitted when unused: `insert` carries `obj`, `update`
+carries `set`/`unset`, and `delete` carries `old`.
 
 ## Exports
 

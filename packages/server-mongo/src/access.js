@@ -286,10 +286,11 @@ export function filterChangeFields(change, fields) {
     const unset = (change.unset ?? []).filter((path) => isAllowedField(path, fields))
 
     if (Object.keys(set).length === 0 && unset.length === 0) return undefined
+    const { set: ignoredSet, unset: ignoredUnset, ...base } = change
     return {
-      ...change,
-      set: Object.keys(set).length > 0 ? set : undefined,
-      unset: unset.length > 0 ? unset : undefined
+      ...base,
+      ...(Object.keys(set).length > 0 ? { set } : {}),
+      ...(unset.length > 0 ? { unset } : {})
     }
   }
 

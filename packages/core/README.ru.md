@@ -35,12 +35,13 @@ npm install @db-state/core
   action: "update", // insert | update | delete
   set: { fio: "Ivan" },
   unset: ["oldField"],
-  obj: null,
-  old: null,
   sessionId: "u1_abcd",
   userId: "u1"
 }
 ```
+
+Неиспользуемые поля не записываются: `insert` несёт `obj`, `update` —
+`set`/`unset`, а `delete` — `old`.
 
 ## Экспорты
 

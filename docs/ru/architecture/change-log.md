@@ -21,13 +21,13 @@ Append-only log - центральный механизм sync, аудита и 
   id: "o1",
   action: "update", // insert | update | delete
   set: { status: "closed" },
-  unset: [],
-  obj: null,
-  old: null,
   sessionId: "u1_abcd",
   userId: "u1"
 }
 ```
+
+Неиспользуемые optional-поля отсутствуют, а не хранятся как `null`: `insert`
+добавляет полный `obj`, `update` — `set`/`unset`, `delete` — полный `old`.
 
 `userId` - компактный actor id. Полный объект пользователя в log не пишется.
 

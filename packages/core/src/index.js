@@ -55,20 +55,23 @@ export function createSessionId(userId = "user", random = defaultRandom) {
 }
 
 export function createChange(change) {
-  return {
+  const result = {
     // Ключ записи журнала — _id, как у всякого документа Mongo.
     _id: change._id ?? defaultId(),
     createdAt: change.createdAt ?? new Date().toISOString(),
     table: change.table,
     id: change.id,
-    action: change.action,
-    set: change.set,
-    unset: change.unset,
-    obj: change.obj,
-    old: change.old,
-    sessionId: change.sessionId,
-    userId: change.userId
+    action: change.action
   }
+
+  // Optional payload fields are absent, not undefined/null. Apart from keeping
+  // the protocol compact, this makes the stored shape independent of the
+  // Mongo driver's ignoreUndefined setting.
+  for (const key of ["set", "unset", "obj", "old", "sessionId", "userId"]) {
+    if (change[key] != null) result[key] = change[key]
+  }
+
+  return result
 }
 
 export function filterSyncChanges(changes, { from, to, sessionId }) {

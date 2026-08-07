@@ -100,7 +100,7 @@ try {
     table: "log",
     id: logIds[0]
   })
-  assert.equal(auditLog._id, auditLog.logId)
+  assert.equal("logId" in auditLog, false)
   assert.equal(auditLog.table, "order")
   assert.equal(auditLog.id, "o1")
   assert.equal(auditLog.userId, "u_manager")

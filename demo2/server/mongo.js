@@ -46,7 +46,7 @@ async function seedDemo(db) {
     if (rows.length) await db.collection(name).insertMany(rows)
   }
 
-  await db.collection("log").createIndex({ createdAt: 1, logId: 1 })
+  await db.collection("log").createIndex({ createdAt: 1, _id: 1 })
   await db.collection("file").createIndex({ ownerId: 1, status: 1 })
   await db.collection("file").createIndex({ token: 1 }, { unique: true, sparse: true })
 }

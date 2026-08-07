@@ -104,17 +104,29 @@ test("createSessionId keeps the user id prefix and random suffix", () => {
 
 test("createChange keeps compact audit fields", () => {
   const change = createChange({
+    _id: "log1",
+    createdAt: "2026-05-21T10:00:00.000Z",
     table: "order",
     id: "o1",
     action: "delete",
     old: { _id: "o1", status: "open" },
     user: { _id: "u1", groups: ["admin"] },
-    userId: "u1"
+    userId: "u1",
+    set: undefined,
+    unset: null,
+    obj: null,
+    sessionId: undefined
   })
 
-  assert.deepEqual(change.old, { _id: "o1", status: "open" })
-  assert.equal(change.userId, "u1")
-  assert.equal("user" in change, false)
+  assert.deepEqual(change, {
+    _id: "log1",
+    createdAt: "2026-05-21T10:00:00.000Z",
+    table: "order",
+    id: "o1",
+    action: "delete",
+    old: { _id: "o1", status: "open" },
+    userId: "u1"
+  })
 })
 
 test("normalizeTables deduplicates explicit tables without adding service tables implicitly", () => {

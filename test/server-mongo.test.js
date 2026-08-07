@@ -43,6 +43,9 @@ test("server update writes data, appends log, broadcasts to everyone, and sync e
   const [log] = await mongo.collection("log").find({}).toArray()
   assert.equal(log.userId, "u-admin")
   assert.equal("user" in log, false)
+  assert.equal("unset" in log, false)
+  assert.equal("obj" in log, false)
+  assert.equal("old" in log, false)
   await waitFor(() =>
     writerSent.some((message) => message.type === "dbstate:changes_available") &&
     readerSent.some((message) => message.type === "dbstate:changes_available")
@@ -104,6 +107,46 @@ test("sync reads complete twelve-hour windows and tells the client when more tim
   assert.equal(second.to, "2026-05-02T00:00:00.000Z")
   assert.equal(second.hasMore, undefined)
   assert.deepEqual(second.changes.map((change) => change.id), ["log3"])
+})
+
+test("sync normalizes legacy log rows to the compact 0.2 change shape", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    now: () => "2026-05-21T11:00:00.000Z"
+  })
+  await mongo.collection("log").insertOne({
+    _id: "log1",
+    logId: "log1",
+    createdAt: "2026-05-21T10:00:00.000Z",
+    table: "order",
+    id: "o1",
+    action: "update",
+    set: { status: "done" },
+    unset: null,
+    obj: null,
+    old: null,
+    sessionId: null,
+    userId: "u1",
+    internal: "must not leave the server"
+  })
+
+  const result = await server.sync({
+    from: "2026-05-21T09:00:00.000Z",
+    sessionId: "reader",
+    req: { user: { _id: "u1", access: { fullaccess: 1 } } }
+  })
+
+  assert.deepEqual(result.changes, [{
+    _id: "log1",
+    createdAt: "2026-05-21T10:00:00.000Z",
+    table: "order",
+    id: "o1",
+    action: "update",
+    set: { status: "done" },
+    userId: "u1"
+  }])
 })
 
 test("sync requests a cache reset only when the cursor is more than twenty days old", async () => {
@@ -1409,10 +1452,7 @@ test("read fields project load and sync changes", async () => {
       table: "order",
       id: "o1",
       action: "insert",
-      set: undefined,
-      unset: undefined,
       obj: { _id: "o1", status: "open", total: 100 },
-      old: undefined,
       sessionId: "writer",
       userId: "u-admin"
     },
@@ -1423,9 +1463,6 @@ test("read fields project load and sync changes", async () => {
       id: "o1",
       action: "update",
       set: { status: "done" },
-      unset: undefined,
-      obj: undefined,
-      old: undefined,
       sessionId: "writer",
       userId: "u-admin"
     }
