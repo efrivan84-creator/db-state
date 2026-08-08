@@ -36,7 +36,7 @@ const dbState = createDbStateServer({
 |---|---|
 | `mongo` | Mongo database-like object. |
 | `tables` | Прикладные таблицы. |
-| `hooksDir` | Папка с хуками-файлами; `before*` могут разрешить или запретить. См. [hooks.md](hooks.md). |
+| `hooksDir` | Существующая читаемая папка с хуками-файлами; `before*` могут разрешить или запретить. См. [hooks.md](hooks.md). |
 | `methodsDir` | Папка с RPC-методами-файлами: `"zad.get-num"` → `rpc/zad/get-num.js`. |
 | `reloadCheckMs` | Как часто сверять файлы хуков и методов с mtime, мс. По умолчанию `60000`, `0` — каждый раз. |
 | `password` | Password adapter. |

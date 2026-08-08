@@ -25,7 +25,7 @@ const HOOK_NAMES = [
   "errorWrite"
 ]
 
-const SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
+const SEGMENT_RE = /^[A-Za-z0-9_][A-Za-z0-9_-]*$/
 
 
 // Читает состав папки и возвращает объект хуков:
@@ -53,7 +53,7 @@ async function scanHooksDir(base) {
   const shared = new Map()
   const byTable = new Map()
 
-  for (const entry of await readDirSafe(base)) {
+  for (const entry of await readHooksDirectory(base)) {
     if (entry.isFile()) {
       const name = hookNameOf(entry.name)
       if (name) shared.set(name, new URL(entry.name, base))
@@ -63,7 +63,7 @@ async function scanHooksDir(base) {
     if (!entry.isDirectory() || !SEGMENT_RE.test(entry.name)) continue
 
     const tableBase = new URL(`${entry.name}/`, base)
-    for (const file of await readDirSafe(tableBase)) {
+    for (const file of await readHooksDirectory(tableBase)) {
       if (!file.isFile()) continue
       const name = hookNameOf(file.name)
       if (!name) continue
@@ -110,8 +110,15 @@ async function loadHook(cache, url, name, every) {
   let info
   try {
     info = await stat(url)
-  } catch {
-    return undefined
+  } catch (error) {
+    // Once a security hook has loaded, a transient filesystem failure or an
+    // accidental deletion must not silently disable it. Directory membership
+    // is intentionally fixed until restart, so keep the last good handler.
+    if (cached) {
+      cached.checkedAt = Date.now()
+      return cached.handler
+    }
+    throw new Error(`Cannot read hook file (${error?.code ?? "read failed"})`, { cause: error })
   }
 
   if (cached && cached.mtimeMs === info.mtimeMs) {
@@ -128,11 +135,11 @@ async function loadHook(cache, url, name, every) {
   return module.default
 }
 
-async function readDirSafe(url) {
+async function readHooksDirectory(url) {
   try {
     return await readdir(url, { withFileTypes: true })
-  } catch {
-    return []
+  } catch (error) {
+    throw new Error(`Cannot read hooksDir (${error?.code ?? "read failed"})`, { cause: error })
   }
 }
 

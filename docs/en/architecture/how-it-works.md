@@ -69,10 +69,9 @@ The Node server.
 3. **Server**: 
    1. Looks up the calling user via `getUser(req)`.
    2. Fetches current `order/o1` from Mongo for permission checks.
-   3. Runs `assertAccess("write", ctx)`:
-      - Tries `access.order.write` (your table-specific code rule, if any).
-      - Tries `access.write` (your global code fallback, if any).
-      - Checks `user.access.order.write` (merged from the user's groups at login): the row filter against the existing document.
+   3. Runs module hooks and then the shared/table `beforeWrite` files from `hooksDir`.
+      - An explicit hook decision allows or denies immediately.
+      - Otherwise checks `user.access.order.write` (merged from the user's groups at login): the row filter against the existing document.
       - Validates every dot-path in `set`/`unset` against `write_fields`.
    4. `mongo.collection("order").updateOne({ _id: "o1" }, { $set: ... })`.
    5. Appends to `log` collection: `{ _id, createdAt, table: "order", id: "o1", action: "update", set, unset, userId, sessionId }`.

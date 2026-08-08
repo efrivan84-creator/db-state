@@ -365,7 +365,8 @@ Or set a custom field:
 And use it in a hook:
 
 ```js
-beforeRead: (ctx) => {
+// hooks/beforeRead.js
+export default (ctx) => {
   ctx.filter = { ...ctx.filter, tenantId: ctx.user?.tenantId }
 }
 ```

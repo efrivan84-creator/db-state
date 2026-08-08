@@ -185,9 +185,8 @@ Important behavior:
 Access is denied by default. The server checks every RPC:
 
 ```text
-code rule for table: access[table].read/write
-  -> global code rule: access.read/write
-  -> user.access (merged from the user's groups at login)
+module hooks -> shared/table hooks from hooksDir
+  -> user.access (merged from the user's groups at login, unless a hook decided)
   -> deny
 ```
 
@@ -218,7 +217,7 @@ Field rules are enforced on the server:
 - `write` covers insert, update, and delete.
 - Delete log rows store `old`, so audit and access checks still work after the source document is gone.
 
-For rules that cannot be expressed declaratively, use code access hooks. They can decide from the user/table/log entry or lazily call `ctx.loadDoc()` only when the document is needed.
+For dynamic rules that cannot be expressed as filters, use default-exported files in `hooksDir`. A hook can inspect the request, user and table, rewrite a CRUD query, narrow fields, or explicitly allow/deny. The `sync` hook wraps the whole sync request; visibility of each change remains governed by declarative `user.access`.
 
 ## Auth and offline read
 

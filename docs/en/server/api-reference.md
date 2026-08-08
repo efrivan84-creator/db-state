@@ -47,7 +47,7 @@ createDbStateServer(config: DbStateServerConfig): DbStateServer
 |---|---|---|---|
 | `mongo` | `MongoDatabaseLike` | required | Mongo database handle. |
 | `tables` | `string[]` | required | Tables exposed through CRUD/RPC. Add `_user`, `_group` explicitly when needed. |
-| `hooksDir` | `string \| URL` | undefined | Directory of hook files; `before*` may also allow or deny. See [hooks.md](hooks.md). |
+| `hooksDir` | `string \| URL` | undefined | Existing readable directory of hook files; `before*` may also allow or deny. See [hooks.md](hooks.md). |
 | `methodsDir` | `string \| URL` | undefined | Directory of named RPC method files: `"zad.get-num"` → `rpc/zad/get-num.js`. |
 | `reloadCheckMs` | `number` | `60000` | How often hook/method files are re-checked against their mtime, ms. `0` checks every call. |
 | `password` | `PasswordHasher` | PBKDF2 | Password hash adapter. |
@@ -190,7 +190,7 @@ interface CountRequest<T> {
 }
 ```
 
-Returns the count after permission filtering. Note: this loads every matching document into memory to evaluate permissions, then counts. If you have millions of docs and need a `count` without per-row checks, write a custom handler that skips permission filtering.
+Returns `countDocuments` for the combined client and access filter. Matching documents are counted by Mongo and are not loaded into application memory.
 
 ### `sync(input)`
 
@@ -299,14 +299,10 @@ Permissions live in the `access` object of the user's groups — see [permission
 
 ## Lifecycle hooks
 
-`hooks` are lifecycle callbacks around server reads and writes. They are not permission rules: `access` decides allow/deny/fields, while hooks normalize input, add read prefilters, observe results, write side effects, and audit errors.
+Application hooks are default-exported files in `hooksDir`. They are not permission data: `access` decides rows and fields, while hooks normalize input, add read prefilters, observe results, write side effects, and audit errors. The `ServerHooks` interface below is retained for mounted modules only; it is not a `createDbStateServer` config option.
 
 ```ts
-type ServerHooks =
-  ServerHookSet &
-  Record<string, ServerHookSet | ServerHook | undefined>
-
-interface ServerHookSet<T = BaseDoc> {
+interface ServerHooks<T = BaseDoc> {
   beforeRead?: ServerHook<T>
   afterRead?: ServerHook<T>
   errorRead?: ServerHook<T>
@@ -315,8 +311,16 @@ interface ServerHookSet<T = BaseDoc> {
   errorWrite?: ServerHook<T>
 }
 
+type ServerHookDecision =
+  | boolean
+  | { allowed: boolean; reason?: string }
+  | void
+  | null
+  | undefined
+
 type ServerHook<T = BaseDoc> =
-  (ctx: ServerHookContext<T>) => void | Promise<void>
+  (ctx: ServerHookContext<T>) =>
+    ServerHookDecision | Promise<ServerHookDecision>
 ```
 
 Example:
@@ -352,9 +356,8 @@ For `load`:
 ```text
 resolve user
 beforeRead
-Mongo findOne
-access read
-field projection
+resolve user.access into an access filter and field projection
+Mongo findOne with both in the same query
 afterRead
 return result
 ```
@@ -364,8 +367,8 @@ For `getIds`, `getUnique`, and `count`:
 ```text
 resolve user
 beforeRead
-Mongo find(filter/sort/skip/limit)
-per-row access read + field projection where needed
+validate visible filter/sort fields
+Mongo find/count with the access filter and projection in the query
 afterRead
 return result
 ```

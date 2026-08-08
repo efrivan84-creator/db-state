@@ -213,7 +213,8 @@ export default (ctx) => {
 ### Скрыть поля по условию
 
 ```js
-beforeRead: (ctx) => {
+// hooks/beforeRead.js
+export default (ctx) => {
   if (ctx.method === "load" && !ctx.user.groups.includes("boss")) {
     ctx.fields = ["fio", "balans"]
   }
@@ -223,7 +224,8 @@ beforeRead: (ctx) => {
 ### Запретить с причиной
 
 ```js
-beforeWrite: (ctx) => {
+// hooks/beforeWrite.js
+export default (ctx) => {
   if (ctx.method === "remove" && ctx.table === "bill") {
     return { allowed: false, reason: "Договоры не удаляются, используйте архив" }
   }
@@ -233,7 +235,8 @@ beforeWrite: (ctx) => {
 ### Дополнить ответ
 
 ```js
-afterRead: (ctx) => {
+// hooks/afterRead.js
+export default (ctx) => {
   if (ctx.method !== "load") return
   ctx.result = { ...ctx.result, canEdit: ctx.user.groups.includes("boss") }
 }
@@ -242,7 +245,8 @@ afterRead: (ctx) => {
 ### Аудит записи
 
 ```js
-afterWrite: (ctx) => {
+// hooks/afterWrite.js
+export default (ctx) => {
   audit.push({ who: ctx.actorId, what: ctx.method, table: ctx.table, change: ctx.change })
 }
 ```

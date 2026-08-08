@@ -68,10 +68,13 @@ export interface DbStateServerConfig {
    * only to `order`. Each file default-exports the hook function; the shared
    * file runs before the table one, and the first explicit decision wins.
    *
-   * The directory listing is read once at startup, then each known file is
-   * re-checked at most every `reloadCheckMs`: editing a file applies within
-   * that window, adding one needs a restart. Hooks run on every operation, so
-   * probing the filesystem per request would cost more than it saves.
+   * The directory must exist and be readable. Its listing is read once on the
+   * first hook use, then each known file is re-checked at most every
+   * `reloadCheckMs`: editing a file applies within that window; adding or
+   * removing one needs a restart. If a loaded file becomes unavailable, its
+   * last good handler stays active until restart. Table directories may use
+   * service names such as `_user`. Hooks run on every operation, so probing
+   * the filesystem per request would cost more than it saves.
    *
    * Hooks of mounted modules are a separate layer and always run first — they
    * belong to the module, not to this configuration.

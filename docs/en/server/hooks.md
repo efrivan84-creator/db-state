@@ -40,14 +40,16 @@ Reads are `getIds`, `load`, `count`, `getUnique`, `sync`. Writes are `add`, `upd
 
 **Order:** the shared file first, then the table one. The first explicit decision (`true` or `false`) stops the chain. They share one `ctx`, so the table hook sees what the shared hook changed.
 
+The configured directory must already exist and be readable. If it cannot be scanned, the operation fails instead of silently running without application hooks. Table folders may start with `_`, so service tables such as `_user` and `_group` work normally.
+
 > A `hooks` object in the config is no longer accepted — the server throws `"hooks" is removed, use "hooksDir"` at startup. The same goes for `methods`: named RPC methods are declared only as files through `methodsDir`.
 
 ## Reloading files
 
-The directory listing is read once at startup; after that the server only touches the files it found and compares their `mtime` — but **at most once a minute**. Therefore:
+The directory listing is read once on the first hook use; after that the server only touches the files it found and compares their `mtime` — but **at most once a minute**. Therefore:
 
 - editing an existing file applies within a minute;
-- adding a new file needs a restart.
+- adding or removing a file needs a restart; if a loaded file becomes unavailable, its last good handler stays active until then.
 
 A hook is consulted on every operation, so hitting the disk before each call would cost more than the hook itself. The interval is set by `reloadCheckMs` (milliseconds); `0` checks `mtime` every time, which suits development:
 
@@ -69,7 +71,8 @@ The same rule and the same option apply to method files in `methodsDir`.
 Mutations of `ctx` apply **regardless** of the returned value. The common case is to rewrite the query and leave the decision to the group access:
 
 ```js
-beforeRead: (ctx) => {
+// hooks/beforeRead.js
+export default (ctx) => {
   if (ctx.table !== "zad" || ctx.method !== "getIds") return
   ctx.filter = { $and: [ctx.filter ?? {}, { ownerId: ctx.user._id }] }
   // nothing returned → group access decides, but on the narrowed query
@@ -83,7 +86,8 @@ beforeRead: (ctx) => {
 `beforeRead` exposes the request fields; whatever you put there goes to the database:
 
 ```js
-beforeRead: (ctx) => {
+// hooks/beforeRead.js
+export default (ctx) => {
   ctx.filter = sanitizeFilter(ctx.filter)         // getIds, count, getUnique
   if (ctx.method === "getIds") ctx.limit = Math.min(ctx.limit || 200, 200)
 }
@@ -92,7 +96,8 @@ beforeRead: (ctx) => {
 `ctx.fields` limits the returned fields and becomes a Mongo projection:
 
 ```js
-beforeRead: (ctx) => {
+// hooks/beforeRead.js
+export default (ctx) => {
   if (ctx.table === "bill" && !ctx.user.groups.includes("boss")) {
     ctx.fields = ["fio", "balans"]
   }
@@ -104,7 +109,8 @@ A hook can only **narrow** fields; it cannot widen what the group's `read_fields
 `beforeWrite` exposes `ctx.set` / `ctx.unset` (for `update`) and `ctx.obj` (for `add`):
 
 ```js
-beforeWrite: (ctx) => {
+// hooks/beforeWrite.js
+export default (ctx) => {
   if (ctx.method !== "update") return
   ctx.set.status = String(ctx.set.status).toLowerCase()
 }
@@ -113,7 +119,8 @@ beforeWrite: (ctx) => {
 ## Rewriting the response
 
 ```js
-afterRead: (ctx) => {
+// hooks/afterRead.js
+export default (ctx) => {
   if (ctx.method !== "load" || ctx.table !== "bill") return
   ctx.result = { ...ctx.result, canEdit: ctx.user.groups.includes("boss") }
 }
@@ -134,7 +141,8 @@ Writes: `id`, `obj`, `old`, `set`, `unset`, `action`, `actorId`, `now`, `change`
 ### Deny with a clear reason
 
 ```js
-beforeWrite: (ctx) => {
+// hooks/beforeWrite.js
+export default (ctx) => {
   if (ctx.method === "remove" && ctx.table === "bill") {
     return { allowed: false, reason: "Contracts are archived, not deleted" }
   }
@@ -144,7 +152,8 @@ beforeWrite: (ctx) => {
 ### System operations without permissions
 
 ```js
-beforeWrite: (ctx) => {
+// hooks/beforeWrite.js
+export default (ctx) => {
   if (ctx.req?.__internal) return true
 }
 ```
@@ -152,7 +161,8 @@ beforeWrite: (ctx) => {
 ### Audit
 
 ```js
-afterWrite: (ctx) => {
+// hooks/afterWrite.js
+export default (ctx) => {
   audit.push({ who: ctx.actorId, what: ctx.method, table: ctx.table, id: ctx.id })
 }
 ```
@@ -160,7 +170,8 @@ afterWrite: (ctx) => {
 ### Logging denials
 
 ```js
-errorRead: (ctx) => {
+// hooks/errorRead.js
+export default (ctx) => {
   console.warn(`${ctx.method} ${ctx.table}: ${ctx.error.message}`)
 }
 ```

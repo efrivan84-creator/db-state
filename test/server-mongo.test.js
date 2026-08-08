@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdir, mkdtemp, utimes, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, unlink, utimes, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -1878,6 +1878,36 @@ test("hooksDir runs the shared hook first, then the table hook", async () => {
   assert.deepEqual(await server.load({ table: "pay", id: "p1", req }), { _id: "p1" })
 })
 
+test("hooksDir supports service table folders beginning with underscore", async () => {
+  const dir = await writeDir({
+    "_user/beforeRead": "export default (ctx) => { ctx.fields = ['login'] }"
+  })
+  const mongo = createMemoryMongo()
+  await mongo.collection("_user").insertOne({ _id: "u1", login: "ivan", passwordHash: "secret" })
+  const server = createDbStateServer({ mongo, tables: ["_user"], hooksDir: dir })
+  const req = { user: { _id: "admin", groups: [], access: { fullaccess: 1 } } }
+
+  assert.deepEqual(
+    await server.load({ table: "_user", id: "u1", req }),
+    { _id: "u1", login: "ivan" }
+  )
+})
+
+test("hooksDir fails closed when its configured directory cannot be read", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "dbstate-hooks-missing-"))
+  const server = createDbStateServer({
+    mongo: createMemoryMongo(),
+    tables: ["order"],
+    hooksDir: join(parent, "missing")
+  })
+  const req = { user: { _id: "u1", groups: [], access: { fullaccess: 1 } } }
+
+  await assert.rejects(
+    () => server.load({ table: "order", id: "o1", req }),
+    /Cannot read hooksDir \(ENOENT\)/
+  )
+})
+
 test("hooksDir hook can deny, and edits apply without a restart", async () => {
   const dir = await mkdtemp(join(tmpdir(), "dbstate-hooks-"))
   await mkdir(join(dir, "order"))
@@ -1897,6 +1927,24 @@ test("hooksDir hook can deny, and edits apply without a restart", async () => {
   await utimes(file, new Date(), new Date(Date.now() + 5000))
 
   assert.deepEqual(await server.load({ table: "order", id: "o1", req }), { _id: "o1", status: "open" })
+})
+
+test("hooksDir keeps the last loaded hook active if its file disappears", async () => {
+  const dir = await writeDir({
+    "order/beforeRead": "export default () => ({ allowed: false, reason: 'protected' })"
+  })
+  const file = join(dir, "order", "beforeRead.js")
+  const server = createDbStateServer({
+    mongo: createMemoryMongo(),
+    tables: ["order"],
+    hooksDir: dir,
+    reloadCheckMs: 0
+  })
+  const req = { user: { _id: "u1", groups: [], access: { fullaccess: 1 } } }
+
+  await assert.rejects(() => server.load({ table: "order", id: "o1", req }), /protected/)
+  await unlink(file)
+  await assert.rejects(() => server.load({ table: "order", id: "o1", req }), /protected/)
 })
 
 test("hook files are re-checked no more often than reloadCheckMs", async () => {

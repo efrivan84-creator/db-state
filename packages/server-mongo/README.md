@@ -317,9 +317,9 @@ applies on the next login or reconnect.
 
 The server checks permissions in this order:
 
-1. Code rule for the table (`access[table][action]`).
-2. Global code rule (`access[action]`).
-3. `user.access`: `fullaccess`, then the `<table>.<action>` filter.
+1. Hooks contributed by mounted modules.
+2. The shared and then table-specific application hook from `hooksDir`.
+3. If no hook decided, `user.access`: `fullaccess`, then the `<table>.<action>` filter.
 4. Deny.
 
 Action mapping: `read` — `load`, `getIds`, `getUnique`, `count` and change
@@ -351,8 +351,8 @@ limit removes the limit entirely.
 
 - lists (`getIds`, `count`, `getUnique`) put the access filter straight into
   the Mongo query (`$or` for several), so the database returns only permitted
-  rows, and `getIds` requests only `_id` (projection); `count` uses `countDocuments` without fetching data (when the table
-  has no code read rules — otherwise the per-row path is used);
+  rows, and `getIds` requests only `_id` (projection); `count` uses
+  `countDocuments` without fetching data;
 - `load` checks the access filter with the same `findOne`, and with
   `read_fields` asks Mongo only for the allowed fields (projection);
   `getUnique` fetches only the requested field;
@@ -370,8 +370,9 @@ accessAllows(user.access, "bill", "write")            // any access at all
 accessAllows(user.access, "zad", "read", doc, user)   // check a concrete document
 ```
 
-Field-level rights and row-level conditions are expressed with code rules
-(next section) — they can return `{ fields: [...] }` or inspect the document.
+Row conditions and field whitelists are the declarative `read` / `write` and
+`read_fields` / `write_fields` values above. Use file hooks for dynamic
+decisions that cannot be represented by those filters.
 
 ## Hooks
 
@@ -407,6 +408,10 @@ beforeWrite  afterWrite  errorWrite
 A file in the root applies to every table, a file in a subfolder only to that
 table; the shared one runs first. Files are re-checked against their mtime at
 most every `reloadCheckMs` (default 60s), so an edit applies without a restart.
+Adding or removing a hook file requires a restart; a loaded handler stays
+active if its file becomes unavailable.
+The configured `hooksDir` must exist and be readable; table folders may start
+with `_`, for example `_user`.
 
 ### What to return
 
@@ -505,7 +510,7 @@ When `from` is more than 20 days old, the server returns `reset: true`; the clie
 ## Internal Files
 
 - `index.js` - CRUD, sync, log writing, public factory.
-- `access.js` - code rules, `accessAllows` and field-level filtering.
+- `access.js` - declarative group access, `accessAllows` and field filtering.
 - `hooks.js` - server read/write lifecycle hook runner.
 - `rpc.js` - WebSocket RPC method dispatch.
 - `socket.js` - WebSocket client registry and broadcast.

@@ -127,9 +127,14 @@ The server iterates returned log entries and filters per request:
 ```js
 for (const change of changes) {
   const access = await resolveAccess(config, "read", {
-    req, table: change.table, id: change.id,
-    obj: change.action === "delete" ? change.old : await maybeLoadDoc(),
-    old: change.old, change, permissionRules: cachedRulesForTable
+    req, user, table: change.table, id: change.id,
+    old: change.old,
+    obj: change.action === "delete" ? change.old : undefined,
+    change,
+    matchAccessFilters: change.action === "delete" ? undefined : (filters) =>
+      mongo.collection(change.table).findOne({
+        $and: [{ _id: change.id }, accessFiltersQuery(filters, user)]
+      })
   })
   if (!access.allowed) continue
   const filtered = filterChangeFields(change, access.fields)
@@ -141,7 +146,7 @@ Optimisations:
 
 1. `user.access` is already on the socket — filtering needs no permission reads.
 2. A `{}` grant is decided from `{ table, user, change }` alone — no document reads.
-3. A row filter is checked by the database with one filtered `findOne` per change; code rules load the document lazily via `ctx.loadDoc()`.
+3. A row filter is checked by the database with one filtered `findOne` per change; the access path is declarative and has no per-row JavaScript fallback.
 
 Field filtering:
 

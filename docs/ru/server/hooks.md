@@ -40,14 +40,16 @@ export default (ctx) => {
 
 **Порядок:** сначала общий файл, затем файл таблицы. Первое явное решение (`true` или `false`) останавливает цепочку. `ctx` у них общий, поэтому табличный хук видит правки общего.
 
+Явно заданная папка должна уже существовать и читаться. Если её нельзя просканировать, операция завершится ошибкой, а не продолжит работу без хуков приложения. Имя подпапки таблицы может начинаться с `_`, поэтому служебные `_user` и `_group` поддерживаются как обычно.
+
 > Объект `hooks` в конфиге больше не принимается — сервер упадёт при старте с `"hooks" is removed, use "hooksDir"`. Так же и `methods`: именованные RPC-методы объявляются только файлами через `methodsDir`.
 
 ## Перезагрузка файлов
 
-Состав папки читается один раз при старте, дальше сервер обращается только к найденным файлам и сверяет `mtime` — но **не чаще раза в минуту**. Отсюда:
+Состав папки читается один раз при первом обращении к хукам, дальше сервер обращается только к найденным файлам и сверяет `mtime` — но **не чаще раза в минуту**. Отсюда:
 
 - правка существующего файла применяется в пределах минуты;
-- новый файл подхватывается после перезапуска.
+- добавление или удаление файла требует перезапуска; если загруженный файл стал недоступен, до перезапуска продолжает работать его последняя успешная версия.
 
 Хук вызывается на каждой операции, поэтому обращение к диску перед каждым вызовом стоило бы дороже самого хука. Интервал меняется опцией `reloadCheckMs` (миллисекунды); `0` — сверяться с `mtime` каждый раз, что удобно при разработке:
 
@@ -69,7 +71,8 @@ createDbStateServer({ mongo, tables, hooksDir: "./hooks", reloadCheckMs: 0 })
 Изменения `ctx` применяются **всегда**, независимо от возврата. Обычный случай — поправить запрос и оставить решение правам группы:
 
 ```js
-beforeRead: (ctx) => {
+// hooks/beforeRead.js
+export default (ctx) => {
   if (ctx.table !== "zad" || ctx.method !== "getIds") return
   ctx.filter = { $and: [ctx.filter ?? {}, { ownerId: ctx.user._id }] }
   // возврата нет → решают права группы, но уже по суженному запросу
@@ -83,7 +86,8 @@ beforeRead: (ctx) => {
 В `beforeRead` доступны поля запроса — всё, что в них записано, уходит в базу:
 
 ```js
-beforeRead: (ctx) => {
+// hooks/beforeRead.js
+export default (ctx) => {
   ctx.filter = sanitizeFilter(ctx.filter)         // getIds, count, getUnique
   if (ctx.method === "getIds") ctx.limit = Math.min(ctx.limit || 200, 200)
 }
@@ -92,7 +96,8 @@ beforeRead: (ctx) => {
 `ctx.fields` ограничивает набор возвращаемых полей — попадает в projection запроса:
 
 ```js
-beforeRead: (ctx) => {
+// hooks/beforeRead.js
+export default (ctx) => {
   if (ctx.table === "bill" && !ctx.user.groups.includes("boss")) {
     ctx.fields = ["fio", "balans"]
   }
@@ -104,7 +109,8 @@ beforeRead: (ctx) => {
 В `beforeWrite` правятся `ctx.set` / `ctx.unset` (для `update`) и `ctx.obj` (для `add`):
 
 ```js
-beforeWrite: (ctx) => {
+// hooks/beforeWrite.js
+export default (ctx) => {
   if (ctx.method !== "update") return
   ctx.set.status = String(ctx.set.status).toLowerCase()
 }
@@ -113,7 +119,8 @@ beforeWrite: (ctx) => {
 ## Правка ответа
 
 ```js
-afterRead: (ctx) => {
+// hooks/afterRead.js
+export default (ctx) => {
   if (ctx.method !== "load" || ctx.table !== "bill") return
   ctx.result = { ...ctx.result, canEdit: ctx.user.groups.includes("boss") }
 }
@@ -134,7 +141,8 @@ afterRead: (ctx) => {
 ### Запрет с понятной причиной
 
 ```js
-beforeWrite: (ctx) => {
+// hooks/beforeWrite.js
+export default (ctx) => {
   if (ctx.method === "remove" && ctx.table === "bill") {
     return { allowed: false, reason: "Договоры не удаляются, используйте архив" }
   }
@@ -144,7 +152,8 @@ beforeWrite: (ctx) => {
 ### Системные операции без прав
 
 ```js
-beforeWrite: (ctx) => {
+// hooks/beforeWrite.js
+export default (ctx) => {
   if (ctx.req?.__internal) return true
 }
 ```
@@ -152,7 +161,8 @@ beforeWrite: (ctx) => {
 ### Аудит
 
 ```js
-afterWrite: (ctx) => {
+// hooks/afterWrite.js
+export default (ctx) => {
   audit.push({ who: ctx.actorId, what: ctx.method, table: ctx.table, id: ctx.id })
 }
 ```
@@ -160,7 +170,8 @@ afterWrite: (ctx) => {
 ### Логирование отказов
 
 ```js
-errorRead: (ctx) => {
+// hooks/errorRead.js
+export default (ctx) => {
   console.warn(`${ctx.method} ${ctx.table}: ${ctx.error.message}`)
 }
 ```
