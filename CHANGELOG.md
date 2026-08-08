@@ -4,6 +4,11 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.3.0
+
+- **Breaking: hooks and named RPC methods are declared as files only.** The `hooks` and `methods` config objects are gone — `createDbStateServer` throws `"hooks" is removed, use "hooksDir"` (and likewise for `methods`) rather than ignoring them, so protection written in the config cannot stop working silently. `hooksDir` holds `<dir>/beforeRead.js` for every table and `<dir>/order/beforeRead.js` for one; the shared file runs first and the first explicit decision wins. Module hooks are a separate layer and still run before both — they belong to the module (that is how `@db-state/server-files` guards its own table), not to the application configuration.
+- File hooks and file methods are re-checked against their mtime **at most once a minute** instead of on every call. Both are consulted on every operation, so a `stat` per call was the most expensive part of a trivial hook. An edit therefore applies within a minute; the interval is set by `reloadCheckMs`, and `0` restores per-call checking for development.
+
 ## 0.2.0
 
 - **Breaking: `change.logId` is renamed to `change._id`.** The log document carried the same value twice — `logId` in the payload and `_id` as the Mongo key — because the protocol field and the storage key were kept separate. They never diverged, so the duplicate is gone: the log entry's own `_id` is the change id. Update anything that reads `change.logId` from `sync` and recreate the log index as `{ createdAt: 1, _id: 1 }` (the old `{ createdAt: 1, logId: 1 }` no longer matches the sort). `createLogId` keeps its name and role — it generates the value.

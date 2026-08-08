@@ -166,10 +166,9 @@ dbState.socket.addClient(ws, {
 Храни `tenantId` в `_user` и документах, затем добавь хук:
 
 ```js
-hooks: {
-  beforeRead(ctx) {
-    ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
-  }
+// hooks/beforeRead.js
+export default (ctx) => {
+  ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
 }
 ```
 

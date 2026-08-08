@@ -25,7 +25,8 @@ import {
 const dbState = createDbStateServer({
   mongo,
   tables: ["order"],
-  hooks
+  hooksDir: "./hooks",
+  methodsDir: "./rpc"
 })
 ```
 
@@ -35,7 +36,9 @@ const dbState = createDbStateServer({
 |---|---|
 | `mongo` | Mongo database-like object. |
 | `tables` | Прикладные таблицы. |
-| `hooks` | Хуки жизненного цикла; `before*` могут разрешить или запретить. См. [hooks.md](hooks.md). |
+| `hooksDir` | Папка с хуками-файлами; `before*` могут разрешить или запретить. См. [hooks.md](hooks.md). |
+| `methodsDir` | Папка с RPC-методами-файлами: `"zad.get-num"` → `rpc/zad/get-num.js`. |
+| `reloadCheckMs` | Как часто сверять файлы хуков и методов с mtime, мс. По умолчанию `60000`, `0` — каждый раз. |
 | `password` | Password adapter. |
 | `socket` | Socket hub config. |
 | `files` | File modules. |
@@ -184,18 +187,15 @@ Socket hub обрабатывает `dbstate:*` messages и может проп�
 ## Lifecycle hooks
 
 ```js
-hooks: {
-  beforeRead(ctx) {},
-  afterRead(ctx) {},
-  errorRead(ctx) {},
-  beforeWrite(ctx) {},
-  afterWrite(ctx) {},
-  errorWrite(ctx) {}
-}
+hooks/
+  beforeRead.js      afterRead.js      errorRead.js
+  beforeWrite.js     afterWrite.js     errorWrite.js
+  <таблица>/
+    beforeRead.js    ...               только для этой таблицы
 ```
 
-Каждый хук объявляется один раз на весь сервер; таблица разбирается внутри по
-`ctx.table`. Возврат `false` / `{ allowed: false, reason }` запрещает операцию,
+Каждый файл экспортирует хук по умолчанию. Общий файл выполняется перед
+табличным. Возврат `false` / `{ allowed: false, reason }` запрещает операцию,
 `true` разрешает без проверки прав группы, `undefined` передаёт решение правам.
 
 ### Read order

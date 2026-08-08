@@ -33,13 +33,14 @@ await state.order.update({
 Добавляй `tenantId` в документы и пользователя:
 
 ```js
-hooks: {
-  beforeRead(ctx) {
-    ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
-  },
-  beforeWrite(ctx) {
-    if (ctx.action === "insert") ctx.obj.tenantId = ctx.user.tenantId
-  }
+// hooks/beforeRead.js
+export default (ctx) => {
+  ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
+}
+
+// hooks/beforeWrite.js
+export default (ctx) => {
+  if (ctx.action === "insert") ctx.obj.tenantId = ctx.user.tenantId
 }
 ```
 
@@ -56,10 +57,9 @@ hooks: {
 Если условие сложнее (зависит от времени, внешних данных), тот же смысл через хук:
 
 ```js
-hooks: {
-  beforeRead: (ctx) => {
-    if (ctx.table !== "order") return
-    ctx.filter = { $and: [ctx.filter ?? {}, { ownerId: ctx.user._id }] }
+// hooks/order/beforeRead.js
+export default (ctx) => {
+  ctx.filter = { $and: [ctx.filter ?? {}, { ownerId: ctx.user._id }] }
   }
 }
 ```

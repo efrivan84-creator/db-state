@@ -99,7 +99,8 @@
 ### Причина запрета
 
 ```js
-beforeWrite: (ctx) => {
+// hooks/bill/beforeWrite.js
+export default (ctx) => {
   if (ctx.method === "remove" && ctx.old?.locked) {
     return { allowed: false, reason: "Договор закрыт, удаление запрещено" }
   }
@@ -161,23 +162,20 @@ beforeWrite: (ctx) => {
 
 ## Объявление хуков
 
-Хук на каждое имя ровно один, общий на весь сервер. Таблица разбирается внутри него по `ctx.table`:
+Хуки лежат файлами в `hooksDir`: файл в корне действует на все таблицы, файл в подпапке — только на свою.
 
-```js
-hooks: {
-  beforeRead: (ctx) => {
-    if (ctx.table === "zad") { ... }
-    if (ctx.table === "bill") { ... }
-  },
-  beforeWrite: (ctx) => { ... },
-  afterRead: (ctx) => { ... },
-  afterWrite: (ctx) => { ... },
-  errorRead: (ctx) => { ... },
-  errorWrite: (ctx) => { ... }
-}
+```text
+hooks/
+  beforeRead.js       все таблицы
+  zad/
+    beforeRead.js     только zad
+  bill/
+    beforeWrite.js
 ```
 
-Вложенности по таблицам (`hooks: { zad: { beforeRead } }`) нет. Один хук — одна точка входа: не нужно помнить, какой из двух сработает первым и что будет, если первый запретил. Общие для всех таблиц проверки — санитизация фильтра, ограничение `limit` — пишутся без `if` и работают везде.
+Общий файл выполняется первым, табличный — вторым, `ctx` у них один. Первое явное решение (`true` или `false`) останавливает цепочку, поэтому общая проверка может запретить операцию, не доходя до табличной.
+
+Так общие для всех таблиц вещи — санитизация фильтра, ограничение `limit` — пишутся без единого `if` и работают везде, а частные правила не тонут в ветвлении по `ctx.table`.
 
 ---
 
@@ -186,12 +184,11 @@ hooks: {
 ### Ограничить список своими записями
 
 ```js
-hooks: {
-  beforeRead: (ctx) => {
-    if (ctx.table !== "zad" || ctx.method !== "getIds") return
-    ctx.filter = { $and: [ctx.filter ?? {}, { ownerId: ctx.user._id }] }
-    // возврата нет → дальше отработают права группы
-  }
+// hooks/zad/beforeRead.js
+export default (ctx) => {
+  if (ctx.method !== "getIds") return
+  ctx.filter = { $and: [ctx.filter ?? {}, { ownerId: ctx.user._id }] }
+  // возврата нет → дальше отработают права группы
 }
 ```
 
@@ -206,11 +203,10 @@ hooks: {
 ### Санитизация запроса от клиента
 
 ```js
-hooks: {
-  beforeRead: (ctx) => {
-    if (ctx.filter) ctx.filter = sanitizeFilter(ctx.filter)
-    if (ctx.method === "getIds") ctx.limit = clampLimit(ctx.limit)
-  }
+// hooks/beforeRead.js — действует на все таблицы
+export default (ctx) => {
+  if (ctx.filter) ctx.filter = sanitizeFilter(ctx.filter)
+  if (ctx.method === "getIds") ctx.limit = clampLimit(ctx.limit)
 }
 ```
 

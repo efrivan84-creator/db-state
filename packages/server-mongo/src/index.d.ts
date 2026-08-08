@@ -63,27 +63,35 @@ export interface DbStateServerConfig {
   tables: ReadonlyArray<string>
 
   /**
-   * Lifecycle hooks around server reads and writes. Declared once per name for
-   * the whole server; a `before*` hook may also allow or deny the request.
-   * Permissions themselves live in the `access` object of the user's groups.
+   * Directory holding the application's hooks as files:
+   * `<dir>/beforeRead.js` applies to every table, `<dir>/order/beforeRead.js`
+   * only to `order`. Each file default-exports the hook function; the shared
+   * file runs before the table one, and the first explicit decision wins.
+   *
+   * The directory listing is read once at startup, then each known file is
+   * re-checked at most every `reloadCheckMs`: editing a file applies within
+   * that window, adding one needs a restart. Hooks run on every operation, so
+   * probing the filesystem per request would cost more than it saves.
+   *
+   * Hooks of mounted modules are a separate layer and always run first — they
+   * belong to the module, not to this configuration.
    */
-  hooks?: ServerHooks
-
-  /**
-   * Custom named RPC methods registered in the same WebSocket router as the
-   * built-in CRUD/sync. Names that collide with built-ins throw at startup.
-   */
-  methods?: Record<string, RpcHandler>
+  hooksDir?: string | URL
 
   /**
    * Directory with file-based RPC methods: "zad.get-num" maps to
    * `<dir>/zad/get-num.js`, whose default export is the handler. Files are
-   * imported lazily on first call and re-imported when their mtime changes,
-   * so edits apply without a restart. Checked after built-ins and `methods`.
-   * Every file method receives `db` (this server's Mongo) and `api`
-   * (the db-state server) by default.
+   * imported lazily on first call and re-checked at most every
+   * `reloadCheckMs`. Every file method receives `db` (this server's Mongo)
+   * and `api` (the db-state server) by default.
    */
   methodsDir?: string | URL
+
+  /**
+   * How often a hook or method file may be re-checked against its mtime, ms.
+   * Default `60000`; `0` checks on every call, which suits development.
+   */
+  reloadCheckMs?: number
 
   /**
    * Extra properties spread into every file-based method request on top of
@@ -236,11 +244,12 @@ export interface DbStateServerModule {
   table?: string
   tables?: ReadonlyArray<string>
   /**
-   * Module hooks run before the application's hook of the same name; the first
-   * explicit decision stops the chain.
+   * Module hooks run before the application's file hooks of the same name; the
+   * first explicit decision stops the chain. This is how a module protects its
+   * own table — it is part of the module, not of the app configuration, so it
+   * does not move into `hooksDir`.
    */
   hooks?: ServerHooks
-  methods?: Record<string, RpcHandler>
   bind?(context: {
     api: DbStateServer
     config: unknown

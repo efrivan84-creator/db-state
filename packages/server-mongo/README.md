@@ -132,32 +132,9 @@ For read RPCs, the WebSocket `dbstate:rpc_result` envelope may include `meta.fie
 
 ## Custom RPC methods
 
-Besides the standard CRUD/sync you can register named server methods via `methods`:
+Besides the standard CRUD/sync, named server methods are declared as files in `methodsDir` — the method name becomes the file path.
 
-```js
-const dbState = createDbStateServer({
-  mongo,
-  tables: ["zad"],
-  methods: {
-    "zad.next-number": async ({ body, client, userId, sessionId }) => {
-      const [last] = await mongo.collection("zad").find({}).sort({ num: -1 }).limit(1).toArray()
-      return { num: (last?.num ?? 0) + 1 }
-    }
-  }
-})
-```
-
-Clients call them with the same RPC envelope: `{ type: "dbstate:rpc", method: "zad.next-number", payload: {...} }`.
-
-- A handler receives `{ body, client, userId, sessionId }` and decides what to read and write itself.
-- RPC is rejected until the socket is authorized, same as the built-in methods.
-- Names that collide with built-ins (`load`, `sync`, ...) are forbidden — the server throws at startup.
-- Modules (`files`) can contribute methods through a `methods` field, like `hooks`.
-- Permission checks and the change log only apply to the standard CRUD: if a named method writes to the database directly, permissions, audit log and broadcast are its own responsibility (or call `api.add`/`api.update` from inside the method).
-
-### File-based methods: `methodsDir`
-
-Instead of registering handlers you can point the server at a directory — the method name becomes the file path:
+### `methodsDir`
 
 ```js
 const dbState = createDbStateServer({
@@ -180,10 +157,12 @@ export default async ({ body, user, db }) => {
 }
 ```
 
-- The file is imported lazily on the first call and **re-imported when its mtime changes** — edits apply without a server restart.
+- The file is imported lazily on the first call and re-checked against its mtime at most every `reloadCheckMs` (default 60s), so edits apply without a restart.
 - Every file method receives `db` (this server's Mongo), `api` (the db-state server: `api.add`/`api.update` write with log and broadcast) and `user` (from `client.user`) by default. Need more — `methodsContext: {...}` spreads on top (same-named keys override the defaults).
 - Name segments are validated (`[a-z0-9_-]`, dot-separated): a client-supplied name can never leave the directory.
-- Built-ins and `methods` take precedence; the file is checked last.
+- Built-in method names (`load`, `sync`, ...) take precedence; a file cannot shadow them.
+- RPC is rejected until the socket is authorized, same as for built-in methods.
+- Permission checks and the change log only apply to standard CRUD: a method writing to the database directly owns its permissions, audit and broadcast — or calls `api.add` / `api.update`, which do all three.
 - Reload uses `import` with `?v=mtime`: old module copies stay in memory (ESM cannot be evicted). Production files do not change, development reloads are negligible; handlers must not keep module-level state.
 
 ## Auth
@@ -400,30 +379,22 @@ Hooks are where your application steps into the built-in commands: rewrite the
 query, narrow the fields, allow or deny, enrich the response.
 
 ```js
-const dbState = createDbStateServer({
-  mongo,
-  tables: ["order"],
-  hooks: {
-    beforeRead: (ctx) => {
-      // Applies to every table.
-      ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
-      if (ctx.table === "order" && ctx.method === "getIds") ctx.limit = Math.min(ctx.limit || 200, 200)
-    },
-    beforeWrite: (ctx) => {
-      if (ctx.table !== "order") return
-      if (ctx.method === "remove" && !ctx.user.groups.includes("admin")) {
-        return { allowed: false, reason: "Only an admin can delete orders" }
-      }
-      if (ctx.method === "update") ctx.set.updatedBy = ctx.user._id
-    },
-    afterWrite: ({ change }) => {
-      // change is already in the log.
-    },
-    errorWrite: ({ error, method }) => {
-      console.warn("write failed", method, error.message)
-    }
+const dbState = createDbStateServer({ mongo, tables: ["order"], hooksDir: "./hooks" })
+```
+
+```js
+// hooks/beforeRead.js — applies to every table
+export default (ctx) => {
+  ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
+}
+
+// hooks/order/beforeWrite.js — only for the order table
+export default (ctx) => {
+  if (ctx.method === "remove" && !ctx.user.groups.includes("admin")) {
+    return { allowed: false, reason: "Only an admin can delete orders" }
   }
-})
+  if (ctx.method === "update") ctx.set.updatedBy = ctx.user._id
+}
 ```
 
 Hook names:
@@ -433,8 +404,9 @@ beforeRead   afterRead   errorRead
 beforeWrite  afterWrite  errorWrite
 ```
 
-Each is declared once for the whole server; branch on `ctx.table` inside. There
-is no per-table nesting such as `hooks: { order: { beforeRead } }`.
+A file in the root applies to every table, a file in a subfolder only to that
+table; the shared one runs first. Files are re-checked against their mtime at
+most every `reloadCheckMs` (default 60s), so an edit applies without a restart.
 
 ### What to return
 

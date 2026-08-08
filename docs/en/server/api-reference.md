@@ -47,7 +47,9 @@ createDbStateServer(config: DbStateServerConfig): DbStateServer
 |---|---|---|---|
 | `mongo` | `MongoDatabaseLike` | required | Mongo database handle. |
 | `tables` | `string[]` | required | Tables exposed through CRUD/RPC. Add `_user`, `_group` explicitly when needed. |
-| `hooks` | `ServerHooks` | `{}` | Lifecycle hooks around read/write operations; `before*` may also allow or deny. See [hooks.md](hooks.md). |
+| `hooksDir` | `string \| URL` | undefined | Directory of hook files; `before*` may also allow or deny. See [hooks.md](hooks.md). |
+| `methodsDir` | `string \| URL` | undefined | Directory of named RPC method files: `"zad.get-num"` → `rpc/zad/get-num.js`. |
+| `reloadCheckMs` | `number` | `60000` | How often hook/method files are re-checked against their mtime, ms. `0` checks every call. |
 | `password` | `PasswordHasher` | PBKDF2 | Password hash adapter. |
 | `authLoginFields` | `string[]` | `["login"]` | `_user` fields accepted by `dbstate:login`, e.g. `["login", "email", "phone"]`. |
 | `normalizeAuthLogin` | `(value, field) => string` | `String(value).trim()` | Normalizes submitted login values before matching each configured field. |
@@ -320,29 +322,24 @@ type ServerHook<T = BaseDoc> =
 Example:
 
 ```js
-createDbStateServer({
-  mongo,
-  tables: ["order"],
-  hooks: {
-    beforeRead: async (ctx) => {
-      ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
-    },
-    beforeWrite: async (ctx) => {
-      if (ctx.table === "order" && ctx.method === "update") ctx.set.updatedBy = ctx.user._id
-    },
-    afterWrite: async ({ change }) => {
-      // change is already written to the log.
-    },
-    errorWrite: async ({ error, method }) => {
-      console.warn("write failed", method, error.message)
-    }
-  }
-})
+createDbStateServer({ mongo, tables: ["order"], hooksDir: "./hooks" })
+```
+
+```js
+// hooks/beforeRead.js
+export default async (ctx) => {
+  ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
+}
+
+// hooks/order/beforeWrite.js
+export default async (ctx) => {
+  if (ctx.method === "update") ctx.set.updatedBy = ctx.user._id
+}
 ```
 
 ### Hook lookup order
 
-Each hook is declared once for the whole server; branch on `ctx.table` inside.
+A hook file in the root applies to every table, a file in a subfolder only to that table; the shared one runs first.
 Hooks contributed by mounted modules run before the application hook of the same
 name, and the first explicit decision (`true` / `false`) stops the chain.
 
@@ -451,11 +448,9 @@ ctx.sessionId
 The main use is server-side prefiltering:
 
 ```js
-hooks: {
-  beforeRead: async (ctx) => {
-    if (ctx.table !== "order") return
-    ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
-  }
+// hooks/order/beforeRead.js
+export default async (ctx) => {
+  ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
 }
 ```
 
@@ -494,10 +489,9 @@ Avoid recursion by one of these patterns:
 Example guard:
 
 ```js
-hooks: {
-  afterWrite: async (ctx) => {
-    if (ctx.table !== "order") return
-    if (ctx.req?.internalHook) return
+// hooks/order/afterWrite.js
+export default async (ctx) => {
+  if (ctx.req?.internalHook) return
 
     await dbState.add({
       table: "audit",

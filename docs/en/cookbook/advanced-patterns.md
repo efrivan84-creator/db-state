@@ -99,22 +99,18 @@ Use an access filter with `"$groupid"` when the tenant is a document field — o
 For policies that data filters cannot express, a hook is the fallback:
 
 ```js
-const dbState = createDbStateServer({
-  mongo,
-  tables: ["order"],
-  hooks: {
-    beforeRead: (ctx) => {
-      if (ctx.table !== "order") return
-      ctx.filter = { $and: [ctx.filter ?? {}, { tenantId: { $in: ctx.user.tenantIds ?? [] } }] }
-    },
-    beforeWrite: (ctx) => {
-      if (ctx.table !== "order" || ctx.method === "add") return
-      if (!ctx.user.tenantIds?.includes(ctx.old?.tenantId)) {
-        return { allowed: false, reason: "Order belongs to another tenant" }
-      }
-    }
+// hooks/order/beforeRead.js
+export default (ctx) => {
+  ctx.filter = { $and: [ctx.filter ?? {}, { tenantId: { $in: ctx.user.tenantIds ?? [] } }] }
+}
+
+// hooks/order/beforeWrite.js
+export default (ctx) => {
+  if (ctx.method === "add") return
+  if (!ctx.user.tenantIds?.includes(ctx.old?.tenantId)) {
+    return { allowed: false, reason: "Order belongs to another tenant" }
   }
-})
+}
 ```
 
 The read hook rewrites the query, so the database never returns other tenants' rows.
@@ -132,14 +128,13 @@ When the condition needs code — say it depends on the time of day or an extern
 service — use a hook and leave the rest to the group access:
 
 ```js
-hooks: {
-  beforeRead: (ctx) => {
-    if (ctx.user.disabled) return { allowed: false, reason: "Account disabled" }
-    if (ctx.table === "task" && !ctx.user.groups?.includes("admin")) {
-      ctx.filter = { $and: [ctx.filter ?? {}, { ownerId: ctx.user._id }] }
-    }
-    // nothing returned → the group access decides on the narrowed query
+// hooks/beforeRead.js
+export default (ctx) => {
+  if (ctx.user.disabled) return { allowed: false, reason: "Account disabled" }
+  if (ctx.table === "task" && !ctx.user.groups?.includes("admin")) {
+    ctx.filter = { $and: [ctx.filter ?? {}, { ownerId: ctx.user._id }] }
   }
+  // nothing returned → the group access decides on the narrowed query
 }
 ```
 

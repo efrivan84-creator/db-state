@@ -6,7 +6,12 @@ import { createPrefixedTableName, normalizeServicePrefix } from "@db-state/core"
 
 const DEFAULT_CHUNK_SIZE = 512 * 1024
 const DEFAULT_MAX_SIZE = 50 * 1024 * 1024
-const FILE_FIELDS = ["ownerId", "token", "name", "mime", "size", "status", "downloadPolicy", "info"]
+// Поля таблицы файлов, которые можно отдавать клиенту. storageKey сюда не
+// входит: путь в хранилище не должен покидать сервер.
+//
+// Экспортируется, чтобы hooksDir-версия защиты не переписывала список вручную
+// и не разъезжалась с библиотекой — см. hooks в module ниже.
+export const FILE_FIELDS = ["ownerId", "token", "name", "mime", "size", "status", "downloadPolicy", "info"]
 
 export function createFileModule(input = {}) {
   const options = normalizeOptions(input)
@@ -22,6 +27,9 @@ export function createFileModule(input = {}) {
     // вызовы помечены internalReq и проходят без прав группы. Всё остальное
     // подчиняется обычному access группы на таблице файлов, например
     //   { file: { read: { ownerId: "$adminid" }, read_fields: [...] } }
+    //
+    // Это хуки модуля: библиотека вызывает их до файловых хуков приложения,
+    // независимо от hooksDir. Переносить их в папку не нужно.
     hooks: {
       beforeRead: (ctx) => {
         if (ctx.table !== options.table) return

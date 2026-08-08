@@ -44,7 +44,7 @@ export function createDbStateServer(options) {
   // resolver spreads it at call time.
   const fileMethodsContext = config.methodsDir ? { db: config.mongo } : undefined
   const resolveFileMethod = config.methodsDir
-    ? createMethodsDirResolver(config.methodsDir, fileMethodsContext)
+    ? createMethodsDirResolver(config.methodsDir, fileMethodsContext, config.reloadCheckMs)
     : undefined
   let router
   const socket = createSocketHub(config.socket, async (client, message) => {
@@ -412,10 +412,6 @@ export function createDbStateServer(options) {
   }
 
   router = createHandlers({ add, count, getIds, getUnique, load, remove, sync, update })
-  for (const [name, handler] of Object.entries(config.methods)) {
-    if (router[name]) throw new Error(`db-state RPC method already exists: ${name}`)
-    router[name] = handler
-  }
 
   const api = { add, count, getIds, getUnique, load, remove, socket, sync, update }
   if (fileMethodsContext) Object.assign(fileMethodsContext, { api }, config.methodsContext)
@@ -491,8 +487,16 @@ function normalizeOptions(options) {
   const logCollection = options.logCollection ?? createPrefixedTableName(servicePrefix, "log", "log")
   const files = normalizeModules(options.files, servicePrefix)
   const fileTables = files.flatMap((module) => module.tables ?? [module.table]).filter(Boolean)
-  const hooks = chainHooks([...files.map((module) => module.hooks ?? {}), options.hooks ?? {}])
-  const methods = mergeConfigs(options.methods ?? {}, ...files.map((module) => module.methods ?? {}))
+
+  // Хуки и RPC-методы приложения объявляются только файлами: hooksDir и
+  // methodsDir. Объекты в конфиге больше не принимаются — источник правды
+  // один, и его видно в файловой системе.
+  assertRemovedOption(options, "hooks", "hooksDir")
+  assertRemovedOption(options, "methods", "methodsDir")
+
+  // Хуки подключённых модулей — отдельный слой: это внутреннее устройство
+  // модуля, а не конфигурация приложения. Выполняются до файловых.
+  const moduleHooks = groupModuleHooks(files)
 
   return {
     authRateLimit: undefined,
@@ -503,7 +507,6 @@ function normalizeOptions(options) {
     changesBroadcastDelay: 3000,
     changesBroadcastRate: 100,
     getUser: async ({ req, client }) => req?.user ?? req?.client?.user ?? client?.user ?? makeUser(req?.client ?? req ?? client),
-    hooks: {},
     now: () => new Date().toISOString(),
     normalizeAuthLogin: defaultNormalizeAuthLogin,
     onAuthWarning: undefined,
@@ -513,9 +516,8 @@ function normalizeOptions(options) {
     authLoginFields: normalizeAuthLoginFields(options.authLoginFields),
     files,
     groupTable,
-    hooks,
-    methods,
     logCollection,
+    moduleHooks,
     servicePrefix,
     tables: new Set(normalizeTables([...(options.tables ?? []), ...fileTables])),
     userTable
@@ -529,35 +531,26 @@ function normalizeModules(input, servicePrefix) {
 }
 
 
-function mergeConfigs(...items) {
-  return Object.assign({}, ...items)
-}
-
-// Хуки подключённых модулей и приложения не затирают друг друга, а идут
-// цепочкой: сначала модули, потом хук приложения. Первый явный ответ
-// (true/false) останавливает цепочку — остальные уже не вызываются.
-function chainHooks(sources) {
-  const names = new Set(sources.flatMap((source) => Object.keys(source ?? {})))
+// hooks и methods объектами больше не принимаются: и то, и другое
+// объявляется файлами. Падаем с внятным текстом, а не игнорируем молча —
+// иначе защита, написанная в конфиге, тихо перестала бы работать.
+// { beforeRead: [хук модуля A, хук модуля B], ... } — по порядку подключения.
+function groupModuleHooks(files) {
   const out = {}
 
-  for (const name of names) {
-    const chain = sources.map((source) => source?.[name]).filter((hook) => typeof hook === "function")
-    if (chain.length === 0) continue
-    if (chain.length === 1) {
-      out[name] = chain[0]
-      continue
-    }
-
-    out[name] = async (ctx) => {
-      for (const hook of chain) {
-        const decision = await hook(ctx)
-        if (decision !== undefined && decision !== null) return decision
-      }
-      return undefined
+  for (const module of files) {
+    for (const [name, hook] of Object.entries(module.hooks ?? {})) {
+      if (typeof hook !== "function") continue
+      ;(out[name] ??= []).push(hook)
     }
   }
 
   return out
+}
+
+function assertRemovedOption(options, removed, replacement) {
+  if (options[removed] === undefined) return
+  throw new Error(`createDbStateServer: "${removed}" is removed, use "${replacement}" (files)`)
 }
 
 function normalizeAuthLoginFields(fields) {

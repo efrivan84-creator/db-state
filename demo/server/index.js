@@ -1,6 +1,6 @@
 import { WebSocketServer } from "ws"
 
-import { accessAllows, createDbStateServer } from "@db-state/server-mongo"
+import { createDbStateServer } from "@db-state/server-mongo"
 import { createMemoryMongo } from "./memoryMongo.js"
 
 const port = Number(process.env.DB_STATE_DEMO_PORT ?? 8787)
@@ -97,61 +97,16 @@ const dbState = createDbStateServer({
   // правит всё, менеджер читает все заказы без поля margin, а пишет только
   // в свои — фильтр { ownerId: "$adminid" } уходит прямо в запрос к базе.
   //
-  // Хуки — для того, что фильтром не выразить. Каждый объявляется один раз
-  // на весь сервер, таблица разбирается внутри по ctx.table.
-  hooks: {
-    beforeRead: (ctx) => {
-      if (ctx.table !== "order") return
+  // Хуки — для того, что фильтром не выразить. Лежат файлами: hooks/afterWrite.js
+  // действует на все таблицы, hooks/order/beforeRead.js — только на order.
+  hooksDir: new URL("./hooks/", import.meta.url),
 
-      // Потолок выборки для всех, включая руководителя.
-      if (ctx.method === "getIds") ctx.limit = Math.min(ctx.limit || 50, 50)
+  // Именованные RPC-методы: "order.next-number" → rpc/order/next-number.js.
+  methodsDir: new URL("./rpc/", import.meta.url),
 
-      // Динамическое сужение полей: ctx.fields уходит в projection запроса.
-      // Сузить можно, расширить сверх read_fields группы — нет.
-      if (ctx.method === "load" && !ctx.user.groups.includes("admin")) {
-        ctx.fields = ["number", "status", "client", "total", "comment", "ownerId"]
-      }
-
-      // Ничего не вернули → дальше решает access группы.
-    },
-
-    beforeWrite: (ctx) => {
-      if (ctx.table !== "order") return
-
-      // Архивный заказ не правит никто, даже руководитель: запрет из хука
-      // сильнее прав группы.
-      if (ctx.old?.status === "в архиве") {
-        return { allowed: false, reason: "Архивный заказ изменять нельзя" }
-      }
-
-      // Нормализуем статус до записи.
-      if (ctx.method === "update" && typeof ctx.set.status === "string") {
-        ctx.set.status = ctx.set.status.trim().toLowerCase()
-      }
-    },
-
-    afterWrite: (ctx) => {
-      // Точка для аудита: запись уже в базе и в журнале, запретить нельзя.
-      console.log(`[аудит] ${ctx.actorId} ${ctx.method} ${ctx.table}/${ctx.id}`)
-    },
-
-    errorWrite: (ctx) => {
-      console.warn(`[отказ] ${ctx.method} ${ctx.table}: ${ctx.error.message}`)
-    }
-  },
-
-  // Именованный RPC-метод: своя серверная команда рядом со стандартным CRUD.
-  // Права проверяет сам — встроенные проверки на него не распространяются.
-  methods: {
-    "order.next-number": async ({ client }) => {
-      if (!accessAllows(client?.user?.access, "order", "write")) {
-        throw new Error("Недостаточно прав для выдачи номера")
-      }
-
-      const [last] = await mongo.collection("order").find({}).sort({ number: -1 }).limit(1).toArray()
-      return { number: (last?.number ?? 1000) + 1 }
-    }
-  },
+  // Демо правится на ходу, поэтому сверяемся с mtime каждый раз.
+  // По умолчанию файлы перечитываются не чаще раза в минуту.
+  reloadCheckMs: 0,
 
   password: {
     hash: async (password) => `demo:${password}`,

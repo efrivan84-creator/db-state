@@ -129,30 +129,9 @@ RPC отклоняется, пока сокет не авторизован.
 
 ## Свои RPC-методы
 
-Кроме стандартных CRUD/sync можно зарегистрировать именованные серверные методы через `methods`:
+Кроме стандартных CRUD/sync именованные серверные методы объявляются файлами в `methodsDir` — имя метода становится путём к файлу.
 
-```js
-const dbState = createDbStateServer({
-  mongo,
-  tables: ["zad"],
-  methods: {
-    "zad.next-number": async ({ body, client, userId, sessionId }) => {
-      const [last] = await mongo.collection("zad").find({}).sort({ num: -1 }).limit(1).toArray()
-      return { num: (last?.num ?? 0) + 1 }
-    }
-  }
-})
-```
-
-Клиент вызывает их тем же RPC envelope: `{ type: "dbstate:rpc", method: "zad.next-number", payload: {...} }`.
-
-- Обработчик получает `{ body, client, userId, sessionId }` и сам решает, что читать и писать.
-- RPC отклоняется до авторизации сокета, как и стандартные методы.
-- Имена, совпадающие со встроенными (`load`, `sync`, ...), запрещены — сервер бросит ошибку при старте.
-- Модули (`files`) могут добавлять свои методы через поле `methods`, как `hooks`.
-- Проверки прав и лог изменений применяются только к стандартным CRUD: если именованный метод пишет в базу напрямую, права, audit log и broadcast — его собственная ответственность (или вызывайте `api.add`/`api.update` изнутри метода).
-
-### Методы-файлы: `methodsDir`
+### `methodsDir`
 
 Вместо регистрации можно отдать папку — имя метода само превращается в путь к файлу:
 
@@ -348,30 +327,22 @@ accessAllows(user.access, "zad", "read", doc, user)   // проверить ко
 ограничивает поля, разрешает или запрещает, дополняет ответ.
 
 ```js
-const dbState = createDbStateServer({
-  mongo,
-  tables: ["order"],
-  hooks: {
-    beforeRead: (ctx) => {
-      // Общий префильтр для всех таблиц.
-      ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
-      if (ctx.table === "order" && ctx.method === "getIds") ctx.limit = Math.min(ctx.limit || 200, 200)
-    },
-    beforeWrite: (ctx) => {
-      if (ctx.table !== "order") return
-      if (ctx.method === "remove" && !ctx.user.groups.includes("admin")) {
-        return { allowed: false, reason: "Удалять заказы может только администратор" }
-      }
-      if (ctx.method === "update") ctx.set.updatedBy = ctx.user._id
-    },
-    afterWrite: ({ change }) => {
-      // change уже записан в лог.
-    },
-    errorWrite: ({ error, method }) => {
-      console.warn("write failed", method, error.message)
-    }
+const dbState = createDbStateServer({ mongo, tables: ["order"], hooksDir: "./hooks" })
+```
+
+```js
+// hooks/beforeRead.js — общий префильтр для всех таблиц
+export default (ctx) => {
+  ctx.filter = { ...ctx.filter, tenantId: ctx.user.tenantId }
+}
+
+// hooks/order/beforeWrite.js — только для таблицы order
+export default (ctx) => {
+  if (ctx.method === "remove" && !ctx.user.groups.includes("admin")) {
+    return { allowed: false, reason: "Удалять заказы может только администратор" }
   }
-})
+  if (ctx.method === "update") ctx.set.updatedBy = ctx.user._id
+}
 ```
 
 Имена хуков:
@@ -381,8 +352,9 @@ beforeRead   afterRead   errorRead
 beforeWrite  afterWrite  errorWrite
 ```
 
-Каждый объявляется один раз на весь сервер; таблица разбирается внутри по
-`ctx.table`. Вложенности вида `hooks: { order: { beforeRead } }` нет.
+Файл в корне действует на все таблицы, файл в подпапке — только на свою;
+общий выполняется первым. Файлы сверяются с mtime не чаще `reloadCheckMs`
+(по умолчанию 60 с), поэтому правка применяется без перезапуска.
 
 ### Что возвращать
 

@@ -1,6 +1,8 @@
 import { stat } from "node:fs/promises"
 import { pathToFileURL } from "node:url"
 
+import { reloadCheckMs } from "./file-cache.js"
+
 // File-based RPC methods: method name maps to a file inside the configured
 // directory ("zad.get-num" -> <dir>/zad/get-num.js), the file's default export
 // is the handler. Files are imported lazily on first call and re-imported when
@@ -12,13 +14,19 @@ import { pathToFileURL } from "node:url"
 
 const SEGMENT_RE = /^[a-z0-9][a-z0-9_-]*$/
 
-export function createMethodsDirResolver(dir, context = {}) {
+export function createMethodsDirResolver(dir, context = {}, checkMs) {
+  const every = reloadCheckMs(checkMs)
   const base = baseUrl(dir)
   const cache = new Map()
 
   return async function resolve(method) {
     const url = methodFileUrl(base, method)
     if (!url) return undefined
+
+    const cached = cache.get(url.href)
+    // Свежесть файла проверяем не чаще RELOAD_CHECK_MS: иначе каждый вызов
+    // метода начинался бы с обращения к диску.
+    if (cached && Date.now() - cached.checkedAt < every) return cached.handler
 
     let info
     try {
@@ -28,8 +36,10 @@ export function createMethodsDirResolver(dir, context = {}) {
     }
     if (!info.isFile()) return undefined
 
-    const cached = cache.get(url.href)
-    if (cached && cached.mtimeMs === info.mtimeMs) return cached.handler
+    if (cached && cached.mtimeMs === info.mtimeMs) {
+      cached.checkedAt = Date.now()
+      return cached.handler
+    }
 
     const module = await import(url.href + "?v=" + info.mtimeMs)
     if (typeof module.default !== "function") {
@@ -37,7 +47,7 @@ export function createMethodsDirResolver(dir, context = {}) {
     }
 
     const handler = (req) => module.default({ ...req, ...context, user: req.client?.user })
-    cache.set(url.href, { mtimeMs: info.mtimeMs, handler })
+    cache.set(url.href, { mtimeMs: info.mtimeMs, checkedAt: Date.now(), handler })
     return handler
   }
 }

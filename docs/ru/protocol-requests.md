@@ -67,12 +67,16 @@
 
 ```js
 createDbStateServer({
-  methods: { "zad.get-num": async ({ body, user, db }) => { ... } },
   methodsDir: import.meta.dirname + "/rpc"   // "zad.get-num" → rpc/zad/get-num.js
 })
 ```
 
-Вызов с клиента — `state.socket.rpc("zad.get-num", payload)`. Файлы из `methodsDir` перечитываются при изменении, перезапуск не нужен. Встроенные проверки прав и запись в журнал изменений на свои методы **не распространяются** — за это отвечает сам обработчик. Подробнее: [API сервера](server/api-reference.md).
+```js
+// rpc/zad/get-num.js
+export default async ({ body, user, db }) => { ... }
+```
+
+Вызов с клиента — `state.socket.rpc("zad.get-num", payload)`. Правка файла применяется без перезапуска (проверка не чаще раза в минуту, см. `reloadCheckMs`). Встроенные проверки прав и запись в журнал изменений на свои методы **не распространяются** — за это отвечает сам обработчик. Подробнее: [API сервера](server/api-reference.md).
 
 ---
 

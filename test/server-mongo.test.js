@@ -512,9 +512,9 @@ test("internal writes without a user use system actor metadata", async () => {
     now: () => "2026-05-21T10:00:01.000Z",
     createLogId: () => "log1",
     // Системные записи сервера проходят без прав группы.
-    hooks: {
-      beforeWrite: (ctx) => (ctx.req?.__internal === true ? true : undefined)
-    }
+    hooksDir: await writeDir({
+      beforeWrite: "export default (ctx) => (ctx.req?.__internal === true ? true : undefined)"
+    })
   })
 
   const add = await server.add({
@@ -726,11 +726,9 @@ test("socket RPC marks load responses with fields filtered by read fields", asyn
     mongo,
     tables: ["order"],
     // Динамическое ограничение полей — ctx.fields в хуке.
-    hooks: {
-      beforeRead: (ctx) => {
-        if (ctx.table === "order") ctx.fields = ["status"]
-      }
-    }
+    hooksDir: await writeDir({
+      "order/beforeRead": "export default (ctx) => { ctx.fields = ['status'] }"
+    })
   })
   await mongo.collection("order").insertOne({ _id: "o1", status: "open", margin: 120 })
   const client = {
@@ -1174,12 +1172,9 @@ test("beforeRead can explicitly narrow visible fields to an empty list", async (
   const server = createDbStateServer({
     mongo,
     tables: ["admin"],
-    hooks: {
-      beforeRead(ctx) {
-        ctx.fields = []
-        return true
-      }
-    }
+    hooksDir: await writeDir({
+      beforeRead: "export default (ctx) => { ctx.fields = []; return true }"
+    })
   })
   await mongo.collection("admin").insertOne({ _id: "a1", fio: "Иван" })
 
@@ -1606,14 +1601,11 @@ test("hooks allow and deny across tables without group access", async () => {
   const server = createDbStateServer({
     mongo,
     tables: ["order", "product"],
-    hooks: {
-      // Один хук на весь сервер, таблица разбирается внутри.
-      beforeRead: (ctx) => (ctx.table === "product" ? true : undefined),
-      beforeWrite: (ctx) => {
-        if (ctx.table !== "order") return
-        return { allowed: false, reason: "Заказы правит только менеджер" }
-      }
-    }
+    // Хук на конкретную таблицу — отдельным файлом в её папке.
+    hooksDir: await writeDir({
+      "product/beforeRead": "export default () => true",
+      "order/beforeWrite": "export default () => ({ allowed: false, reason: 'Заказы правит только менеджер' })"
+    })
   })
 
   await mongo.collection("product").insertOne({ _id: "p1", title: "Box" })
@@ -1644,29 +1636,31 @@ test("hooks allow and deny across tables without group access", async () => {
 
 test("read hooks can prefilter queries and observe results", async () => {
   const mongo = createMemoryMongo()
-  const events = []
+  // Хуки живут в файлах, поэтому след оставляем в самом запросе: req виден
+  // и хуку, и тесту.
   const server = createDbStateServer({
     mongo,
     tables: ["order"],
-    hooks: {
-      beforeRead: async (ctx) => {
-        events.push(`before:${ctx.table}:${ctx.method}`)
+    hooksDir: await writeDir({
+      beforeRead: `export default async (ctx) => {
+        ctx.req.events.push(\`before:\${ctx.table}:\${ctx.method}\`)
         // Правка фильтра применяется, хотя решение оставлено access группы.
         ctx.filter = { ...ctx.filter, status: "open", ownerId: ctx.user._id }
-      },
-      afterRead: async (ctx) => {
-        events.push(`after:${ctx.result.length}`)
-      }
-    }
+      }`,
+      afterRead: `export default async (ctx) => {
+        ctx.req.events.push(\`after:\${ctx.result.length}\`)
+      }`
+    })
   })
   await mongo.collection("order").insertOne({ _id: "o1", status: "open", ownerId: "u1" })
   await mongo.collection("order").insertOne({ _id: "o2", status: "closed", ownerId: "u1" })
   await mongo.collection("order").insertOne({ _id: "o3", status: "open", ownerId: "u2" })
 
+  const events = []
   const ids = await server.getIds({
     table: "order",
     filter: {},
-    req: { user: { _id: "u1", groups: [], access: { order: { read: {} } } } }
+    req: { events, user: { _id: "u1", groups: [], access: { order: { read: {} } } } }
   })
 
   assert.deepEqual(ids, ["o1"])
@@ -1675,29 +1669,29 @@ test("read hooks can prefilter queries and observe results", async () => {
 
 test("write hooks can mutate writes and observe appended changes", async () => {
   const mongo = createMemoryMongo()
-  const events = []
   const server = createDbStateServer({
     mongo,
     tables: ["order"],
     now: () => "2026-05-21T10:00:01.000Z",
     createLogId: idSeq(),
-    hooks: {
-      beforeWrite: async (ctx) => {
-        events.push(`before:${ctx.table}:${ctx.action}`)
+    hooksDir: await writeDir({
+      beforeWrite: `export default async (ctx) => {
+        ctx.req.events.push(\`before:\${ctx.table}:\${ctx.action}\`)
         ctx.set.status = String(ctx.set.status).toLowerCase()
         ctx.set.hook = true
-      },
-      afterWrite: async (ctx) => {
-        events.push(`after:${ctx.change.action}:${ctx.change.id}`)
-      }
-    }
+      }`,
+      afterWrite: `export default async (ctx) => {
+        ctx.req.events.push(\`after:\${ctx.change.action}:\${ctx.change.id}\`)
+      }`
+    })
   })
 
+  const events = []
   await server.update({
     table: "order",
     id: "o1",
     set: { status: "OPEN" },
-    req: { user: { _id: "u1", groups: [], access: { order: { write: {} } } } }
+    req: { events, user: { _id: "u1", groups: [], access: { order: { write: {} } } } }
   })
 
   assert.deepEqual(await mongo.collection("order").findOne({ _id: "o1" }), {
@@ -1718,14 +1712,14 @@ test("error hooks run for failed reads and writes without swallowing errors", as
   const server = createDbStateServer({
     mongo,
     tables: ["order"],
-    hooks: {
-      errorRead: async (ctx) => events.push(`read:${ctx.method}:${ctx.error.message}`),
-      errorWrite: async (ctx) => events.push(`write:${ctx.method}:${ctx.error.message}`)
-    }
+    hooksDir: await writeDir({
+      errorRead: "export default async (ctx) => ctx.req.events.push(`read:${ctx.method}:${ctx.error.message}`)",
+      errorWrite: "export default async (ctx) => ctx.req.events.push(`write:${ctx.method}:${ctx.error.message}`)"
+    })
   })
 
   await assert.rejects(
-    () => server.load({ table: "order", id: "o1", req: { user: { _id: "u1", groups: [] } } }),
+    () => server.load({ table: "order", id: "o1", req: { events, user: { _id: "u1", groups: [] } } }),
     /Read denied/
   )
   await assert.rejects(
@@ -1733,14 +1727,14 @@ test("error hooks run for failed reads and writes without swallowing errors", as
       table: "order",
       id: "o1",
       set: { status: "open" },
-      req: { user: { _id: "u1", groups: [] } }
+      req: { events, user: { _id: "u1", groups: [] } }
     }),
     /Write denied/
   )
 
   // Обращение к таблице вне tables тоже доходит до error-хука.
   await assert.rejects(
-    () => server.getIds({ table: "hack", req: { user: { _id: "u1", groups: [] } } }),
+    () => server.getIds({ table: "hack", req: { events, user: { _id: "u1", groups: [] } } }),
     /Unknown db-state table/
   )
 
@@ -1814,9 +1808,7 @@ test("a hook decides before the user's group access", async () => {
   const server = createDbStateServer({
     mongo,
     tables: ["order"],
-    hooks: {
-      beforeWrite: (ctx) => (ctx.table === "order" ? false : undefined)
-    }
+    hooksDir: await writeDir({ "order/beforeWrite": "export default () => false" })
   })
 
   // Право группы полное, но хук запретил раньше.
@@ -1831,58 +1823,6 @@ test("a hook decides before the user's group access", async () => {
   )
 })
 
-test("server exposes custom RPC methods through options.methods", async () => {
-  const mongo = createMemoryMongo()
-  const server = createDbStateServer({
-    mongo,
-    tables: ["zad"],
-    methods: {
-      "zad.next-number": async ({ body, userId }) => ({ num: (body.from ?? 0) + 1, userId })
-    }
-  })
-  const sent = []
-  const client = { send: (message) => sent.push(JSON.parse(message)) }
-  server.socket.addClient(client, { user: { _id: "u-admin", groups: ["admins"] }, userId: "u-admin", sessionId: "s1" })
-
-  await server.socket.handleMessage(client, JSON.stringify({
-    type: "dbstate:rpc",
-    id: "r1",
-    method: "zad.next-number",
-    payload: { from: 41 }
-  }))
-
-  const result = sent.find((message) => message.type === "dbstate:rpc_result" && message.id === "r1")
-  assert.deepEqual(result.result, { num: 42, userId: "u-admin" })
-})
-
-test("server merges custom RPC methods from modules", async () => {
-  const mongo = createMemoryMongo()
-  const server = createDbStateServer({
-    mongo,
-    tables: [],
-    files: [{ methods: { "module.ping": async () => "pong" } }]
-  })
-  const sent = []
-  const client = { send: (message) => sent.push(JSON.parse(message)) }
-  server.socket.addClient(client, { user: { _id: "u1", groups: [] }, userId: "u1", sessionId: "s1" })
-
-  await server.socket.handleMessage(client, JSON.stringify({ type: "dbstate:rpc", id: "r1", method: "module.ping", payload: {} }))
-
-  const result = sent.find((message) => message.type === "dbstate:rpc_result" && message.id === "r1")
-  assert.equal(result.result, "pong")
-})
-
-test("server rejects custom methods that collide with built-in RPC", () => {
-  assert.throws(
-    () => createDbStateServer({
-      mongo: createMemoryMongo(),
-      tables: ["zad"],
-      methods: { load: async () => null }
-    }),
-    /already exists: load/
-  )
-})
-
 test("methodsDir serves file-based methods and hot-reloads on mtime change", async () => {
   const dir = await mkdtemp(join(tmpdir(), "dbstate-methods-"))
   await mkdir(join(dir, "zad"))
@@ -1893,7 +1833,9 @@ test("methodsDir serves file-based methods and hot-reloads on mtime change", asy
     mongo: createMemoryMongo(),
     tables: [],
     methodsDir: dir,
-    methodsContext: { db: "DB" }
+    methodsContext: { db: "DB" },
+    // Тест правит файл и сразу ждёт перезагрузки: сверяемся с mtime каждый раз.
+    reloadCheckMs: 0
   })
   const sent = []
   const client = { send: (message) => sent.push(JSON.parse(message)) }
@@ -1910,6 +1852,119 @@ test("methodsDir serves file-based methods and hot-reloads on mtime change", asy
   await server.socket.handleMessage(client, JSON.stringify({ type: "dbstate:rpc", id: "r2", method: "zad.get-num", payload: { from: 41 } }))
   const second = sent.find((message) => message.type === "dbstate:rpc_result" && message.id === "r2")
   assert.deepEqual(second.result, { num: 141 })
+})
+
+test("hooksDir runs the shared hook first, then the table hook", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dbstate-hooks-"))
+  await mkdir(join(dir, "order"))
+  // Общий хук помечает каждое чтение, табличный — только своё.
+  await writeFile(join(dir, "beforeRead.js"), "export default (ctx) => { ctx.seen = ['shared'] }\n")
+  await writeFile(join(dir, "order", "beforeRead.js"), "export default (ctx) => { ctx.seen.push('order') }\n")
+
+  const mongo = createMemoryMongo()
+  await mongo.collection("order").insertOne({ _id: "o1", status: "open" })
+  await mongo.collection("pay").insertOne({ _id: "p1", sum: 10 })
+  const server = createDbStateServer({ mongo, tables: ["order", "pay"], hooksDir: dir })
+  const req = { user: { _id: "u1", groups: [], access: { fullaccess: 1 } } }
+
+  // Хуки видят и правят один и тот же ctx, поэтому след виден в ctx.fields:
+  // общий ставит поле, табличный дописывает своё.
+  await writeFile(join(dir, "beforeRead.js"), "export default (ctx) => { ctx.fields = ['_id'] }\n")
+  await writeFile(join(dir, "order", "beforeRead.js"), "export default (ctx) => { ctx.fields = [...ctx.fields, 'status'] }\n")
+
+  // order: сработали оба — вернулось поле, добавленное табличным хуком.
+  assert.deepEqual(await server.load({ table: "order", id: "o1", req }), { _id: "o1", status: "open" })
+  // pay: только общий — sum отфильтрован, хотя прав на него хватает.
+  assert.deepEqual(await server.load({ table: "pay", id: "p1", req }), { _id: "p1" })
+})
+
+test("hooksDir hook can deny, and edits apply without a restart", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dbstate-hooks-"))
+  await mkdir(join(dir, "order"))
+  const file = join(dir, "order", "beforeRead.js")
+  await writeFile(file, "export default () => ({ allowed: false, reason: 'сначала нельзя' })\n")
+
+  const mongo = createMemoryMongo()
+  await mongo.collection("order").insertOne({ _id: "o1", status: "open" })
+  // Тест правит файл и сразу ждёт перезагрузки: сверяемся с mtime каждый раз.
+  const server = createDbStateServer({ mongo, tables: ["order"], hooksDir: dir, reloadCheckMs: 0 })
+  const req = { user: { _id: "u1", groups: [], access: { fullaccess: 1 } } }
+
+  await assert.rejects(() => server.load({ table: "order", id: "o1", req }), /сначала нельзя/)
+
+  // Правка существующего файла подхватывается по mtime.
+  await writeFile(file, "export default () => undefined\n")
+  await utimes(file, new Date(), new Date(Date.now() + 5000))
+
+  assert.deepEqual(await server.load({ table: "order", id: "o1", req }), { _id: "o1", status: "open" })
+})
+
+test("hook files are re-checked no more often than reloadCheckMs", async () => {
+  const dir = await writeDir({ "order/beforeRead": "export default (ctx) => { ctx.fields = ['a'] }" })
+  const file = join(dir, "order", "beforeRead.js")
+
+  const mongo = createMemoryMongo()
+  await mongo.collection("order").insertOne({ _id: "o1", a: 1, b: 2 })
+  // Интервал по умолчанию — минута, поэтому правка внутри минуты не видна.
+  const server = createDbStateServer({ mongo, tables: ["order"], hooksDir: dir })
+  const req = { user: { _id: "u1", groups: [], access: { fullaccess: 1 } } }
+
+  assert.deepEqual(await server.load({ table: "order", id: "o1", req }), { _id: "o1", a: 1 })
+
+  await writeFile(file, "export default (ctx) => { ctx.fields = ['b'] }\n")
+  await utimes(file, new Date(), new Date(Date.now() + 5000))
+
+  // Файл изменён, но интервал ещё не истёк — работает прежняя версия.
+  assert.deepEqual(await server.load({ table: "order", id: "o1", req }), { _id: "o1", a: 1 })
+})
+
+test("hooks and methods as config objects are rejected", () => {
+  // Молча игнорировать нельзя: защита, написанная в конфиге, тихо
+  // перестала бы работать.
+  assert.throws(
+    () => createDbStateServer({ mongo: createMemoryMongo(), tables: [], hooks: { beforeRead: () => {} } }),
+    /"hooks" is removed, use "hooksDir"/
+  )
+  assert.throws(
+    () => createDbStateServer({ mongo: createMemoryMongo(), tables: [], methods: { ping: async () => 1 } }),
+    /"methods" is removed, use "methodsDir"/
+  )
+})
+
+test("module hooks run even though config hooks are gone", async () => {
+  const mongo = createMemoryMongo()
+  await mongo.collection("secret").insertOne({ _id: "s1", title: "Плюс", hidden: "нельзя" })
+
+  // Модуль защищает свою таблицу сам — это часть модуля, а не конфигурации,
+  // поэтому в hooksDir его хуки переносить не нужно.
+  const server = createDbStateServer({
+    mongo,
+    tables: [],
+    files: [{
+      table: "secret",
+      hooks: { beforeRead: (ctx) => { ctx.fields = ["title"] } }
+    }],
+    hooksDir: await writeDir({ beforeRead: "export default (ctx) => { ctx.seenByFileHook = true }" })
+  })
+
+  const req = { user: { _id: "u1", groups: [], access: { fullaccess: 1 } } }
+  // Хук модуля скрыл поле, файловый хук приложения тоже отработал.
+  assert.deepEqual(await server.load({ table: "secret", id: "s1", req }), { _id: "s1", title: "Плюс" })
+})
+
+test("hooksDir ignores files that are not hook names", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "dbstate-hooks-"))
+  // README и вспомогательный файл рядом не должны ломать загрузку.
+  await writeFile(join(dir, "README.md"), "# хуки\n")
+  await writeFile(join(dir, "helper.js"), "export const x = 1\n")
+  await writeFile(join(dir, "beforeRead.js"), "export default (ctx) => { ctx.limit = 5 }\n")
+
+  const mongo = createMemoryMongo()
+  await mongo.collection("order").insertOne({ _id: "o1" })
+  const server = createDbStateServer({ mongo, tables: ["order"], hooksDir: dir })
+  const req = { user: { _id: "u1", groups: [], access: { fullaccess: 1 } } }
+
+  assert.deepEqual(await server.getIds({ table: "order", filter: {}, req }), ["o1"])
 })
 
 test("methodsDir file methods receive db and api by default", async () => {
@@ -1958,7 +2013,7 @@ test("custom RPC methods require an authenticated client", async () => {
   const server = createDbStateServer({
     mongo: createMemoryMongo(),
     tables: [],
-    methods: { ping: async () => "pong" }
+    methodsDir: await writeDir({ ping: "export default async () => 'pong'" }, "dbstate-methods-")
   })
   const sent = []
   const client = { send: (message) => sent.push(JSON.parse(message)) }
@@ -2066,6 +2121,21 @@ class MemoryCollection {
       }
     }
   }
+}
+
+// Хуки и методы объявляются файлами, поэтому тесты пишут их во временную
+// папку. Значение — исходный текст модуля: { "beforeRead": "export default ..." }
+// для общих, { "order/beforeRead": "..." } для табличных.
+async function writeDir(files, prefix = "dbstate-hooks-") {
+  const dir = await mkdtemp(join(tmpdir(), prefix))
+
+  for (const [name, source] of Object.entries(files)) {
+    const parts = name.split("/")
+    if (parts.length > 1) await mkdir(join(dir, ...parts.slice(0, -1)), { recursive: true })
+    await writeFile(join(dir, ...parts) + ".js", source + "\n")
+  }
+
+  return dir
 }
 
 async function allowTable(mongo, table, group) {

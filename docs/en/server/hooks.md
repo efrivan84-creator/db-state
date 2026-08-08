@@ -8,24 +8,54 @@ For the full call order see the [request flow map](../request-flow.md).
 
 ## Declaring hooks
 
-There are six hooks, each declared once for the whole server. Branch on `ctx.table` inside:
+Hooks are files in the `hooksDir` directory. The file name is the hook name, the folder is the table name:
 
-```js
-createDbStateServer({
-  mongo,
-  tables: ["order", "bill"],
-  hooks: {
-    beforeRead: (ctx) => { ... },
-    afterRead: (ctx) => { ... },
-    errorRead: (ctx) => { ... },
-    beforeWrite: (ctx) => { ... },
-    afterWrite: (ctx) => { ... },
-    errorWrite: (ctx) => { ... }
-  }
-})
+```text
+hooks/
+  beforeRead.js          every table
+  beforeWrite.js
+  order/
+    beforeRead.js        order only
+    afterWrite.js
+  bill/
+    beforeWrite.js
 ```
 
+```js
+createDbStateServer({ mongo, tables: ["order", "bill"], hooksDir: "./hooks" })
+```
+
+Each file default-exports the hook:
+
+```js
+// hooks/order/beforeRead.js
+export default (ctx) => {
+  if (ctx.method === "getIds") ctx.limit = Math.min(ctx.limit || 200, 200)
+}
+```
+
+There are six names: `beforeRead`, `afterRead`, `errorRead`, `beforeWrite`, `afterWrite`, `errorWrite`. Anything else in the directory is ignored, so a README or a helper module next to them breaks nothing.
+
 Reads are `getIds`, `load`, `count`, `getUnique`, `sync`. Writes are `add`, `update`, `remove`. The exact command is always in `ctx.method`.
+
+**Order:** the shared file first, then the table one. The first explicit decision (`true` or `false`) stops the chain. They share one `ctx`, so the table hook sees what the shared hook changed.
+
+> A `hooks` object in the config is no longer accepted — the server throws `"hooks" is removed, use "hooksDir"` at startup. The same goes for `methods`: named RPC methods are declared only as files through `methodsDir`.
+
+## Reloading files
+
+The directory listing is read once at startup; after that the server only touches the files it found and compares their `mtime` — but **at most once a minute**. Therefore:
+
+- editing an existing file applies within a minute;
+- adding a new file needs a restart.
+
+A hook is consulted on every operation, so hitting the disk before each call would cost more than the hook itself. The interval is set by `reloadCheckMs` (milliseconds); `0` checks `mtime` every time, which suits development:
+
+```js
+createDbStateServer({ mongo, tables, hooksDir: "./hooks", reloadCheckMs: 0 })
+```
+
+The same rule and the same option apply to method files in `methodsDir`.
 
 ## What to return
 
@@ -137,7 +167,11 @@ errorRead: (ctx) => {
 
 ## Module hooks
 
-Mounted modules (such as `@db-state/server-files`) declare their own hooks. They run **before** the application hook of the same name, and the first explicit decision (`true` or `false`) stops the chain. Nothing is overwritten, so you can declare your own `beforeRead` safely.
+Mounted modules (such as `@db-state/server-files`) declare their own hooks. This is the module's internals: that is how it protects its own table and lets its own internal calls through.
+
+They run **before** the application's file hooks of the same name, and the first explicit decision (`true` or `false`) stops the chain. They do not need to be — and should not be — restated in `hooksDir`; they travel with the module.
+
+Part of the same is expressible as group permissions: `read_fields` on the file table hides service fields without any hook. The hook is for what a filter cannot express.
 
 ## Where to put what
 
