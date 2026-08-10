@@ -1,4 +1,4 @@
-import type { SocketClient } from "./socket"
+import type { SocketClient } from "./socket.js"
 
 /** Pluggable password hashing primitive used by the auth layer. */
 export interface PasswordHasher {

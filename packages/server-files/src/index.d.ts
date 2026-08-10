@@ -1,4 +1,4 @@
-import type { DbStateServer, DbStateServerConfig } from "@db-state/server-mongo"
+import type { DbStateServer, ServerHooks } from "@db-state/server-mongo"
 
 export type DownloadPolicy =
   | { mode: "public" }
@@ -43,8 +43,7 @@ export interface FileModuleOptions {
 export interface FileModule {
   table: string
   tables: string[]
-  access: NonNullable<DbStateServerConfig["access"]>
-  hooks: NonNullable<DbStateServerConfig["hooks"]>
+  hooks: ServerHooks<FileRecord>
   bind(context: { api: DbStateServer; config: unknown; mongo: unknown; socket: DbStateServer["socket"] }): void
   handleMessage(client: unknown, message: { type?: string; [key: string]: unknown }): Promise<boolean>
   handleRawMessage(client: unknown, raw: unknown): Promise<void>

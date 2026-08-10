@@ -6,8 +6,9 @@ Release notes and project status for db-state.
 
 ## 0.3.1
 
-- Hooks now receive `db` and `api` in `ctx`, the same pair file methods already got. A hook could decide a request's fate but not act on it: reacting to a write — raising a flag on a related document, writing a row through the change log — meant importing the Mongo handle at module level, and `api` was not reachable at all. `db` is the driver as-is (no permission checks, no change log); `api` runs the same commands the client does. Both are assigned right before the hook runs rather than when `ctx` is created, because `api` is assembled last and does not exist while the first requests are served. A value already on `ctx` wins, so module hooks can substitute their own.
+- Hooks now receive `db` and `api` in `ctx`, the same pair file methods already got. A hook could decide a request's fate but not act on it: reacting to a write — raising a flag on a related document, writing a row through the change log — meant importing the Mongo handle at module level, and `api` was not reachable at all. `db` is the driver as-is (no permission checks, no change log); `api` runs the same commands the client does. Injection happens centrally immediately before the hook chain; `api` is assembled at the end of `createDbStateServer` but attached before the factory returns, so the first request receives it too. A value already on `ctx` wins, so module hooks can substitute their own for following hooks.
 - Writing to the hook's own table from `afterWrite` re-enters that hook. There is no built-in guard: mark `req` (`{ ...ctx.req, internal: true }`) and return early when the marker is present — `req` reaches the hook unchanged, so the marker survives the nested call.
+- Type declarations now resolve under ESM `moduleResolution: NodeNext`: relative declaration imports include `.js`, `ServerHookContext` exposes `db` / `api`, and `@db-state/server-files` no longer declares the removed config-level `access` property on its runtime module.
 
 ## 0.3.0
 

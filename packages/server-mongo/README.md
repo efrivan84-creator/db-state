@@ -432,6 +432,13 @@ the query and still leave the decision to the group access.
 `afterWrite` runs after the Mongo write, the append-log and the broadcast, so it
 cannot deny; `ctx.change` and `ctx.result` are available.
 
+Every hook receives `ctx.db`, the raw Mongo handle, and `ctx.api`, this
+db-state server's CRUD/sync API. Use `db` for server-only data that should
+bypass permissions and the change log; use `api` when the nested write must
+run normal permissions, append a change and wake clients. A same-table
+`afterWrite` call through `api` re-enters the hook, so pass a marker in `req`
+and return early on the nested call.
+
 `errorRead` / `errorWrite` receive `ctx.error` and do not swallow it — the
 original error still reaches the caller.
 

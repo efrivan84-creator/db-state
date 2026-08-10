@@ -26,6 +26,8 @@ import type {
   MongoDatabaseLike, MongoCollectionLike, MongoCursorLike,
   AccessContext, AccessDecision, AccessUser,
   UserAccess, AccessTableEntry, AccessFilter,
+  ServerHookContext, ServerHookDecision, ServerHook, ServerHooks,
+  DbStateServerModule,
   PasswordHasher, AuthHandlers, LoginMessage, AuthMessage, LogoutMessage,
   BroadcastOptions, ClientMeta, DetachClient, SocketAdapter, SocketClient, SocketHub,
   RpcHandler, RpcRequest, RpcRouter,
@@ -302,6 +304,40 @@ Permissions live in the `access` object of the user's groups — see [permission
 Application hooks are default-exported files in `hooksDir`. They are not permission data: `access` decides rows and fields, while hooks normalize input, add read prefilters, observe results, write side effects, and audit errors. The `ServerHooks` interface below is retained for mounted modules only; it is not a `createDbStateServer` config option.
 
 ```ts
+interface ServerHookContext<T extends BaseDoc = BaseDoc> {
+  db: MongoDatabaseLike  // raw Mongo; bypasses permissions/log/broadcast
+  api: DbStateServer     // normal db-state commands
+  req?: unknown
+  user?: AccessUser
+  table?: string         // absent on the outer sync hook
+  method: "load" | "getIds" | "getUnique" | "count" | "sync"
+        | "add" | "update" | "remove"
+  id?: string
+  action?: Change<T>["action"]
+  obj?: T
+  old?: T
+  set?: Partial<T> & Record<string, unknown>
+  unset?: string[]
+  clientObj?: Partial<T>
+  clientSet?: Partial<T> & Record<string, unknown>
+  clientUnset?: string[]
+  filter?: Filter<T>
+  sort?: Record<string, 1 | -1>
+  skip?: number
+  limit?: number
+  field?: string
+  fields?: string[]
+  from?: string
+  to?: string
+  sessionId?: string
+  actorId?: string
+  now?: string
+  rows?: T[]
+  change?: Change<T>
+  result?: unknown
+  error?: Error
+}
+
 interface ServerHooks<T = BaseDoc> {
   beforeRead?: ServerHook<T>
   afterRead?: ServerHook<T>

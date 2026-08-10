@@ -1,14 +1,14 @@
 import type { AccessObject, BaseDoc, Change, ServiceGroup, ServiceUser } from "@db-state/core"
-import type { DbStateCache } from "./cache"
-import type { LoadingKeyRef } from "./keys"
-import type { DbStateSocketFacade } from "./socket"
-import type { StorageLike } from "./storage"
-import type { ChangeUnsubscribe, TableApi } from "./table"
+import type { DbStateCache } from "./cache.js"
+import type { LoadingKeyRef } from "./keys.js"
+import type { DbStateSocketFacade } from "./socket.js"
+import type { StorageLike } from "./storage.js"
+import type { ChangeUnsubscribe, TableApi } from "./table.js"
 
-export type { DbStateCache } from "./cache"
-export type { LoadingKeyRef } from "./keys"
-export type { DbStateSocketFacade, SocketMessage, SocketMessageHandler, SocketUnsubscribe } from "./socket"
-export type { StorageLike } from "./storage"
+export type { DbStateCache } from "./cache.js"
+export type { LoadingKeyRef } from "./keys.js"
+export type { DbStateSocketFacade, SocketMessage, SocketMessageHandler, SocketUnsubscribe } from "./socket.js"
+export type { StorageLike } from "./storage.js"
 export type {
   Filter,
   ListQuery,
@@ -23,7 +23,7 @@ export type {
   TableDeleteHandler,
   TableEditHandler,
   UpdateArgs
-} from "./table"
+} from "./table.js"
 export type {
   BaseDoc,
   Change,
@@ -32,7 +32,7 @@ export type {
   ServiceUser
 } from "@db-state/core"
 
-export { createIndexedDbCache, createMemoryCache, createStorageCache } from "./cache"
+export { createIndexedDbCache, createMemoryCache, createStorageCache } from "./cache.js"
 
 // ---------------------------------------------------------------------------
 // Schema generic

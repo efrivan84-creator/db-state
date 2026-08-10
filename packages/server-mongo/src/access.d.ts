@@ -40,7 +40,10 @@ export interface AccessUser {
   phoneVerified?: boolean
 }
 
-/** Context object passed into every hook and access check. */
+/**
+ * Context consumed by declarative access-resolution helpers.
+ * Hook callbacks receive `ServerHookContext` from the package root instead.
+ */
 export interface AccessContext<T extends BaseDoc = BaseDoc> {
   /** Original RPC request the access check runs for (may be undefined for internal calls). */
   req?: unknown

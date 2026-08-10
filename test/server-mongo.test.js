@@ -2085,6 +2085,66 @@ test("read hooks receive db and api on the very first request", async () => {
   assert.equal(seen.api, "function")
 })
 
+test("module hooks receive db and api and may replace them for following file hooks", async () => {
+  const dir = await writeDir({
+    beforeRead: `export default (ctx) => {
+      if (ctx.db?.source !== "module-db" || ctx.api?.source !== "module-api") {
+        throw new Error("Module hook context was overwritten")
+      }
+    }`
+  })
+  const mongo = createMemoryMongo()
+  await mongo.collection("order").insertOne({ _id: "o1", status: "open" })
+  let server
+  server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    hooksDir: dir,
+    files: [{
+      hooks: {
+        beforeRead(ctx) {
+          assert.equal(ctx.db, mongo)
+          assert.equal(ctx.api, server)
+          ctx.db = { source: "module-db" }
+          ctx.api = { source: "module-api" }
+        }
+      }
+    }]
+  })
+  const req = { user: { _id: "u1", groups: [], access: { fullaccess: 1 } } }
+
+  assert.deepEqual(
+    await server.load({ table: "order", id: "o1", req }),
+    { _id: "o1", status: "open" }
+  )
+})
+
+test("error hooks receive db and api", async () => {
+  const mongo = createMemoryMongo()
+  let seen
+  let server
+  server = createDbStateServer({
+    mongo,
+    tables: [],
+    files: [{
+      hooks: {
+        errorRead(ctx) {
+          seen = { db: ctx.db, api: ctx.api, error: ctx.error }
+        }
+      }
+    }]
+  })
+  const req = { user: { _id: "u1", groups: [], access: { fullaccess: 1 } } }
+
+  await assert.rejects(
+    () => server.load({ table: "missing", id: "o1", req }),
+    /Unknown db-state table: missing/
+  )
+  assert.equal(seen.db, mongo)
+  assert.equal(seen.api, server)
+  assert.match(seen.error.message, /Unknown db-state table: missing/)
+})
+
 test("methodsDir rejects method names that could leave the directory", async () => {
   const dir = await mkdtemp(join(tmpdir(), "dbstate-methods-"))
   await writeFile(join(dir, "ping.js"), "export default async () => \"pong\"\n")

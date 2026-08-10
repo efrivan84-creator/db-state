@@ -147,12 +147,13 @@ export default (ctx) => {
 | Поле | Смысл |
 | --- | --- |
 | `method` | `load`, `getIds`, `getUnique`, `count`, `sync`, `add`, `update`, `remove` |
-| `table` | Имя таблицы |
 | `user` | Пользователь с полем `access` (слитые права групп) |
 | `req` | Исходный RPC-запрос; `req.body` — payload клиента |
-| `sessionId` | Сессия клиента |
 | `db` | Драйвер Mongo — чтение и запись мимо прав и журнала |
 | `api` | Команды сервера: `load`, `add`, `update`, ... — с правами, журналом и рассылкой |
+
+`table` есть у табличных CRUD-вызовов, но отсутствует во внешнем контексте
+`sync`. `sessionId` приходит при записи/sync, если его передал вызывающий код.
 
 Только при чтении: `filter`, `sort`, `skip`, `limit`, `field`, `id`, `obj`, `rows`, `result`.
 

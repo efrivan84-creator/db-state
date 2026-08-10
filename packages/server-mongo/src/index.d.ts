@@ -1,14 +1,14 @@
 import type { BaseDoc, Change, Filter, ListQuery, UpdatePatch } from "@db-state/core"
-import type { AccessUser } from "./access"
-import type { AuthRateLimitContext, AuthWarning, PasswordHasher } from "./auth"
-import type { RpcHandler } from "./rpc"
-import type { SocketHub } from "./socket"
+import type { AccessUser } from "./access.js"
+import type { AuthRateLimitContext, AuthWarning, PasswordHasher } from "./auth.js"
+import type { RpcHandler } from "./rpc.js"
+import type { SocketHub } from "./socket.js"
 
-export type { AccessContext, AccessDecision, AccessFilter, AccessTableEntry, AccessUser, UserAccess } from "./access"
-export { accessAllows, matchesAccessFilter } from "./access"
-export type { PasswordHasher, AuthHandlers, LoginMessage, AuthMessage, LogoutMessage, AuthRateLimitContext, AuthWarning } from "./auth"
-export type { BroadcastOptions, ClientMeta, DetachClient, SocketAdapter, SocketClient, SocketHub } from "./socket"
-export type { RpcHandler, RpcMeta, RpcRequest, RpcRouter } from "./rpc"
+export type { AccessContext, AccessDecision, AccessFilter, AccessTableEntry, AccessUser, UserAccess } from "./access.js"
+export { accessAllows, matchesAccessFilter } from "./access.js"
+export type { PasswordHasher, AuthHandlers, LoginMessage, AuthMessage, LogoutMessage, AuthRateLimitContext, AuthWarning } from "./auth.js"
+export type { BroadcastOptions, ClientMeta, DetachClient, SocketAdapter, SocketClient, SocketHub } from "./socket.js"
+export type { RpcHandler, RpcMeta, RpcRequest, RpcRouter } from "./rpc.js"
 export type { BaseDoc, Change, ChangeAction, Filter, ListQuery, SortSpec, UpdatePatch } from "@db-state/core"
 
 // ---------------------------------------------------------------------------
@@ -162,7 +162,7 @@ export interface DbStateServerConfig {
   now?: () => string
 
   /** Optional out-of-process broadcast adapter (e.g. Redis pubsub). */
-  socket?: import("./socket").SocketAdapter
+  socket?: import("./socket.js").SocketAdapter
 
   /** Debounce delay before waking clients after writes, ms. Default `3000`. */
   changesBroadcastDelay?: number
@@ -172,6 +172,10 @@ export interface DbStateServerConfig {
 }
 
 export interface ServerHookContext<T extends BaseDoc = BaseDoc> {
+  /** Raw Mongo database handle. Calls bypass db-state permissions, change log and broadcasts. */
+  db: MongoDatabaseLike
+  /** This db-state server API. Calls use normal permissions, change log and broadcasts. */
+  api: DbStateServer
   req?: unknown
   user?: AccessUser
   table?: string

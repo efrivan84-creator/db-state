@@ -1,4 +1,4 @@
-import type { SocketClient } from "./socket"
+import type { SocketClient } from "./socket.js"
 
 /** Request envelope passed into every router handler. */
 export interface RpcRequest<TBody = Record<string, unknown>> {

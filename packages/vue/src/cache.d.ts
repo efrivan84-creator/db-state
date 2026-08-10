@@ -1,4 +1,4 @@
-import type { StorageLike } from "./storage"
+import type { StorageLike } from "./storage.js"
 
 /**
  * Persistent or in-memory record cache used by the client to avoid

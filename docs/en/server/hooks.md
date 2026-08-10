@@ -128,7 +128,7 @@ export default (ctx) => {
 
 ## `ctx` contents
 
-Always: `method`, `table`, `user`, `req` (`req.body` holds the client payload), `sessionId`, `db`, `api`.
+Every hook receives `method`, `user`, `req` (`req.body` holds the client payload), `db`, and `api`. `table` is present for table-scoped CRUD calls but absent on the outer `sync` hook. `sessionId` is present on writes/sync when the caller supplied one.
 
 Reads: `filter`, `sort`, `skip`, `limit`, `field`, `fields`, `id`, `obj`, `rows`, `result`.
 

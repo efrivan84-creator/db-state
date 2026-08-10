@@ -128,7 +128,7 @@ export default (ctx) => {
 
 ## Состав `ctx`
 
-Общее: `method`, `table`, `user`, `req` (в `req.body` — payload клиента), `sessionId`, `db`, `api`.
+Каждый хук получает `method`, `user`, `req` (в `req.body` — payload клиента), `db` и `api`. Поле `table` есть у табличных CRUD-вызовов, но отсутствует во внешнем хуке `sync`. `sessionId` приходит при записи/sync, если его передал вызывающий код.
 
 Чтение: `filter`, `sort`, `skip`, `limit`, `field`, `fields`, `id`, `obj`, `rows`, `result`.
 

@@ -217,7 +217,7 @@ Field rules are enforced on the server:
 - `write` covers insert, update, and delete.
 - Delete log rows store `old`, so audit and access checks still work after the source document is gone.
 
-For dynamic rules that cannot be expressed as filters, use default-exported files in `hooksDir`. A hook can inspect the request, user and table, rewrite a CRUD query, narrow fields, or explicitly allow/deny. The `sync` hook wraps the whole sync request; visibility of each change remains governed by declarative `user.access`.
+For dynamic rules that cannot be expressed as filters, use default-exported files in `hooksDir`. A hook can inspect the request, user and table, rewrite a CRUD query, narrow fields, or explicitly allow/deny. Every hook also receives `ctx.db` (raw Mongo, bypassing permissions and the change log) and `ctx.api` (normal db-state commands with permissions, logging and broadcasts). The `sync` hook wraps the whole sync request; visibility of each change remains governed by declarative `user.access`.
 
 ## Auth and offline read
 
