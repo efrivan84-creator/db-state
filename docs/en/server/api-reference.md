@@ -208,6 +208,41 @@ Returns `{ to, changes, hasMore? }` for an incremental window of at most 12 hour
 
 If `from` is more than 20 days behind the server clock, returns `{ to, changes: [], reset: true }`. The client must discard local data, reload current records/queries, and continue from `to`.
 
+### `notifyChanges()`
+
+```ts
+notifyChanges(): void
+```
+
+Broadcasts the same `changes_available` signal a normal write sends. Writes nothing itself.
+
+For code that writes through the raw driver instead of `add`/`update`/`remove` — typically a transaction committing several documents at once, where nothing else can trigger the broadcast. Without it, clients only learn about the change on their next sync.
+
+```js
+const session = client.startSession()
+try {
+  await session.withTransaction(async () => {
+    await db.collection("bill").updateOne({ _id: 5 }, { $inc: { balans: 500 } }, { session })
+    await db.collection("pay").insertOne(row, { session })
+    await db.collection("log").insertMany([billChange, payChange], { session })
+  })
+} finally {
+  await session.endSession()
+}
+
+dbState.notifyChanges()
+```
+
+Write the log entries yourself with `createChange` from `@db-state/core` — it produces the same shape the library writes.
+
+Two things are easy to get wrong:
+
+**Log entries belong in the same transaction as the data.** Otherwise a rollback leaves a record of something that never happened.
+
+**Call `notifyChanges` after the commit, not inside it.** A client that receives the signal reads immediately, and would read what can still roll back.
+
+Transactions require a replica set; standalone MongoDB has none.
+
 ## `socket: SocketHub`
 
 ```ts

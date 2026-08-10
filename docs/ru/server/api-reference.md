@@ -58,6 +58,7 @@ const dbState = createDbStateServer({
   getUnique(input)
   count(input)
   sync(input)
+  notifyChanges()
   socket
   config
 }
@@ -149,6 +150,56 @@ await dbState.sync({
 Возвращает `{ to, changes, hasMore? }` для окна не более 12 часов. При `hasMore: true` клиент сразу вызывает `sync` ещё раз от нового `to`.
 
 Если `from` старше серверного времени более чем на 20 дней, возвращает `{ to, changes: [], reset: true }`. Клиент должен удалить локальные данные, перечитать актуальные объекты/query refs и продолжить от `to`.
+
+### `notifyChanges()`
+
+```js
+dbState.notifyChanges()
+```
+
+Шлёт клиентам тот же сигнал `changes_available`, что и обычная запись. Ничего не пишет — только рассылка.
+
+Нужен коду, который пишет в базу мимо `add`/`update`/`remove`. Основной случай — транзакция: несколько документов кладутся одним коммитом через драйвер, и дёрнуть рассылку после неё больше нечем. Без этого клиенты узнают об изменении только при следующей синхронизации.
+
+```js
+const session = client.startSession()
+try {
+  await session.withTransaction(async () => {
+    await db.collection("bill").updateOne({ _id: 5 }, { $inc: { balans: 500 } }, { session })
+    await db.collection("pay").insertOne(row, { session })
+    await db.collection("admin_log").insertMany([billChange, payChange], { session })
+  })
+} finally {
+  await session.endSession()
+}
+
+dbState.notifyChanges()
+```
+
+Строки журнала такой код пишет сам — [`createChange`](../../../packages/core/src/index.js) из `@db-state/core` даёт тот же формат, что и библиотека:
+
+```js
+import { createChange } from "@db-state/core"
+
+const payChange = createChange({
+  _id: crypto.randomUUID(),
+  table: "pay",
+  id: row._id,
+  action: "insert",
+  obj: row,
+  sessionId,
+  userId: user._id,
+  createdAt: new Date().toISOString()
+})
+```
+
+Две вещи, в которых легко ошибиться:
+
+**Журнал — в ту же транзакцию, что и данные.** Иначе при откате останется запись о том, чего не произошло.
+
+**`notifyChanges` — после подтверждения, а не внутри.** Клиент, получив сигнал, сразу читает — и прочитал бы то, что ещё может откатиться.
+
+Транзакции требуют replica set; на standalone MongoDB их нет.
 
 ## `socket: SocketHub`
 

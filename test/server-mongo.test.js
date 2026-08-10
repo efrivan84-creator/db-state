@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 
-import { setByPath, unsetByPath } from "../packages/core/src/index.js"
+import { createChange, setByPath, unsetByPath } from "../packages/core/src/index.js"
 import { accessAllows, createDbStateServer, mergeUserAccess } from "../packages/server-mongo/src/index.js"
 
 test("server update writes data, appends log, broadcasts to everyone, and sync excludes current session", async () => {
@@ -199,6 +199,44 @@ test("server debounces change broadcasts", async () => {
   assert.equal(sent.filter((message) => message.type === "dbstate:changes_available").length, 0)
 
   await waitFor(() => sent.filter((message) => message.type === "dbstate:changes_available").length === 1)
+})
+
+test("notifyChanges broadcasts for writes made outside add/update/remove", async () => {
+  // Сценарий транзакции: несколько документов кладутся одним коммитом мимо
+  // api, журнал пишется самим кодом через createChange, а сигнал клиентам
+  // дёргается после подтверждения — больше его дёрнуть нечем.
+  const mongo = createMemoryMongo()
+  const sent = []
+  const server = createDbStateServer({
+    mongo,
+    tables: ["user"],
+    changesBroadcastDelay: 0,
+    now: clock(["2026-05-21T10:00:02.000Z"]),
+    createLogId: idSeq()
+  })
+  await allowTable(mongo, "user", "admins")
+  server.socket.addClient({ send: (message) => sent.push(JSON.parse(message)) }, { sessionId: "s1" })
+
+  await mongo.collection("user").insertOne({ _id: "u1", name: "Ivan" })
+  await mongo.collection("log").insertOne(createChange({
+    _id: "log-tx-1",
+    table: "user",
+    id: "u1",
+    action: "insert",
+    obj: { _id: "u1", name: "Ivan" },
+    createdAt: "2026-05-21T10:00:01.000Z"
+  }))
+
+  // Пока не позвали — тишина: сама запись через драйвер рассылку не шлёт.
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(sent.filter((message) => message.type === "dbstate:changes_available").length, 0)
+
+  server.notifyChanges()
+  await waitFor(() => sent.some((message) => message.type === "dbstate:changes_available"))
+
+  // Строка журнала своего формата доезжает до клиента обычной синхронизацией.
+  const result = await server.sync({ from: "2026-05-21T09:00:00.000Z", req: adminReq() })
+  assert.equal(result.changes.some((change) => change._id === "log-tx-1"), true)
 })
 
 test("server cancels an active rate-limited broadcast when a new change arrives", async () => {

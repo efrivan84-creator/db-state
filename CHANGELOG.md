@@ -4,6 +4,10 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.3.2
+
+- `api.notifyChanges()` broadcasts the same `changes_available` signal a write sends, without writing anything. Application code that commits several documents in one transaction has to go through the raw driver — `add`/`update`/`remove` each write outside any session, so a transaction cannot contain them — and until now nothing could trigger the broadcast afterwards: clients only learned about the change on their next sync. Write the log entries with `createChange` from `@db-state/core` inside the same transaction (a rollback must not leave a record of something that never happened), then call `notifyChanges` after the commit — not inside it, or a client reading on the signal would read what can still roll back. Transactions require a replica set; standalone MongoDB has none.
+
 ## 0.3.1
 
 - Hooks now receive `db` and `api` in `ctx`, the same pair file methods already got. A hook could decide a request's fate but not act on it: reacting to a write — raising a flag on a related document, writing a row through the change log — meant importing the Mongo handle at module level, and `api` was not reachable at all. `db` is the driver as-is (no permission checks, no change log); `api` runs the same commands the client does. Injection happens centrally immediately before the hook chain; `api` is assembled at the end of `createDbStateServer` but attached before the factory returns, so the first request receives it too. A value already on `ctx` wins, so module hooks can substitute their own for following hooks.

@@ -417,7 +417,24 @@ export function createDbStateServer(options) {
 
   router = createHandlers({ add, count, getIds, getUnique, load, remove, sync, update })
 
-  const api = { add, count, getIds, getUnique, load, remove, socket, sync, update }
+  // Сигнал клиентам «есть изменения» — тот же, что шлёт обычная запись.
+  //
+  // Нужен коду, который пишет в базу мимо add/update/remove: транзакция в
+  // прикладном методе кладёт несколько документов одним коммитом, и дёрнуть
+  // рассылку после неё больше нечем. Без этого клиенты узнают об изменении
+  // только при следующей синхронизации.
+  //
+  // Строки журнала такой код пишет сам — createChange из @db-state/core даёт
+  // тот же формат — и кладёт их в ту же транзакцию, что и данные. Иначе при
+  // откате остался бы журнал о том, чего не произошло.
+  //
+  // Звать после подтверждения транзакции, а не внутри: клиент, получив
+  // сигнал, сразу читает — и прочитал бы то, что ещё может откатиться.
+  function notifyChanges() {
+    changesBroadcaster.schedule()
+  }
+
+  const api = { add, count, getIds, getUnique, load, notifyChanges, remove, socket, sync, update }
   if (fileMethodsContext) Object.assign(fileMethodsContext, { api }, config.methodsContext)
   hookContext.api = api
   for (const module of config.files) {

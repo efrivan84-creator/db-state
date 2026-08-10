@@ -357,6 +357,16 @@ export interface DbStateServer {
   /** Loads a single document by id, projected to readable fields. */
   load<T extends BaseDoc>(input: LoadRequest): Promise<T | null>
 
+  /**
+   * Broadcasts the same `changes_available` signal a normal write sends.
+   *
+   * For code that writes through the raw driver instead of add/update/remove —
+   * typically a transaction committing several documents at once. Write the log
+   * entries yourself with `createChange` from `@db-state/core`, inside the same
+   * transaction, then call this after the commit.
+   */
+  notifyChanges(): void
+
   /** Deletes a document, appends to the log, and broadcasts the change. */
   remove<T extends BaseDoc>(input: RemoveRequest): Promise<MutationResult<T>>
 
