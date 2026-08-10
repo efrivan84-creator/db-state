@@ -2211,17 +2211,19 @@ test("module hooks receive db and api and may replace them for following file ho
   )
 })
 
-test("error hooks receive db and api", async () => {
+test("error hooks receive db, api and methodsContext extras", async () => {
   const mongo = createMemoryMongo()
+  const auditClient = { write() {} }
   let seen
   let server
   server = createDbStateServer({
     mongo,
     tables: [],
+    methodsContext: { auditClient },
     files: [{
       hooks: {
         errorRead(ctx) {
-          seen = { db: ctx.db, api: ctx.api, error: ctx.error }
+          seen = { db: ctx.db, api: ctx.api, auditClient: ctx.auditClient, error: ctx.error }
         }
       }
     }]
@@ -2234,6 +2236,7 @@ test("error hooks receive db and api", async () => {
   )
   assert.equal(seen.db, mongo)
   assert.equal(seen.api, server)
+  assert.equal(seen.auditClient, auditClient)
   assert.match(seen.error.message, /Unknown db-state table: missing/)
 })
 

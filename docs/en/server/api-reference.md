@@ -51,6 +51,7 @@ createDbStateServer(config: DbStateServerConfig): DbStateServer
 | `tables` | `string[]` | required | Tables exposed through CRUD/RPC. Add `_user`, `_group` explicitly when needed. |
 | `hooksDir` | `string \| URL` | undefined | Existing readable directory of hook files; `before*` may also allow or deny. See [hooks.md](hooks.md). |
 | `methodsDir` | `string \| URL` | undefined | Directory of named RPC method files: `"zad.get-num"` → `rpc/zad/get-num.js`. |
+| `methodsContext` | `Record<string, unknown>` | undefined | Extra values for file methods and hooks. File methods merge them over their defaults; hooks receive the extras but keep server-owned `db` and `api`. |
 | `reloadCheckMs` | `number` | `60000` | How often hook/method files are re-checked against their mtime, ms. `0` checks every call. |
 | `password` | `PasswordHasher` | PBKDF2 | Password hash adapter. |
 | `authLoginFields` | `string[]` | `["login"]` | `_user` fields accepted by `dbstate:login`, e.g. `["login", "email", "phone"]`. |

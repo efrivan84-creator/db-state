@@ -158,7 +158,7 @@ export default async ({ body, user, db }) => {
 ```
 
 - The file is imported lazily on the first call and re-checked against its mtime at most every `reloadCheckMs` (default 60s), so edits apply without a restart.
-- Every file method receives `db` (this server's Mongo), `api` (the db-state server: `api.add`/`api.update` write with log and broadcast) and `user` (from `client.user`) by default. Need more — `methodsContext: {...}` spreads on top (same-named keys override the defaults).
+- Every file method receives `db` (this server's Mongo), `api` (the db-state server: `api.add`/`api.update` write with log and broadcast) and `user` (from `client.user`) by default. Need more — `methodsContext: {...}` spreads on top (same-named keys override the defaults). Hooks receive the same extra keys, but their `db` and `api` always remain the server-owned values; this protection applies to hook `ctx`, not to file-method merging.
 - Name segments are validated (`[a-z0-9_-]`, dot-separated): a client-supplied name can never leave the directory.
 - Built-in method names (`load`, `sync`, ...) take precedence; a file cannot shadow them.
 - RPC is rejected until the socket is authorized, same as for built-in methods.

@@ -38,6 +38,7 @@ const dbState = createDbStateServer({
 | `tables` | Прикладные таблицы. |
 | `hooksDir` | Существующая читаемая папка с хуками-файлами; `before*` могут разрешить или запретить. См. [hooks.md](hooks.md). |
 | `methodsDir` | Папка с RPC-методами-файлами: `"zad.get-num"` → `rpc/zad/get-num.js`. |
+| `methodsContext` | Дополнительные значения для файловых методов и хуков. В методах они накладываются поверх значений по умолчанию; хуки получают дополнения, но сохраняют серверные `db` и `api`. |
 | `reloadCheckMs` | Как часто сверять файлы хуков и методов с mtime, мс. По умолчанию `60000`, `0` — каждый раз. |
 | `password` | Password adapter. |
 | `socket` | Socket hub config. |

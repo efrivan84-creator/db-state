@@ -6,7 +6,7 @@ Release notes and project status for db-state.
 
 ## 0.3.3
 
-- Hooks now receive everything passed via `methodsContext`, the same extras file methods already got — a second database, a transaction runner, an external client. Whatever a method needs is what a hook doing the same work on a write event needs, and the split meant an operation reachable from a method but not from the hook that reacts to the write. `db` and `api` belong to the server and are not overridden by same-named keys.
+- Hooks now receive everything passed via `methodsContext`, the same extras file methods already got — a second database, a transaction runner, an external client. Whatever a method needs is what a hook doing the same work on a write event needs, and the split meant an operation reachable from a method but not from the hook that reacts to the write. `db` and `api` belong to the server and are not overridden by same-named keys. File methods retain their existing merge semantics, where `methodsContext` may override their defaults; the protection applies specifically to hook `ctx`.
 
 ## 0.3.2
 
