@@ -4,6 +4,11 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.3.1
+
+- Hooks now receive `db` and `api` in `ctx`, the same pair file methods already got. A hook could decide a request's fate but not act on it: reacting to a write — raising a flag on a related document, writing a row through the change log — meant importing the Mongo handle at module level, and `api` was not reachable at all. `db` is the driver as-is (no permission checks, no change log); `api` runs the same commands the client does. Both are assigned right before the hook runs rather than when `ctx` is created, because `api` is assembled last and does not exist while the first requests are served. A value already on `ctx` wins, so module hooks can substitute their own.
+- Writing to the hook's own table from `afterWrite` re-enters that hook. There is no built-in guard: mark `req` (`{ ...ctx.req, internal: true }`) and return early when the marker is present — `req` reaches the hook unchanged, so the marker survives the nested call.
+
 ## 0.3.0
 
 - **Breaking: hooks and named RPC methods are declared as files only.** The `hooks` and `methods` config objects are gone — `createDbStateServer` throws `"hooks" is removed, use "hooksDir"` (and likewise for `methods`) rather than ignoring them, so protection written in the config cannot stop working silently. `hooksDir` holds `<dir>/beforeRead.js` for every table and `<dir>/order/beforeRead.js` for one; the shared file runs first and the first explicit decision wins. Module hooks are a separate layer and still run before both — they belong to the module (that is how `@db-state/server-files` guards its own table), not to the application configuration.

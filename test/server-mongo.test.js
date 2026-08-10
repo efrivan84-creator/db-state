@@ -2033,6 +2033,58 @@ test("methodsDir file methods receive db and api by default", async () => {
   assert.deepEqual(reply.result, { hasDb: true, hasApi: true })
 })
 
+test("hooks receive db and api and can write from afterWrite", async () => {
+  // Хук не только решает судьбу запроса, но и сам пишет: здесь запись в order
+  // поднимает флаг в соседней таблице через api, а через db читает исходный
+  // документ. Ради этого в ctx и кладутся db и api.
+  const dir = await writeDir({
+    "order/afterWrite": `export default async (ctx) => {
+      const doc = await ctx.db.collection("order").findOne({ _id: ctx.id })
+      await ctx.api.add({ table: "audit", obj: { _id: "a1", order: ctx.id, status: doc.status }, req: ctx.req })
+    }`
+  })
+
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({ mongo, tables: ["order", "audit"], hooksDir: dir })
+  const req = { user: { _id: "u1", groups: [], access: { fullaccess: 1 } } }
+
+  await server.add({ table: "order", obj: { _id: "o1", status: "open" }, req })
+
+  // Хук отработал: прочитал через db и записал через api.
+  const audit = await mongo.collection("audit").findOne({ _id: "a1" })
+  assert.equal(audit.order, "o1")
+  assert.equal(audit.status, "open")
+  // Запись прошла именно через api, а не мимо: автор проставлен сервером.
+  assert.equal(audit.info.makeid, "u1")
+})
+
+test("read hooks receive db and api on the very first request", async () => {
+  // api собирается последним, уже после createDbStateServer. Хук, сработавший
+  // на первом же запросе, всё равно должен получить оба — иначе запись из
+  // хука молча не сработает, а ошибки видно не будет.
+  const dir = await writeDir({
+    beforeRead: `export default async (ctx) => {
+      await ctx.api.add({
+        table: "seen",
+        obj: { _id: "s1", db: typeof ctx.db?.collection, api: typeof ctx.api?.add },
+        req: ctx.req
+      })
+    }`
+  })
+
+  const mongo = createMemoryMongo()
+  await mongo.collection("order").insertOne({ _id: "o1", status: "open" })
+  const server = createDbStateServer({ mongo, tables: ["order", "seen"], hooksDir: dir })
+  const req = { user: { _id: "u1", groups: [], access: { fullaccess: 1 } } }
+
+  // Первое же обращение к серверу — хук вызывается раньше, чем что-либо ещё.
+  await server.load({ table: "order", id: "o1", req })
+
+  const seen = await mongo.collection("seen").findOne({ _id: "s1" })
+  assert.equal(seen.db, "function")
+  assert.equal(seen.api, "function")
+})
+
 test("methodsDir rejects method names that could leave the directory", async () => {
   const dir = await mkdtemp(join(tmpdir(), "dbstate-methods-"))
   await writeFile(join(dir, "ping.js"), "export default async () => \"pong\"\n")

@@ -46,6 +46,10 @@ export function createDbStateServer(options) {
   const resolveFileMethod = config.methodsDir
     ? createMethodsDirResolver(config.methodsDir, fileMethodsContext, config.reloadCheckMs)
     : undefined
+  // Хуки получают { db, api } в ctx — тем же приёмом: api появится ниже,
+  // объект заполняется на месте, а хуки читают его в момент вызова.
+  const hookContext = { db: config.mongo }
+  config.hookContext = hookContext
   let router
   const socket = createSocketHub(config.socket, async (client, message) => {
     for (const module of config.files) {
@@ -415,6 +419,7 @@ export function createDbStateServer(options) {
 
   const api = { add, count, getIds, getUnique, load, remove, socket, sync, update }
   if (fileMethodsContext) Object.assign(fileMethodsContext, { api }, config.methodsContext)
+  hookContext.api = api
   for (const module of config.files) {
     module.bind?.({ api, config, mongo: config.mongo, socket })
     socket.onRawMessage((client, raw) => module.handleRawMessage?.(client, raw))

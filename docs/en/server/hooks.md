@@ -128,11 +128,23 @@ export default (ctx) => {
 
 ## `ctx` contents
 
-Always: `method`, `table`, `user`, `req` (`req.body` holds the client payload), `sessionId`.
+Always: `method`, `table`, `user`, `req` (`req.body` holds the client payload), `sessionId`, `db`, `api`.
 
 Reads: `filter`, `sort`, `skip`, `limit`, `field`, `fields`, `id`, `obj`, `rows`, `result`.
 
 Writes: `id`, `obj`, `old`, `set`, `unset`, `action`, `actorId`, `now`, `change`, `result`.
+
+`db` and `api` let a hook read and write, not just decide the request's fate. `db` is the Mongo driver — no permission checks, no change log. `api` runs the same commands the client does, with permissions, the change log and the `changes_available` broadcast.
+
+Writing to the same table from `afterWrite` re-enters the hook. Break the loop with a marker in `req`:
+
+```js
+// hooks/bill/afterWrite.js
+export default async (ctx) => {
+  if (ctx.req?.internal) return
+  await ctx.api.update({ table: "bill", id: ctx.id, set: { seen: true }, req: { ...ctx.req, internal: true } })
+}
+```
 
 `errorRead` / `errorWrite` also get `ctx.error`. An exception thrown inside an error hook is swallowed so the original error stays authoritative.
 

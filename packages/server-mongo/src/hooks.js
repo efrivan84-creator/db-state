@@ -14,7 +14,12 @@ import { loadHooksDir } from "./hooks-dir.js"
 // Изменения ctx применяются в любом случае, независимо от возврата.
 
 export async function runHooks(config, name, ctx) {
-  for (const hook of await resolveHooks(config, name)) {
+  const hooks = await resolveHooks(config, name)
+  if (hooks.length === 0) return undefined
+
+  applyHookContext(config, ctx)
+
+  for (const hook of hooks) {
     const decision = normalizeHookDecision(await hook(ctx))
     // Первое явное решение останавливает цепочку.
     if (decision !== undefined) return decision
@@ -24,13 +29,38 @@ export async function runHooks(config, name, ctx) {
 }
 
 export async function runErrorHooks(config, name, ctx) {
-  for (const hook of await resolveHooks(config, name)) {
+  const hooks = await resolveHooks(config, name)
+  if (hooks.length === 0) return
+
+  applyHookContext(config, ctx)
+
+  for (const hook of hooks) {
     try {
       await hook(ctx)
     } catch {
       // Ошибка исходной операции остаётся главной.
     }
   }
+}
+
+// db и api в ctx: хук может не только решать судьбу запроса, но и сам читать
+// и писать — поднять флаг в соседней таблице, дописать связанный документ.
+//
+// db — драйвер Mongo как есть, мимо прав и журнала изменений.
+// api — те же команды, что у клиента: с проверкой прав, журналом и рассылкой.
+//
+// Присваиваем перед вызовом, а не при создании ctx: api собирается последним
+// и на момент первых запросов ещё не существует. Объект один на сервер, его
+// поля дописываются на месте — хук читает их в момент вызова.
+//
+// ??= а не присваивание: значение, уже положенное в ctx самим сервером или
+// хуком модуля, важнее общего.
+function applyHookContext(config, ctx) {
+  const context = config.hookContext
+  if (!context) return
+
+  ctx.db ??= context.db
+  ctx.api ??= context.api
 }
 
 // Сначала хуки модулей, затем файловый хук приложения.

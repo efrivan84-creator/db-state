@@ -128,11 +128,13 @@ export default (ctx) => {
 
 ## Состав `ctx`
 
-Общее: `method`, `table`, `user`, `req` (в `req.body` — payload клиента), `sessionId`.
+Общее: `method`, `table`, `user`, `req` (в `req.body` — payload клиента), `sessionId`, `db`, `api`.
 
 Чтение: `filter`, `sort`, `skip`, `limit`, `field`, `fields`, `id`, `obj`, `rows`, `result`.
 
 Запись: `id`, `obj`, `old`, `set`, `unset`, `action`, `actorId`, `now`, `change`, `result`.
+
+`db` и `api` — чтобы хук мог не только решать судьбу запроса, но и сам читать и писать: `db` это драйвер Mongo мимо прав и журнала, `api` — те же команды, что у клиента, с правами, журналом и рассылкой изменений. Подробнее и с примером — [Путь запроса](../request-flow.md#запись-из-хука).
 
 В `errorRead` / `errorWrite` добавляется `ctx.error`. Исключение внутри самого error-хука подавляется — главной остаётся исходная ошибка.
 
