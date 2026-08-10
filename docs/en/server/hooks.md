@@ -136,6 +136,15 @@ Writes: `id`, `obj`, `old`, `set`, `unset`, `action`, `actorId`, `now`, `change`
 
 `db` and `api` let a hook read and write, not just decide the request's fate. `db` is the Mongo driver — no permission checks, no change log. `api` runs the same commands the client does, with permissions, the change log and the `changes_available` broadcast.
 
+Anything passed via `methodsContext` is on `ctx` as well — the same extras file methods receive. Whatever a method needs is what a hook doing the same work on a write event needs; separate sets would mean an operation callable from a method but not from a hook. `db` and `api` belong to the server and are not overridden by same-named keys.
+
+```js
+// createDbStateServer({ ..., methodsContext: { transaction } })
+export default async (ctx) => {
+  await ctx.transaction(async (session) => { ... })
+}
+```
+
 Writing to the same table from `afterWrite` re-enters the hook. Break the loop with a marker in `req`:
 
 ```js

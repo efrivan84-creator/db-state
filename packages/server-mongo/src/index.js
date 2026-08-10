@@ -436,7 +436,13 @@ export function createDbStateServer(options) {
 
   const api = { add, count, getIds, getUnique, load, notifyChanges, remove, socket, sync, update }
   if (fileMethodsContext) Object.assign(fileMethodsContext, { api }, config.methodsContext)
-  hookContext.api = api
+  // methodsContext достаётся и хукам: то, что нужно методу для работы —
+  // вторая база, транзакция, внешний клиент, — нужно и хуку, который делает
+  // то же самое по событию записи. Разные наборы означали бы, что одну и ту
+  // же операцию из хука не вызвать.
+  //
+  // db и api из methodsContext не перебиваются: они принадлежат серверу.
+  Object.assign(hookContext, config.methodsContext, { api, db: config.mongo })
   for (const module of config.files) {
     module.bind?.({ api, config, mongo: config.mongo, socket })
     socket.onRawMessage((client, raw) => module.handleRawMessage?.(client, raw))

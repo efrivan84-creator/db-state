@@ -2123,6 +2123,60 @@ test("read hooks receive db and api on the very first request", async () => {
   assert.equal(seen.api, "function")
 })
 
+test("hooks receive methodsContext, the same extras file methods get", async () => {
+  // То, что нужно методу для работы — вторая база, транзакция, внешний
+  // клиент, — нужно и хуку, который делает то же самое по событию записи.
+  // Разные наборы означали бы, что одну операцию из хука не вызвать.
+  const dir = await writeDir({
+    "order/afterWrite": `export default async (ctx) => {
+      await ctx.charge(ctx.id)
+    }`
+  })
+
+  const mongo = createMemoryMongo()
+  const charged = []
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    hooksDir: dir,
+    methodsContext: { charge: async (id) => charged.push(id) }
+  })
+  const req = { user: { _id: "u1", groups: [], access: { fullaccess: 1 } } }
+
+  await server.update({ table: "order", id: "o1", set: { status: "paid" }, req })
+  assert.deepEqual(charged, ["o1"])
+})
+
+test("methodsContext cannot replace db and api in hooks", async () => {
+  // db и api принадлежат серверу: приложение, положившее в methodsContext
+  // свой api, отрезало бы хукам запись через журнал — молча.
+  const dir = await writeDir({
+    "order/afterWrite": `export default async (ctx) => {
+      await ctx.api.add({
+        table: "seen",
+        obj: { _id: "s1", api: typeof ctx.api?.add, db: typeof ctx.db?.collection },
+        req: ctx.req
+      })
+    }`
+  })
+
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order", "seen"],
+    hooksDir: dir,
+    methodsContext: { api: "подмена", db: "подмена" }
+  })
+  const req = { user: { _id: "u1", groups: [], access: { fullaccess: 1 } } }
+
+  await server.update({ table: "order", id: "o1", set: { status: "paid" }, req })
+
+  // Хук вызвал api.add — значит получил настоящий объект, а не строку.
+  const seen = await mongo.collection("seen").findOne({ _id: "s1" })
+  assert.equal(seen.api, "function")
+  assert.equal(seen.db, "function")
+})
+
 test("module hooks receive db and api and may replace them for following file hooks", async () => {
   const dir = await writeDir({
     beforeRead: `export default (ctx) => {

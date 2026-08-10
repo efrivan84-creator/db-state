@@ -99,6 +99,10 @@ export interface DbStateServerConfig {
   /**
    * Extra properties spread into every file-based method request on top of
    * the defaults ({ db, api }); same-named keys override the defaults.
+   *
+   * Hooks receive the same extras on `ctx` — whatever a method needs is what a
+   * hook doing the same work on a write event needs. There `db` and `api`
+   * belong to the server and cannot be overridden.
    */
   methodsContext?: Record<string, unknown>
 
@@ -171,6 +175,17 @@ export interface DbStateServerConfig {
   changesBroadcastRate?: number
 }
 
+/**
+ * Everything a hook receives. Extras passed via `methodsContext` land here too
+ * — the same ones file methods get. They are not listed below; declare them by
+ * augmenting this interface:
+ *
+ * ```ts
+ * declare module "@db-state/server-mongo" {
+ *   interface ServerHookContext { transaction: (fn: () => Promise<void>) => Promise<void> }
+ * }
+ * ```
+ */
 export interface ServerHookContext<T extends BaseDoc = BaseDoc> {
   /** Raw Mongo database handle. Calls bypass db-state permissions, change log and broadcasts. */
   db: MongoDatabaseLike

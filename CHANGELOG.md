@@ -4,6 +4,10 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.3.3
+
+- Hooks now receive everything passed via `methodsContext`, the same extras file methods already got — a second database, a transaction runner, an external client. Whatever a method needs is what a hook doing the same work on a write event needs, and the split meant an operation reachable from a method but not from the hook that reacts to the write. `db` and `api` belong to the server and are not overridden by same-named keys.
+
 ## 0.3.2
 
 - `api.notifyChanges()` broadcasts the same `changes_available` signal a write sends, without writing anything. Application code that commits several documents in one transaction has to go through the raw driver — `add`/`update`/`remove` each write outside any session, so a transaction cannot contain them — and until now nothing could trigger the broadcast afterwards: clients only learned about the change on their next sync. Write the log entries with `createChange` from `@db-state/core` inside the same transaction (a rollback must not leave a record of something that never happened), then call `notifyChanges` after the commit — not inside it, or a client reading on the signal would read what can still roll back. Transactions require a replica set; standalone MongoDB has none.
