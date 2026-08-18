@@ -36,7 +36,12 @@ export function createDbState(input) {
       connected: false,
       sessionId,
       status: "idle",
-      time1: options.metaStorage.getItem(options.syncKey) ?? "1970-01-01T00:00:00.000Z"
+      time1: options.metaStorage.getItem(options.syncKey) ?? "1970-01-01T00:00:00.000Z",
+      // Server identity from hello (`serverInfo` server config): build, branch,
+      // commit — whatever the server chose to publish. hello arrives before
+      // authentication, so a login screen can already show it. null until the
+      // first hello, and stays null when the server publishes nothing.
+      server: null
     },
 
     socket: createSocketFacade(options),
@@ -250,8 +255,9 @@ export function createDbState(input) {
       state.auth.status = state.auth.userId && state.auth.hash ? "restored" : "anonymous"
     }
   })
-  state.socket.on(DB_STATE_MESSAGES.hello, async () => {
+  state.socket.on(DB_STATE_MESSAGES.hello, async (message) => {
     state.sync.connected = true
+    state.sync.server = message.server ?? null
     await syncWhenReady(state, options)
   })
   state.socket.on(DB_STATE_MESSAGES.changesAvailable, async () => {

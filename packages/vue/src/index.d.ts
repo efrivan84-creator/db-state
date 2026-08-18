@@ -142,6 +142,12 @@ export interface SyncState {
   status: SyncStatus
   /** ISO timestamp of the last successful sync (exclusive lower bound for next sync). */
   time1: string
+  /**
+   * Server identity from `hello` (`serverInfo` server config): build, branch,
+   * commit — whatever the server publishes. Arrives before authentication;
+   * `null` until the first `hello` or when the server publishes nothing.
+   */
+  server: Record<string, unknown> | null
 }
 
 export interface AuthState {

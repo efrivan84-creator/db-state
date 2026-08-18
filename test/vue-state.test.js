@@ -1320,6 +1320,69 @@ test("clearLocalDB clears reactive query refs", async () => {
   assert.deepEqual(ids.value, [])
 })
 
+test("hello fills state.sync.server before any authentication", async () => {
+  // Свой WebSocket вместо глобального: тесту нужен входящий кадр hello,
+  // а не настоящее соединение.
+  const sockets = []
+  class FakeWebSocket {
+    static CONNECTING = 0
+    static OPEN = 1
+
+    constructor() {
+      this.readyState = FakeWebSocket.OPEN
+      this.handlers = new Map()
+      sockets.push(this)
+    }
+
+    addEventListener(type, handler) {
+      if (!this.handlers.has(type)) this.handlers.set(type, [])
+      this.handlers.get(type).push(handler)
+    }
+
+    emit(type, event = {}) {
+      for (const handler of this.handlers.get(type) ?? []) handler(event)
+    }
+
+    send() {}
+    close() {}
+  }
+
+  const original = globalThis.WebSocket
+  globalThis.WebSocket = FakeWebSocket
+
+  try {
+    const state = createDbState({
+      autoConnect: false,
+      cache: createMemoryCache(),
+      safetySyncInterval: 0,
+      ...testStorage(),
+      tables: ["order"],
+      wsUrl: "ws://example.test/ws"
+    })
+
+    assert.equal(state.sync.server, null)
+
+    state.socket.connect()
+    sockets[0].emit("message", {
+      data: JSON.stringify({
+        type: DB_STATE_MESSAGES.hello,
+        server: { branch: "main", commit: "abc123" }
+      })
+    })
+
+    // Пользователь анонимен — данные сервера видны уже до входа.
+    assert.equal(state.auth.status, "anonymous")
+    assert.deepEqual(state.sync.server, { branch: "main", commit: "abc123" })
+
+    // hello без server (сервер до 0.3.4) возвращает поле к null, а не
+    // оставляет данные прежнего подключения.
+    sockets[0].emit("message", { data: JSON.stringify({ type: DB_STATE_MESSAGES.hello }) })
+    assert.equal(state.sync.server, null)
+  } finally {
+    globalThis.WebSocket = original
+  }
+})
+
 function testStorage() {
   return {
     authStorage: memoryStorage(),

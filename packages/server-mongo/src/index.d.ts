@@ -106,6 +106,13 @@ export interface DbStateServerConfig {
    */
   methodsContext?: Record<string, unknown>
 
+  /**
+   * Server identity sent to every client in the `hello` message — build,
+   * branch, commit, anything worth showing before authentication. The Vue
+   * client exposes it as `state.sync.server`. Omitted → `hello` stays bare.
+   */
+  serverInfo?: Record<string, unknown>
+
   /** Optional extension modules mounted on the same db-state server/socket. */
   files?: DbStateServerModule | ReadonlyArray<DbStateServerModule>
 

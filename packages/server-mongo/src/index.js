@@ -60,7 +60,7 @@ export function createDbStateServer(options) {
     if (message.type === DB_STATE_MESSAGES.auth) return auth.auth(client, message)
     if (message.type === DB_STATE_MESSAGES.logout) return auth.logout(client, message)
     if (message.type === DB_STATE_MESSAGES.rpc) return handleRpc(router, client, message, resolveFileMethod)
-  })
+  }, { server: config.serverInfo })
   const changesBroadcaster = createChangesBroadcaster(socket, config)
 
   // Ключ нового документа, когда клиент не прислал свой.

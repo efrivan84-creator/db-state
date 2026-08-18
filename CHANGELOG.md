@@ -4,6 +4,10 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.3.4
+
+- `serverInfo` config on `createDbStateServer` rides along in the `hello` message, and the Vue client exposes it as `state.sync.server`. `hello` is the one message every client receives before authentication, so a login screen can show which build it is talking to — branch, commit, deploy date — without a separate endpoint. RPC cannot do this job: it is rejected until the user is authorized. Without `serverInfo` the `hello` stays byte-for-byte what it was, and a bare `hello` from an older server resets `state.sync.server` to `null` rather than leaving a previous connection's identity on screen.
+
 ## 0.3.3
 
 - Hooks now receive everything passed via `methodsContext`, the same extras file methods already got — a second database, a transaction runner, an external client. Whatever a method needs is what a hook doing the same work on a write event needs, and the split meant an operation reachable from a method but not from the hook that reacts to the write. `db` and `api` belong to the server and are not overridden by same-named keys. File methods retain their existing merge semantics, where `methodsContext` may override their defaults; the protection applies specifically to hook `ctx`.

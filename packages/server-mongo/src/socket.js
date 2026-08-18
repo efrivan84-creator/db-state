@@ -1,9 +1,17 @@
 import { DB_STATE_MESSAGES } from "@db-state/core"
 
-export function createSocketHub(adapter, onMessage) {
+export function createSocketHub(adapter, onMessage, options = {}) {
   const clients = new Set()
   const rawHandlers = new Set()
   const closeHandlers = new Set()
+
+  // hello is the one message every client gets before authentication, so it
+  // carries the server-provided identity (`serverInfo` config: build, branch,
+  // commit). A login screen can show which server it is talking to without
+  // an extra endpoint or a protocol round-trip.
+  const hello = options.server
+    ? { type: DB_STATE_MESSAGES.hello, server: options.server }
+    : { type: DB_STATE_MESSAGES.hello }
 
   return {
     addClient(client, meta = {}) {
@@ -11,7 +19,7 @@ export function createSocketHub(adapter, onMessage) {
       clients.add(client)
       client.on?.("message", (message) => this.handleMessage(client, message))
       client.on?.("close", () => this.handleClose(client))
-      client.send?.(JSON.stringify({ type: DB_STATE_MESSAGES.hello }))
+      client.send?.(JSON.stringify(hello))
       return () => clients.delete(client)
     },
 

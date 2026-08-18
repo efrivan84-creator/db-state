@@ -608,6 +608,35 @@ test("socket hub exposes custom events without sending reserved dbstate messages
   assert.deepEqual(sent.map((message) => message.type), ["dbstate:hello", "notify"])
 })
 
+test("hello carries serverInfo so unauthenticated clients see who they talk to", () => {
+  const sent = []
+  const server = createDbStateServer({
+    mongo: createMemoryMongo(),
+    tables: ["user"],
+    serverInfo: { branch: "main", commit: "abc123", date: "2026-08-18T15:56:13+03:00" }
+  })
+
+  server.socket.addClient({ send: (message) => sent.push(JSON.parse(message)) })
+
+  assert.deepEqual(sent[0], {
+    type: "dbstate:hello",
+    server: { branch: "main", commit: "abc123", date: "2026-08-18T15:56:13+03:00" }
+  })
+})
+
+test("hello stays bare when serverInfo is not configured", () => {
+  const sent = []
+  const server = createDbStateServer({
+    mongo: createMemoryMongo(),
+    tables: ["user"]
+  })
+
+  server.socket.addClient({ send: (message) => sent.push(JSON.parse(message)) })
+
+  // Ровно прежняя форма: клиенты до 0.3.4 разбирают hello без лишних полей.
+  assert.deepEqual(sent[0], { type: "dbstate:hello" })
+})
+
 test("socket RPC handles db-state methods over WebSocket", async () => {
   const sent = []
   const mongo = createMemoryMongo()

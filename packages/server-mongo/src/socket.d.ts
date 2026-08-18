@@ -71,5 +71,9 @@ export interface SocketHub {
 
 export function createSocketHub(
   adapter: SocketAdapter | null | undefined,
-  onMessage: (client: SocketClient, message: { type: string; [key: string]: unknown }) => Promise<void> | void
+  onMessage: (client: SocketClient, message: { type: string; [key: string]: unknown }) => Promise<void> | void,
+  options?: {
+    /** Included in every `hello` as its `server` field (see `serverInfo`). */
+    server?: Record<string, unknown>
+  }
 ): SocketHub
