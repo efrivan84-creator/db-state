@@ -50,7 +50,7 @@ createDbStateServer(config: DbStateServerConfig): DbStateServer
 | `mongo` | `MongoDatabaseLike` | required | Mongo database handle. |
 | `tables` | `string[]` | required | Tables exposed through CRUD/RPC. Add `_user`, `_group` explicitly when needed. |
 | `hooksDir` | `string \| URL` | undefined | Existing readable directory of hook files; `before*` may also allow or deny. See [hooks.md](hooks.md). |
-| `methodsDir` | `string \| URL` | undefined | Directory of named RPC method files: `"zad.get-num"` → `rpc/zad/get-num.js`. |
+| `methodsDir` | `string \| URL` | undefined | Directory of named RPC method files: `"zad.get-num"` → `rpc/zad/get-num.js`. Files under `pub/` are callable **without signing in** — see below. |
 | `methodsContext` | `Record<string, unknown>` | undefined | Extra values for file methods and hooks. File methods merge them over their defaults; hooks receive the extras but keep server-owned `db` and `api`. |
 | `reloadCheckMs` | `number` | `60000` | How often hook/method files are re-checked against their mtime, ms. `0` checks every call. |
 | `password` | `PasswordHasher` | PBKDF2 | Password hash adapter. |
@@ -70,6 +70,38 @@ createDbStateServer(config: DbStateServerConfig): DbStateServer
 | `changesBroadcastDelay` | `number` | `3000` | Debounce delay before waking clients after writes, ms. |
 | `changesBroadcastRate` | `number` | `100` | Maximum clients to wake per second. |
 | `socket` | `SocketAdapter` | undefined | Out-of-process broadcast hook. |
+
+### Methods without sign-in: the `pub` folder
+
+Ordinary RPC requires an authenticated client. Sign-up and password recovery
+cannot work that way: calling a method needs a session, and a session is
+exactly what the caller does not have yet.
+
+So files under `<methodsDir>/pub/` are callable without signing in:
+
+```
+rpc/
+  pub/
+    auth/
+      register.js   → method "pub.auth.register", no sign-in
+      reset.js      → method "pub.auth.reset",    no sign-in
+  bill/
+    get.js          → method "bill.get",          sign-in required
+```
+
+A folder, not a config list: `ls rpc/pub` answers "what is exposed", and a
+file is either in it or not — there is no spelling to get wrong. The method
+name carries the same mark (`pub.`), so an open call is visible in the
+browser and in logs.
+
+**What a public method must do itself.** It receives no `user` and gets no
+built-in checks. Rate limiting, one-time codes and input validation belong to
+the method.
+
+**What never becomes public.** Table commands (`load`, `getIds`, `update`,
+`sync`, …): they read and write data, and exposing them would hand over the
+database. The `pub` folder applies to file methods only, and without
+`methodsDir` there are no public methods at all.
 
 ## `DbStateServer`
 

@@ -2309,6 +2309,138 @@ test("custom RPC methods require an authenticated client", async () => {
   assert.equal(error.error, "Unauthorized")
 })
 
+test("an array in a permission filter means any of, in queries too", async () => {
+  // Массив значений — «совпадает любое» (docs: access). Проверка уже
+  // прочитанного документа это делала всегда, а в запрос Mongo массив
+  // уходил как есть — то есть «поле равно этому массиву», и чтение по
+  // фильтру молча отдавало пусто. Два пути одного права расходились.
+  const mongo = createMemoryMongo()
+  for (const row of [{ _id: "a", city: "msk" }, { _id: "b", city: "spb" }, { _id: "c", city: "kzn" }]) {
+    await mongo.collection("order").insertOne(row)
+  }
+  await mongo.collection("_group").insertOne({
+    _id: "sales",
+    access: { order: { read: { city: ["msk", "spb"] } } }
+  })
+  await mongo.collection("_user").insertOne({
+    _id: "u1", login: "u1", passwordHash: "demo:pw", groups: ["sales"]
+  })
+
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    password: { hash: async (value) => `demo:${value}`, verify: async (value, stored) => stored === `demo:${value}` }
+  })
+  const sent = []
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { sessionId: "s1" })
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:login", id: "l1", login: "u1", password: "pw"
+  }))
+
+  // Список: обе разрешённые строки видны, третья — нет.
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:rpc", id: "r1", method: "getIds", payload: { table: "order", filter: {} }
+  }))
+  const ids = sent.find((message) => message.id === "r1")
+  assert.equal(ids.type, "dbstate:rpc_result", ids.error)
+  assert.deepEqual([...ids.result].sort(), ["a", "b"])
+
+  // Точечное чтение тоже: раньше здесь был отказ на собственную строку.
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:rpc", id: "r2", method: "load", payload: { table: "order", id: "b" }
+  }))
+  const own = sent.find((message) => message.id === "r2")
+  assert.equal(own.type, "dbstate:rpc_result", own.error)
+  assert.equal(own.result.city, "spb")
+
+  // Чужая строка закрыта.
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:rpc", id: "r3", method: "load", payload: { table: "order", id: "c" }
+  }))
+  assert.equal(sent.find((message) => message.id === "r3").type, "dbstate:rpc_error")
+})
+
+test("methods in the pub folder are callable without signing in", async () => {
+  const server = createDbStateServer({
+    mongo: createMemoryMongo(),
+    tables: [],
+    methodsDir: await writeDir({
+      "pub/auth/register": "export default async () => 'registered'",
+      "auth/change": "export default async () => 'changed'"
+    }, "dbstate-public-")
+  })
+  const sent = []
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { sessionId: "s1" })
+
+  // Регистрация нужна тому, у кого сессии ещё нет: она и открыта.
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:rpc", id: "r1", method: "pub.auth.register", payload: {}
+  }))
+  const ok = sent.find((message) => message.id === "r1")
+  assert.equal(ok.type, "dbstate:rpc_result")
+  assert.equal(ok.result, "registered")
+
+  // Соседний метод вне папки вход по-прежнему требует.
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:rpc", id: "r2", method: "auth.change", payload: {}
+  }))
+  const denied = sent.find((message) => message.id === "r2")
+  assert.equal(denied.type, "dbstate:rpc_error")
+  assert.equal(denied.error, "Unauthorized")
+})
+
+test("pub only opens the folder, not any name that starts with it", async () => {
+  const server = createDbStateServer({
+    mongo: createMemoryMongo(),
+    tables: ["order"],
+    methodsDir: await writeDir({ "pub/ping": "export default async () => 'pong'" }, "dbstate-public-")
+  })
+  const sent = []
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { sessionId: "s1" })
+
+  // Табличные команды публичными не становятся никогда: они читают и пишут
+  // данные, и открыть их — значит отдать базу любому.
+  for (const method of ["load", "getIds", "update", "sync"]) {
+    await server.socket.handleMessage(client, JSON.stringify({
+      type: "dbstate:rpc", id: method, method, payload: { table: "order", id: "1" }
+    }))
+    const answer = sent.find((message) => message.id === method)
+    assert.equal(answer.type, "dbstate:rpc_error", method)
+    assert.equal(answer.error, "Unauthorized", method)
+  }
+
+  // "public" и "pubs" — не папка pub: сегмент сравнивается целиком.
+  for (const method of ["public.ping", "pubs.ping", "pub2.ping"]) {
+    await server.socket.handleMessage(client, JSON.stringify({
+      type: "dbstate:rpc", id: method, method, payload: {}
+    }))
+    const answer = sent.find((message) => message.id === method)
+    assert.equal(answer.error, "Unauthorized", method)
+  }
+})
+
+test("pub methods stay closed without methodsDir", async () => {
+  // Без methodsDir файловых методов нет вовсе. Ответ должен остаться
+  // "Unauthorized", а не "Unknown method": разные ответы на существующий и
+  // несуществующий метод — способ их перебрать.
+  const server = createDbStateServer({ mongo: createMemoryMongo(), tables: [] })
+  const sent = []
+  const client = { send: (message) => sent.push(JSON.parse(message)) }
+  server.socket.addClient(client, { sessionId: "s1" })
+
+  await server.socket.handleMessage(client, JSON.stringify({
+    type: "dbstate:rpc", id: "r1", method: "pub.auth.register", payload: {}
+  }))
+
+  const error = sent.find((message) => message.id === "r1")
+  assert.equal(error.type, "dbstate:rpc_error")
+  assert.equal(error.error, "Unauthorized")
+})
+
+
 function createMemoryMongo() {
   const collections = new Map()
 

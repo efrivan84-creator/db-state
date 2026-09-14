@@ -4,6 +4,12 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.3.5
+
+- An array of values in a permission filter now means "any of" in Mongo queries too. The two paths of the same rule disagreed: checking an already-loaded document accepted `{ city: ["msk", "spb"] }` as "any of these cities", while the query sent the array verbatim — "the field equals this array" — so filtered reads silently returned nothing. It was easy to miss because the `$groupid` placeholder did expand to `$in`, so a rule using it worked while the same rule written as a list did not. The documented shape of permissions is unchanged (docs: access); only its execution was fixed.
+
+- File RPC methods under a `pub/` subfolder are callable without signing in: `rpc/pub/auth/register.js` becomes method `"pub.auth.register"`. Sign-up and password recovery cannot be expressed otherwise — calling an ordinary method requires a session, which is exactly what the caller lacks; until now such flows had to be written as a `files` module intercepting messages ahead of the library. The marker is a folder rather than a config list or a filename prefix: `ls rpc/pub` answers "what is exposed", a file is either in it or not, and a typo has nowhere to hide. The method name carries the same mark, so an open call is visible in the browser and in logs. A public method receives no `user` and validates its own input — rate limiting and one-time codes stay with the application. Table commands (`load`, `getIds`, `update`, `sync`) never become public, and without `methodsDir` there are no public methods at all: a `pub.*` call on such a server is still rejected as `Unauthorized` rather than as an unknown method, since differing answers for existing and missing methods would let them be enumerated.
+
 ## 0.3.4
 
 - `serverInfo` config on `createDbStateServer` rides along in the `hello` message, and the Vue client exposes it as `state.sync.server`. `hello` is the one message every client receives before authentication, so a login screen can show which build it is talking to — branch, commit, deploy date — without a separate endpoint. RPC cannot do this job: it is rejected until the user is authorized. Without `serverInfo` the `hello` stays byte-for-byte what it was, and a bare `hello` from an older server resets `state.sync.server` to `null` rather than leaving a previous connection's identity on screen.

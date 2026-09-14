@@ -119,7 +119,12 @@ function resolveFilterForQuery(filter, user) {
 function resolveQueryValue(value, user) {
   if (value === "$adminid") return user?._id
   if (value === "$groupid") return { $in: user?.groups ?? [] }
-  if (Array.isArray(value)) return value.map((item) => resolveQueryValue(item, user))
+  // Массив значений в поле — «совпадает любое», как и при сверке документа
+  // (valuesMatch ниже). Без $in он ушёл бы в Mongo как есть, а там это
+  // «поле равно этому массиву»: право { _id: [101, 102] } не совпало бы ни
+  // с одной строкой, и чтение по фильтру молча отдавало бы пусто — при том
+  // что проверка уже прочитанного документа то же право принимает.
+  if (Array.isArray(value)) return { $in: value.map((item) => resolveQueryValue(item, user)) }
   if (value && typeof value === "object") {
     const out = {}
     for (const [key, nested] of Object.entries(value)) out[key] = resolveQueryValue(nested, user)

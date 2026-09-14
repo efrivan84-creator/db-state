@@ -87,6 +87,12 @@ export interface DbStateServerConfig {
    * imported lazily on first call and re-checked at most every
    * `reloadCheckMs`. Every file method receives `db` (this server's Mongo)
    * and `api` (the db-state server) by default.
+   *
+   * Methods under `<dir>/pub/` are callable without signing in — sign-up and
+   * password recovery cannot require a session, since a session is exactly
+   * what the caller lacks. Such a method is named "pub.auth.register" and
+   * receives no `user`: it must validate its own input, and rate limits or
+   * one-time codes are the application's job.
    */
   methodsDir?: string | URL
 

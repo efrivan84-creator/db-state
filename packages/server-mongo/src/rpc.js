@@ -13,9 +13,19 @@ export function createHandlers(api) {
   }
 }
 
-export async function handleRpc(router, client, message, resolve) {
+export async function handleRpc(router, client, message, resolve, isPublicMethod) {
   try {
-    if (!client.user) throw new Error("Unauthorized")
+    // Вход нужен всем методам, кроме объявленных публичными.
+    //
+    // Публичные существуют ради того, что делают до входа и вместо него:
+    // регистрация, восстановление пароля, проверка кода из SMS. Такой метод
+    // нельзя выразить обычным — чтобы позвать обычный, надо уже быть
+    // вошедшим, а человек как раз войти и не может.
+    //
+    // Публичные лежат в папке rpc/pub — имя метода начинается с "pub."
+    // (см. methods-dir.js). Без resolver'а публичных нет вовсе: методы
+    // роутера, то есть табличные команды, вход требуют всегда.
+    if (!client.user && !isPublicMethod?.(message.method)) throw new Error("Unauthorized")
 
     const handler = router[message.method] ?? await resolve?.(message.method)
     if (!handler) throw new Error(`Unknown db-state RPC method: ${message.method}`)

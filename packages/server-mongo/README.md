@@ -165,6 +165,44 @@ export default async ({ body, user, db }) => {
 - Permission checks and the change log only apply to standard CRUD: a method writing to the database directly owns its permissions, audit and broadcast — or calls `api.add` / `api.update`, which do all three.
 - Reload uses `import` with `?v=mtime`: old module copies stay in memory (ESM cannot be evicted). Production files do not change, development reloads are negligible; handlers must not keep module-level state.
 
+### Methods without sign-in: the `pub` folder
+
+Ordinary RPC requires an authenticated client. Sign-up and password recovery
+cannot work that way: calling a method needs a session, and a session is
+exactly what the caller does not have yet.
+
+So files in a `pub/` subfolder are callable without signing in:
+
+```
+rpc/
+  pub/
+    auth/
+      register.js   -> "pub.auth.register", no sign-in
+      reset.js      -> "pub.auth.reset",    no sign-in
+  zad/
+    get-num.js      -> "zad.get-num",       sign-in required
+```
+
+```js
+// rpc/pub/auth/reset.js
+export default async ({ body, db }) => {
+  // No `user` here: there is no session to check, so the method guards itself.
+  await verifyCode(db, body.phone, body.code)
+  return { ok: true }
+}
+```
+
+- The marker is a **folder**, not a config list or a filename prefix:
+  `ls rpc/pub` answers "what is exposed", and a file is either in it or not —
+  a typo has nowhere to hide.
+- The method name carries the same mark (`pub.`), so an open call is visible
+  in the browser and in logs.
+- A public method **receives no `user`** and validates its own input. Rate
+  limiting, one-time codes and input checks belong to the method.
+- Table commands (`load`, `getIds`, `update`, `sync`) never become public:
+  they read and write data. Without `methodsDir` there are no public methods
+  at all.
+
 ## Auth
 
 Users live in `_user`:

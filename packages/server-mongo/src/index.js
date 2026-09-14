@@ -22,7 +22,7 @@ import {
 } from "./access.js"
 import { createAuth, defaultAuthHash, defaultPassword } from "./auth.js"
 import { runErrorHooks, runHooks } from "./hooks.js"
-import { createMethodsDirResolver } from "./methods-dir.js"
+import { createMethodsDirResolver, isPublicMethod } from "./methods-dir.js"
 import { DEFAULT_COUNTER_COLLECTION, nextNumericId, useNumericId } from "./numeric-id.js"
 import { createHandlers, handleRpc } from "./rpc.js"
 import { createSocketHub } from "./socket.js"
@@ -59,7 +59,15 @@ export function createDbStateServer(options) {
     if (message.type === DB_STATE_MESSAGES.login) return auth.login(client, message)
     if (message.type === DB_STATE_MESSAGES.auth) return auth.auth(client, message)
     if (message.type === DB_STATE_MESSAGES.logout) return auth.logout(client, message)
-    if (message.type === DB_STATE_MESSAGES.rpc) return handleRpc(router, client, message, resolveFileMethod)
+    // Публичные методы (папка pub) существуют только вместе с methodsDir:
+    // без него файловых методов нет, а табличные команды роутера вход
+    // требуют всегда. Иначе вызов "pub.что-угодно" на сервере без
+    // methodsDir проходил бы проверку входа и падал уже на «неизвестный
+    // метод» — разный ответ на существующий и несуществующий метод, то
+    // есть способ их перебрать.
+    if (message.type === DB_STATE_MESSAGES.rpc) {
+      return handleRpc(router, client, message, resolveFileMethod, resolveFileMethod && isPublicMethod)
+    }
   }, { server: config.serverInfo })
   const changesBroadcaster = createChangesBroadcaster(socket, config)
 

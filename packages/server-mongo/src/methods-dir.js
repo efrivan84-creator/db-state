@@ -14,6 +14,21 @@ import { reloadCheckMs } from "./file-cache.js"
 
 const SEGMENT_RE = /^[a-z0-9][a-z0-9_-]*$/
 
+// Папка публичных методов: rpc/pub/... вызывается без входа.
+//
+// Регистрация и восстановление пароля не выражаются обычным методом: чтобы
+// позвать обычный, нужна сессия, а это как раз то, чего у человека нет.
+//
+// Признак — папка, а не список в конфиге и не префикс в имени файла.
+// Папку видно в дереве, и «что открыто наружу» отвечается одним `ls rpc/pub`.
+// Префикс в имени пришлось бы повторять у каждого файла, и опечатка в нём
+// молча меняла бы доступ; здесь промахнуться мимо папки невозможно —
+// файл либо лежит в ней, либо нет.
+//
+// Имя метода у клиента тоже начинается с pub: "pub.auth.register". Видно и
+// в браузере, и в логах, что вызов идёт в открытую часть.
+const PUBLIC_SEGMENT = "pub"
+
 export function createMethodsDirResolver(dir, context = {}, checkMs) {
   const every = reloadCheckMs(checkMs)
   const base = baseUrl(dir)
@@ -60,6 +75,13 @@ function baseUrl(dir) {
     : String(dir).startsWith("file:") ? new URL(dir) : pathToFileURL(String(dir))
   if (!url.pathname.endsWith("/")) url.pathname += "/"
   return url
+}
+
+// Публичный ли метод — по первому сегменту имени, то есть по папке, в
+// которой лежит файл. Проверка отдельно от разбора пути: её зовёт rpc.js
+// до того, как метод вообще станут искать на диске.
+export function isPublicMethod(method) {
+  return String(method ?? "").split(".")[0] === PUBLIC_SEGMENT
 }
 
 // "zad.get-num" -> <dir>/zad/get-num.js; every segment is validated so a

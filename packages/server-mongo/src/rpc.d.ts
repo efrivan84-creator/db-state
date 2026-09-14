@@ -44,10 +44,14 @@ export function createHandlers(api: {
 /**
  * Dispatches a `dbstate:rpc` message into the router, sending the result
  * back as `dbstate:rpc_result` or `dbstate:rpc_error`. Rejects unauthenticated
- * clients with `"Unauthorized"`.
+ * clients with `"Unauthorized"`, unless `isPublicMethod` accepts the method.
+ * File methods under `<methodsDir>/pub/` are public: sign-up and password
+ * recovery cannot require a session, since a session is what the caller lacks.
  */
 export function handleRpc(
   router: RpcRouter,
   client: SocketClient,
-  message: { id: string; method: string; payload?: unknown }
+  message: { id: string; method: string; payload?: unknown },
+  resolve?: (method: string) => Promise<RpcHandler | undefined> | RpcHandler | undefined,
+  isPublicMethod?: (method: string) => boolean
 ): Promise<void>
