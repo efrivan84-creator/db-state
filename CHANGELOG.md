@@ -4,6 +4,14 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.3.7
+
+- A change that replaces a parent object as a whole no longer disappears from `sync` when only its nested fields are allowed. A `set: { sip: {...} }` patch under `read_fields: ["sip.extension"]` (or the same `ctx.fields` from `readChange`) used to be dropped entirely — only the `sip` path was checked, and it is not in the list. Nothing leaked, but the client silently missed what it was entitled to: the new `sip.extension` value never reached the open page. Such a path is now projected onto the allowed nested fields: they go into `set`, the rest does not, and an allowed field missing from the new object goes into `unset` — the object was replaced as a whole. An `unset` of the parent likewise becomes an `unset` of the allowed nested fields. Inserts and deletes were already projected correctly.
+
+## 0.3.7
+
+- A change that replaces a parent object as a whole no longer disappears from `sync` when only its nested fields are allowed. A `set: { sip: {...} }` patch under `read_fields: ["sip.extension"]` (or the same `ctx.fields` from `readChange`) used to be dropped entirely — only the `sip` path was checked, and it is not in the list. Nothing leaked, but the client silently missed what it was entitled to: the new `sip.extension` value never reached the open page. Such a path is now projected onto the allowed nested fields: they go into `set`, the rest does not, and an allowed field missing from the new object goes into `unset` — the object was replaced as a whole. An `unset` of the parent likewise becomes an `unset` of the allowed nested fields. Inserts and deletes were already projected correctly.
+
 ## 0.3.6
 
 - New file hook `readChange`: called during `sync` for every change, with `table`, `id`, `change` and `loadDoc()`. A row rule that an access filter cannot express — membership in another collection, access to a parent document — could not be applied to sync before: the outer `sync` hook has no `table`, changes were checked by group filters only, and `fullaccess` received everything. Applications had to repeat the rule in a shared `afterRead` by walking `ctx.result.changes`, and a forgotten table meant a leak through sync while lists were correct. `false` drops the change, `true` sends it without the group access, no decision leaves it to the group access; `ctx.fields` narrows the fields and intersects with `read_fields`. The hook is optional: without the file `sync` behaves as before. The table `beforeRead` is still not called per change — it narrows the filter and allows the request, and a change has no filter, so its "allowed" would open the table.

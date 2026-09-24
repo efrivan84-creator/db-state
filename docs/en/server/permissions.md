@@ -95,7 +95,7 @@ The `write` filter is checked against the **existing** document for `update` / `
 | `read` | `load`, `getIds`, `getUnique`, `count`, and change visibility in `sync` |
 | `write` | `add`, `update`, `remove` |
 
-`read_fields` projects `load` results and filters `sync` changes per field. `write_fields` validates the field paths of `add` / `update` — a patch touching a path outside the whitelist **rejects the whole operation** with `Write denied: field <path>` (nothing is silently dropped).
+`read_fields` projects `load` results and filters `sync` changes per field. When a patch replaces a parent object as a whole (`set: { sip: {...} }`) and only nested fields are allowed (`sip.extension`), the change is projected onto them: allowed values are sent, the rest are not, and an allowed field missing from the new object is removed on the client. When a patch replaces a parent object as a whole (`set: { sip: {...} }`) and only nested fields are allowed (`sip.extension`), the change is projected onto them: allowed values are sent, the rest are not, and an allowed field missing from the new object is removed on the client. `write_fields` validates the field paths of `add` / `update` — a patch touching a path outside the whitelist **rejects the whole operation** with `Write denied: field <path>` (nothing is silently dropped).
 
 An empty list is still a whitelist, not an omitted limit: `read_fields: []` exposes only `_id`, which is always visible, and `write_fields: []` rejects every client field.
 

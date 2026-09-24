@@ -2698,3 +2698,36 @@ test("mergeUserAccess keeps every action, not only read and write", async () => 
   assert.equal(accessAllows(access, "olt", "activate"), true)
   assert.equal(accessAllows(access, "bill", "write"), false)
 })
+
+test("sync projects a replaced parent object onto nested read_fields instead of dropping it", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["staff", "chat"],
+    now: clock(["2026-05-21T10:00:01.000Z", "2026-05-21T10:00:02.000Z", "2026-05-21T10:00:03.000Z", "2026-05-21T10:00:04.000Z", "2026-05-21T10:00:05.000Z"]),
+    createLogId: idSeq(),
+    hooksDir: await writeDir({ "chat/readChange": `export default (ctx) => { ctx.fields = ["last.direction", "last.sentAt"]; return true }` })
+  })
+  const writer = { user: { _id: "w1", groups: [], access: { fullaccess: 1 } } }
+  await server.add({ table: "staff", obj: { _id: "s1", name: "Техник", sip: { extension: "225", password: "x" } }, sessionId: "w", req: writer })
+  // Родитель заменён целиком: разрешённое вложенное поле уходит, секрет — нет.
+  await server.update({ table: "staff", id: "s1", set: { sip: { extension: "226", password: "y" } }, sessionId: "w", req: writer })
+  // В новом объекте разрешённого поля нет — у клиента оно удаляется.
+  await server.update({ table: "staff", id: "s1", set: { sip: { password: "z" } }, sessionId: "w", req: writer })
+  await server.add({ table: "chat", obj: { _id: "c1", last: { direction: "in", text: "секрет" } }, sessionId: "w", req: writer })
+  await server.update({ table: "chat", id: "c1", set: { last: { direction: "out", sentAt: "t", text: "секрет" } }, sessionId: "w", req: writer })
+
+  const reader = { user: { _id: "u1", groups: [], access: { staff: { read: {}, read_fields: ["name", "sip.extension"] } } } }
+  const { changes } = await server.sync({ from: "2026-05-21T10:00:00.000Z", sessionId: "r", req: reader })
+  assert.equal(JSON.stringify(changes).includes("password"), false)
+  assert.equal(JSON.stringify(changes).includes("секрет"), false)
+  const staff = changes.filter((change) => change.table === "staff")
+  assert.deepEqual(staff.map((change) => change.action), ["insert", "update", "update"])
+  assert.deepEqual(staff[1].set, { "sip.extension": "226" })
+  assert.equal(staff[1].unset, undefined)
+  assert.equal(staff[2].set, undefined)
+  assert.deepEqual(staff[2].unset, ["sip.extension"])
+  // То же с полями из readChange.
+  const chat = changes.filter((change) => change.table === "chat")
+  assert.deepEqual(chat[1].set, { "last.direction": "out", "last.sentAt": "t" })
+})

@@ -285,17 +285,35 @@ export function filterChangeFields(change, fields) {
   }
 
   if (change.action === "update") {
-    const set = Object.fromEntries(
-      Object.entries(change.set ?? {}).filter(([path]) => isAllowedField(path, fields))
-    )
-    const unset = (change.unset ?? []).filter((path) => isAllowedField(path, fields))
+    // Патч может заменить родительский объект целиком — set: { sip: {...} }, —
+    // а разрешены только его вложенные поля: ["sip.extension"]. Такой путь
+    // не выбрасываем, а разворачиваем по разрешённым вложенным: иначе клиент
+    // молча не получил бы изменение, которое ему положено. Разрешённого поля
+    // в новом объекте нет — у клиента оно удаляется: объект заменён целиком.
+    const set = {}
+    const unset = new Set()
+    for (const [path, value] of Object.entries(change.set ?? {})) {
+      if (isAllowedField(path, fields)) {
+        set[path] = value
+        continue
+      }
+      for (const field of nestedFields(path, fields)) {
+        const nested = getByPath(value, field.slice(path.length + 1))
+        if (nested === undefined) unset.add(field)
+        else set[field] = nested
+      }
+    }
+    for (const path of change.unset ?? []) {
+      if (isAllowedField(path, fields)) unset.add(path)
+      else for (const field of nestedFields(path, fields)) unset.add(field)
+    }
 
-    if (Object.keys(set).length === 0 && unset.length === 0) return undefined
+    if (Object.keys(set).length === 0 && unset.size === 0) return undefined
     const { set: ignoredSet, unset: ignoredUnset, ...base } = change
     return {
       ...base,
       ...(Object.keys(set).length > 0 ? { set } : {}),
-      ...(unset.length > 0 ? { unset } : {})
+      ...(unset.size > 0 ? { unset: [...unset] } : {})
     }
   }
 
@@ -308,6 +326,12 @@ export function resolveUser(config, ctx) {
 
 export function isAllowedField(path, fields) {
   return fields.some((field) => path === field || path.startsWith(`${field}.`))
+}
+
+// Разрешённые поля внутри пути: для "sip" из ["sip.extension", "name"] —
+// ["sip.extension"].
+function nestedFields(path, fields) {
+  return fields.filter((field) => field.startsWith(`${path}.`))
 }
 
 function copyMetaField(from, to, field) {
