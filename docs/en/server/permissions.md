@@ -67,7 +67,8 @@ Merging is **additive only** — there are no deny rules:
 
 - filters for the same action from different groups combine into an **any-of** set (the document passes when at least one filter matches);
 - `{}` (all rows) beats any filter;
-- `*_fields` lists are united; a grant **without** a field limit removes the limit.
+- `*_fields` lists are united; a grant **without** a field limit removes the limit;
+- **every** action is merged, not only `read` and `write`: permissions of named methods (`bill: { pay: {} }`, `olt: { manage: {} }`) merge by the same rules and are checked with `accessAllows`.
 
 Changing a group's `access` applies on the user's next login or reconnect.
 

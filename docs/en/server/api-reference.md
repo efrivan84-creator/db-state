@@ -451,7 +451,7 @@ A hook file in the root applies to every table, a file in a subfolder only to th
 Hooks contributed by mounted modules run before the application hook of the same
 name, and the first explicit decision (`true` / `false`) stops the chain.
 
-The same order applies to all hook names. For `sync`, there is no single table for the whole operation, so only global `beforeRead/afterRead/errorRead` run for the outer sync call. Per-change filtering still uses normal read access rules.
+The same order applies to all hook names. For `sync`, there is no single table for the whole operation, so only global `beforeRead/afterRead/errorRead` run for the outer sync call. Each change is then checked by `readChange` (shared and table file, when present) and the normal read access rules — see [hooks](hooks.md#sync-readchange).
 
 ### Read order
 

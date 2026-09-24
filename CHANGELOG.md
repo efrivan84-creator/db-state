@@ -4,6 +4,12 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.3.6
+
+- New file hook `readChange`: called during `sync` for every change, with `table`, `id`, `change` and `loadDoc()`. A row rule that an access filter cannot express — membership in another collection, access to a parent document — could not be applied to sync before: the outer `sync` hook has no `table`, changes were checked by group filters only, and `fullaccess` received everything. Applications had to repeat the rule in a shared `afterRead` by walking `ctx.result.changes`, and a forgotten table meant a leak through sync while lists were correct. `false` drops the change, `true` sends it without the group access, no decision leaves it to the group access; `ctx.fields` narrows the fields and intersects with `read_fields`. The hook is optional: without the file `sync` behaves as before. The table `beforeRead` is still not called per change — it narrows the filter and allows the request, and a change has no filter, so its "allowed" would open the table.
+
+- Access merging at login keeps **every** action, not only `read` and `write`. Permissions of named methods (`bill: { pay: {} }`, `olt: { manage: {} }`) were stored on the group but silently dropped at login, so `accessAllows(user.access, "bill", "pay")` said "no" to a user who had the right; only non-`fullaccess` users noticed. Actions now come from the data itself and merge by the same rules: filters any-of, `{}` beats any filter, `<action>_fields` are united.
+
 ## 0.3.5
 
 - An array of values in a permission filter now means "any of" in Mongo queries too. The two paths of the same rule disagreed: checking an already-loaded document accepted `{ city: ["msk", "spb"] }` as "any of these cities", while the query sent the array verbatim — "the field equals this array" — so filtered reads silently returned nothing. It was easy to miss because the `$groupid` placeholder did expand to `$in`, so a rule using it worked while the same rule written as a list did not. The documented shape of permissions is unchanged (docs: access); only its execution was fixed.

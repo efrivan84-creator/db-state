@@ -235,6 +235,8 @@ export interface ServerHookContext<T extends BaseDoc = BaseDoc> {
   now?: string
   rows?: T[]
   change?: Change<T>
+  /** `readChange` only: loads the current document of the change (cached). */
+  loadDoc?: () => Promise<T | undefined>
   result?: unknown
   error?: Error
 }
@@ -270,6 +272,16 @@ export interface ServerHooks<T extends BaseDoc = BaseDoc> {
   beforeRead?: ServerHook<T>
   afterRead?: ServerHook<T>
   errorRead?: ServerHook<T>
+  /**
+   * Called for every change a `sync` is about to send, with `table`, `id`,
+   * `change` and `loadDoc()`. This is where a row rule that data access cannot
+   * express (membership in another collection, access to a parent document)
+   * is applied to sync. `false` drops the change, `true` sends it without the
+   * group access, no decision leaves it to the group access; `ctx.fields`
+   * narrows the fields in every case. Table `beforeRead` is not called per
+   * change: it narrows `ctx.filter` and a change has none.
+   */
+  readChange?: ServerHook<T>
   beforeWrite?: ServerHook<T>
   afterWrite?: ServerHook<T>
   errorWrite?: ServerHook<T>

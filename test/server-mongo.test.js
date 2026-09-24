@@ -2605,3 +2605,96 @@ async function waitFor(check) {
   }
   assert.equal(check(), true)
 }
+
+test("readChange hook applies a row rule to sync that data access cannot express", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["msg", "note"],
+    now: clock(["2026-05-21T10:00:01.000Z", "2026-05-21T10:00:02.000Z", "2026-05-21T10:00:03.000Z", "2026-05-21T10:00:04.000Z"]),
+    createLogId: idSeq(),
+    // Членство в ящике лежит в другой коллекции: фильтром права это не выразить.
+    hooksDir: await writeDir({
+      "msg/readChange": `export default async (ctx) => {
+        const row = await ctx.loadDoc()
+        if (!await ctx.db.collection("member").findOne({ _id: row.box + ":" + ctx.user._id })) return false
+        ctx.fields = ["box", "subject"]
+        return true
+      }`
+    })
+  })
+  await mongo.collection("member").insertOne({ _id: "a:u1" })
+  const writer = { user: { _id: "w1", groups: [], access: { fullaccess: 1 } } }
+  await server.add({ table: "msg", obj: { _id: "m1", box: "a", subject: "свой", body: "текст" }, sessionId: "w", req: writer })
+  await server.add({ table: "msg", obj: { _id: "m2", box: "b", subject: "чужой", body: "секрет" }, sessionId: "w", req: writer })
+  await server.add({ table: "note", obj: { _id: "n1", text: "без хука" }, sessionId: "w", req: writer })
+
+  // fullaccess не обходит хук изменения: чужое письмо не уходит.
+  const boss = await server.sync({ from: "2026-05-21T10:00:00.000Z", sessionId: "r", req: { user: { _id: "u1", groups: [], access: { fullaccess: 1 } } } })
+  assert.deepEqual(boss.changes.map((change) => [change.table, change.id]), [["msg", "m1"], ["note", "n1"]])
+  assert.deepEqual(boss.changes[0].obj, { _id: "m1", box: "a", subject: "свой" })
+
+  // true от хука отдаёт изменение без права группы; таблица без хука — как раньше.
+  const plain = await server.sync({ from: "2026-05-21T10:00:00.000Z", sessionId: "r", req: { user: { _id: "u1", groups: [], access: {} } } })
+  assert.deepEqual(plain.changes.map((change) => change.id), ["m1"])
+  const stranger = await server.sync({ from: "2026-05-21T10:00:00.000Z", sessionId: "r", req: { user: { _id: "u9", groups: [], access: { fullaccess: 1 } } } })
+  assert.deepEqual(stranger.changes.map((change) => change.id), ["n1"])
+})
+
+test("readChange without a decision leaves access to the group and narrows fields", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["card"],
+    now: clock(["2026-05-21T10:00:01.000Z", "2026-05-21T10:00:02.000Z"]),
+    createLogId: idSeq(),
+    hooksDir: await writeDir({ "card/readChange": `export default (ctx) => { ctx.fields = ["a", "b.c", "d"] }` })
+  })
+  const writer = { user: { _id: "w1", groups: [], access: { fullaccess: 1 } } }
+  await server.add({ table: "card", obj: { _id: "c1", a: 1, b: { c: 2, x: 3 }, d: 4, e: 5 }, sessionId: "w", req: writer })
+
+  const reader = { user: { _id: "u1", groups: [], access: { card: { read: {}, read_fields: ["a", "b", "e"] } } } }
+  const sync = await server.sync({ from: "2026-05-21T10:00:00.000Z", sessionId: "r", req: reader })
+  // Пересечение: a — в обоих, b.c — уже из b, d и e — только в одном списке.
+  assert.deepEqual(sync.changes[0].obj, { _id: "c1", a: 1, b: { c: 2 } })
+
+  const none = await server.sync({ from: "2026-05-21T10:00:00.000Z", sessionId: "r", req: { user: { _id: "u2", groups: [], access: {} } } })
+  assert.deepEqual(none.changes, [])
+})
+
+test("table beforeRead is not called per sync change: its allow would open the table", async () => {
+  const mongo = createMemoryMongo()
+  const server = createDbStateServer({
+    mongo,
+    tables: ["chat"],
+    now: clock(["2026-05-21T10:00:01.000Z", "2026-05-21T10:00:02.000Z"]),
+    createLogId: idSeq(),
+    // Типичный хук списка: сужает фильтр и явно разрешает.
+    hooksDir: await writeDir({ "chat/beforeRead": `export default (ctx) => { ctx.filter = { owner: ctx.user._id }; return true }` })
+  })
+  const writer = { user: { _id: "w1", groups: [], access: { fullaccess: 1 } } }
+  await server.add({ table: "chat", obj: { _id: "x1", owner: "someone" }, sessionId: "w", req: writer })
+  const sync = await server.sync({ from: "2026-05-21T10:00:00.000Z", sessionId: "r", req: { user: { _id: "u1", groups: [], access: {} } } })
+  assert.deepEqual(sync.changes, [])
+})
+
+test("mergeUserAccess keeps every action, not only read and write", async () => {
+  const mongo = createMemoryMongo()
+  await mongo.collection("_group").insertOne({ _id: "kassa", access: { bill: { read: {}, pay: { zone: 1 } } } })
+  await mongo.collection("_group").insertOne({ _id: "kassa2", access: { bill: { pay: { zone: 2 }, pay_fields: ["sum"] }, olt: { manage: {} } } })
+  await mongo.collection("_group").insertOne({ _id: "old", access: { bill: { pay: true } } })
+
+  const access = await mergeUserAccess(
+    { mongo, groupTable: "_group" },
+    { _id: "u1", groups: ["kassa", "kassa2", "old"], access: { olt: { activate: { own: "$adminid" } } } }
+  )
+
+  // Поля ограничивает только один источник права pay — другой снимает ограничение.
+  assert.deepEqual(access, {
+    bill: { read: {}, pay: [{ zone: 1 }, { zone: 2 }] },
+    olt: { manage: {}, activate: { own: "$adminid" } }
+  })
+  assert.equal(accessAllows(access, "bill", "pay"), true)
+  assert.equal(accessAllows(access, "olt", "activate"), true)
+  assert.equal(accessAllows(access, "bill", "write"), false)
+})

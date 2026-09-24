@@ -34,7 +34,7 @@ export default (ctx) => {
 }
 ```
 
-There are six names: `beforeRead`, `afterRead`, `errorRead`, `beforeWrite`, `afterWrite`, `errorWrite`. Anything else in the directory is ignored, so a README or a helper module next to them breaks nothing.
+There are seven names: `beforeRead`, `afterRead`, `errorRead`, `readChange`, `beforeWrite`, `afterWrite`, `errorWrite`. Anything else in the directory is ignored, so a README or a helper module next to them breaks nothing.
 
 Reads are `getIds`, `load`, `count`, `getUnique`, `sync`. Writes are `add`, `update`, `remove`. The exact command is always in `ctx.method`.
 
@@ -128,7 +128,7 @@ export default (ctx) => {
 
 ## `ctx` contents
 
-Every hook receives `method`, `user`, `req` (`req.body` holds the client payload), `db`, and `api`. `table` is present for table-scoped CRUD calls but absent on the outer `sync` hook. `sessionId` is present on writes/sync when the caller supplied one.
+Every hook receives `method`, `user`, `req` (`req.body` holds the client payload), `db`, and `api`. `table` is present for table-scoped CRUD calls but absent on the outer `sync` hook; per-change rules for `sync` go into `readChange`, which has `table`. `sessionId` is present on writes/sync when the caller supplied one.
 
 Reads: `filter`, `sort`, `skip`, `limit`, `field`, `fields`, `id`, `obj`, `rows`, `result`.
 
@@ -197,6 +197,30 @@ export default (ctx) => {
 }
 ```
 
+## Sync: `readChange`
+
+`sync` sends changes from the shared change log. Each change is checked against the group access for its table — the same `read` filter as in lists. The table `beforeRead` is **not** called per change: it narrows `ctx.filter` and allows the request, and a change has no filter — its "allowed" would open the whole table.
+
+A row rule that a filter cannot express (membership in another collection, access to a parent document) goes into `readChange` for `sync`. The hook runs for every change and receives `table`, `id`, `change` and `loadDoc()` — the current document, loaded once:
+
+```js
+// hooks/message/readChange.js
+export default async (ctx) => {
+  const row = await ctx.loadDoc()           // for a delete — the document before it
+  const member = await ctx.db.collection("member").findOne({ box: row.box, user: ctx.user._id })
+  if (!member) return false                 // do not send this change
+  ctx.fields = ["box", "subject"]           // and only these fields
+  return true                               // without group access to message
+}
+```
+
+- `false` — the change is dropped; for `sync` this is not an error, the row is simply not this user's;
+- `true` — sent without the group access; `fullaccess` does not bypass the hook;
+- no decision — the group access decides, as without the hook;
+- `ctx.fields` narrows the fields in every case and intersects with the group `read_fields`.
+
+The hook runs only where the file exists: `hooks/<table>/readChange.js` for its table, `hooks/readChange.js` for all of them. A row read rule is usually written twice — in `beforeRead` for lists and in `readChange` for sync — so keep the check in a shared module.
+
 ## Module hooks
 
 Mounted modules (such as `@db-state/server-files`) declare their own hooks. This is the module's internals: that is how it protects its own table and lets its own internal calls through.
@@ -212,6 +236,7 @@ Part of the same is expressible as group permissions: `read_fields` on the file 
 | "own documents", "own group", "active only" | Filter in the group access (`$adminid`, `$groupid`) |
 | A fixed list of visible fields per role | `read_fields` in the group access |
 | Condition depends on time, request params, another table | `beforeRead` / `beforeWrite` |
+| The same read condition for sync | `readChange` |
 | Clamping and sanitising the client filter | `beforeRead` |
 | A hard denial with a message | `beforeRead` / `beforeWrite` |
 | Enrich the response | `afterRead` |

@@ -397,14 +397,32 @@ export function createDbStateServer(options) {
             }))
         }
 
+        // Хук изменения — правило строки, которое не выражается данными:
+        // членство в другой коллекции, право на родительский документ.
+        // Табличный beforeRead здесь не годится: он сужает ctx.filter и
+        // разрешает запрос, а у изменения фильтра нет — его «разрешено»
+        // открыло бы таблицу целиком. Поэтому отдельное имя, которое
+        // приложение кладёт только там, где правило нужно.
+        //
+        //   false — изменение не отдаём (запросу это не ошибка, строка не его);
+        //   true  — отдаём без права группы;
+        //   ничего — решает право группы, как без хука.
+        // ctx.fields урезает поля при любом решении.
+        const decision = await runHooks(config, "readChange", ctx)
+        if (decision?.allowed === false) continue
+        const hookFields = Array.isArray(ctx.fields) ? ctx.fields : undefined
+
         // Хук разрешил sync целиком — права по таблицам не спрашиваем.
-        const access = before?.allowed === true
-          ? { allowed: true, fields: Array.isArray(readCtx.fields) ? readCtx.fields : undefined }
-          : await resolveAccess(config, "read", ctx)
+        const access = decision?.allowed === true
+          ? { allowed: true }
+          : before?.allowed === true
+            ? { allowed: true, fields: Array.isArray(readCtx.fields) ? readCtx.fields : undefined }
+            : await resolveAccess(config, "read", ctx)
         if (!access.allowed) continue
 
-        if (access.fields) markFieldsFiltered(req)
-        const filtered = filterChangeFields(change, access.fields)
+        const fields = intersectFields(access.fields, hookFields)
+        if (fields) markFieldsFiltered(req)
+        const filtered = filterChangeFields(change, fields)
         if (filtered) allowed.push(filtered)
       }
 
@@ -664,4 +682,15 @@ function createChangesBroadcaster(socket, config) {
       }, Math.max(0, config.changesBroadcastDelay))
     }
   }
+}
+
+// Пересечение двух белых списков полей: права группы и хука изменения.
+// undefined — «без ограничения», поэтому уступает другому списку целиком.
+// Пути вложенные: "audio" покрывает "audio.mime", и наоборот, в результат
+// попадает более узкий из двух.
+function intersectFields(a, b) {
+  if (!a) return b
+  if (!b) return a
+  const covers = (list, path) => list.some((field) => path === field || path.startsWith(`${field}.`))
+  return [...new Set([...a.filter((path) => covers(b, path)), ...b.filter((path) => covers(a, path))])]
 }

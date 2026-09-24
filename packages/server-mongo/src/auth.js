@@ -144,8 +144,14 @@ function mergeTableEntry(current, extra) {
   if (extra == null || typeof extra !== "object") return current
   const base = current && typeof current === "object" ? current : undefined
 
+  // Все действия, какие есть в данных, а не только read и write: полномочия
+  // именованных методов (bill.pay, olt.manage) проверяются тем же
+  // accessAllows и при слиянии групп теряться не должны. *_fields — не
+  // действие, а ограничение полей действия, его сливает mergeAction.
+  const actions = new Set([...Object.keys(base ?? {}), ...Object.keys(extra)])
   const out = {}
-  for (const action of ["read", "write"]) {
+  for (const action of actions) {
+    if (action.endsWith("_fields")) continue
     const merged = mergeAction(base, extra, action)
     if (merged.value !== undefined) out[action] = merged.value
     if (merged.fields) out[`${action}_fields`] = merged.fields

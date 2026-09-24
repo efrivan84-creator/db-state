@@ -20,6 +20,8 @@ const HOOK_NAMES = [
   "beforeRead",
   "afterRead",
   "errorRead",
+  // На каждое изменение при sync: у него есть table и id, но нет фильтра.
+  "readChange",
   "beforeWrite",
   "afterWrite",
   "errorWrite"

@@ -1,6 +1,6 @@
 {
   "name": "@db-state/server-mongo",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "MongoDB-backed server for db-state: CRUD, append-only log, sync, WebSocket RPC, group-based access objects with row filters and field-level rules, file-based custom methods.",
   "keywords": [
     "db-state",
