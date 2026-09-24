@@ -6,7 +6,9 @@
 [![npm @db-state/server-mongo](https://img.shields.io/npm/v/@db-state/server-mongo?label=%40db-state%2Fserver-mongo)](https://www.npmjs.com/package/@db-state/server-mongo)
 [![license](https://img.shields.io/npm/l/@db-state/vue)](LICENSE)
 
-Reactive database state for Vue 3 + MongoDB.
+Reactive MongoDB state for Vue 3.
+
+**Like Meteor in spirit — but as a library for a plain Node + Vue stack, with permissions as Mongo filters.** Database documents on the page are ordinary reactive state, other users' changes arrive by themselves, and group permissions are Mongo filters that go straight into the database query. Your own MongoDB, your own Node server, your own Vue: db-state plugs into them instead of replacing them.
 
 db-state lets page code read MongoDB documents like normal Vue state:
 
@@ -64,6 +66,34 @@ db-state turns that chain into one small library:
 - one WebSocket connection for data RPC and custom app events.
 
 The goal is not to replace MongoDB or Vue state. The goal is to make MongoDB-backed state feel native on a Vue page.
+
+## How it compares
+
+The individual ideas behind db-state have well-known relatives. The difference is the combination, and that it is a library rather than a platform:
+
+- **permissions are plain Mongo filters** on the group document: `{ order: { write: { ownerId: "$adminid" } } }`. An administrator edits them in the database, and they go into the Mongo query instead of being checked after the fetch;
+- **hooks and RPC methods are files**: `hooks/order/beforeWrite.js`, `rpc/order/next-number.js`. Drop a file in and it works, with no registration in code; edits to a file are picked up without a restart;
+- **fits into your stack**: your Node server (ws or your framework's HTTP server), your MongoDB, your Vue. No custom build, no cloud, no separate service;
+- **small and readable**: the server side is under 2,000 lines with comments explaining why, and can be read end to end.
+
+| Tool | In common | Different |
+| --- | --- | --- |
+| **Meteor** | Closest in spirit: a local Mongo copy on the client, reactive queries, server methods, per-collection rules | Meteor is a platform with its own build and runtime; db-state is a library for a plain Node + Vue stack |
+| **Hasura** | Permissions as row filters with session variables, column limits per role | A GraphQL engine running as a separate service over SQL databases; db-state gives Vue direct access to Mongo without an API layer |
+| **Firebase / Supabase** | Live data on the client, row-level access rules | Platforms; rules in their own language (Security Rules, Postgres RLS); db-state runs on your server and your MongoDB |
+| **Convex** | Reactive queries, server functions as files | Its own database and platform; db-state works with your MongoDB |
+| **RxDB, Replicache, PowerSync, ElectricSQL** | Local cache and sync | Their strength is read sync; writes, write permissions and server logic are left to the app. In db-state it is one model |
+
+db-state fits best for **internal admin panels and staff workplaces**: dozens of tables, filtered lists, record cards, several people editing the same records at once, permissions by group and role.
+
+**When it is not a fit:**
+
+- you need an SQL database — db-state is built on MongoDB;
+- the client is React or framework-free — the ready client is Vue 3 only (the protocol is open, but you would write the client);
+- heavy analytics and reports — there are no aggregations in the API; build them as RPC methods or in a separate store;
+- hundreds of thousands of concurrent users — sync reads a shared change log, designed for working teams rather than a mass public service.
+
+More on the boundaries — [scope and use cases](docs/en/scope-and-use-cases.md).
 
 ## The core idea
 
