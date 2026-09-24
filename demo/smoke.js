@@ -1,11 +1,14 @@
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
 import { setTimeout as delay } from "node:timers/promises"
+import { fileURLToPath } from "node:url"
 
 import WebSocket from "ws"
 
-const port = 8787
-const server = spawn(process.execPath, ["demo/server/index.js"], {
+// Порт задаётся снаружи: npm test (test/demo-smoke.test.js) берёт свободный,
+// чтобы не упасть о запущенный рядом demo:server на 8787.
+const port = Number(process.env.DB_STATE_DEMO_PORT ?? 8787)
+const server = spawn(process.execPath, [fileURLToPath(new URL("./server/index.js", import.meta.url))], {
   env: { ...process.env, DB_STATE_DEMO_PORT: String(port) },
   stdio: ["ignore", "pipe", "pipe"]
 })
@@ -26,6 +29,12 @@ try {
     password: "manager"
   })
   assert.equal(login.userId, "u_manager")
+  // Права двух групп сложились: write с фильтром — из manager, своё
+  // полномочие number — из numbering. Раньше всё, кроме read и write,
+  // при входе пропадало.
+  assert.deepEqual(login.access.order.write, { ownerId: "$adminid" })
+  assert.deepEqual(login.access.order.number, {})
+  assert.equal("order_note" in login.access, false)
   const syncFrom = new Date(Date.now() - 60_000).toISOString()
 
   // Чтение одного документа: маржа скрыта read_fields группы.
@@ -152,6 +161,38 @@ try {
     /Write denied: field margin/
   )
 
+  // --- Заметки: правило через другую таблицу (hooks/order_note/) ----------
+  // Заметку видит тот, кто может править её заказ. Менеджер читает все
+  // заказы, но правит только свои — поэтому видит заметку к o1 и не видит к o3.
+  assert.deepEqual(await rpc(ws, messages, "getIds", { table: "order_note", sort: { _id: 1 } }), ["n1"])
+  assert.equal(await rpc(ws, messages, "count", { table: "order_note", filter: {} }), 1)
+  // Фильтр клиента сужается, а не заменяется: чужой заказ в фильтре не поможет.
+  assert.deepEqual(await rpc(ws, messages, "getIds", { table: "order_note", filter: { orderId: "o3" } }), [])
+  assert.equal((await rpc(ws, messages, "load", { table: "order_note", id: "n1" })).text, "Клиент просил счёт на почту")
+  await assert.rejects(
+    () => rpc(ws, messages, "load", { table: "order_note", id: "n2" }),
+    /Нет доступа к заказу/
+  )
+
+  // Добавить — только к своему заказу. Автора ставит сервер: подложенный
+  // клиентом authorId не сохраняется.
+  const myNote = await rpc(ws, messages, "add", {
+    table: "order_note",
+    obj: { orderId: "o1", text: "  Перезвонить в пятницу ", authorId: "u_admin" },
+    sessionId: "smoke_manager"
+  })
+  const savedNote = await rpc(ws, messages, "load", { table: "order_note", id: myNote.id })
+  assert.equal(savedNote.text, "Перезвонить в пятницу")
+  assert.equal(savedNote.authorId, "u_manager")
+  await assert.rejects(
+    () => rpc(ws, messages, "add", { table: "order_note", obj: { orderId: "o3", text: "чужой" }, sessionId: "smoke_manager" }),
+    /Нет доступа к заказу/
+  )
+  await assert.rejects(
+    () => rpc(ws, messages, "update", { table: "order_note", id: "n1", set: { text: "x" }, sessionId: "smoke_manager" }),
+    /Заметки не правятся/
+  )
+
   // Неизвестная таблица отклоняется.
   await assert.rejects(
     () => rpc(ws, messages, "getIds", { table: "secret" }),
@@ -171,7 +212,7 @@ try {
     password: "admin"
   })
   assert.equal(adminLogin.userId, "u_admin")
-  assert.deepEqual(adminLogin.access, { order: { read: {}, write: {} } })
+  assert.deepEqual(adminLogin.access, { order: { read: {}, write: {}, number: {} } })
 
   // Маржа видна руководителю.
   const adminView = await rpc(adminWs, adminMessages, "load", { table: "order", id: "o1" })
@@ -213,6 +254,50 @@ try {
   })
   assert.equal(removed.ok, true)
   assert.equal(await rpc(adminWs, adminMessages, "count", { table: "order", filter: {} }), 4)
+
+  // --- Заметки в синхронизации: readChange --------------------------------
+  // Руководитель правит все заказы — видит все заметки, в том числе
+  // добавленную менеджером.
+  assert.equal(await rpc(adminWs, adminMessages, "count", { table: "order_note", filter: {} }), 3)
+
+  const notesFrom = new Date().toISOString()
+  await delay(5)
+  const onOwn = await rpc(adminWs, adminMessages, "add", {
+    table: "order_note", obj: { orderId: "o3", text: "Отгрузка в четверг" }, sessionId: "smoke_admin"
+  })
+  const onManagers = await rpc(adminWs, adminMessages, "add", {
+    table: "order_note", obj: { orderId: "o1", text: "Проверить реквизиты" }, sessionId: "smoke_admin"
+  })
+
+  // Менеджеру синхронизация приносит заметку к его заказу и не приносит к
+  // чужому: права группы на order_note у него нет, решает readChange.
+  const manager = await connectAs("manager")
+  const managerSync = await rpc(manager.ws, manager.messages, "sync", { from: notesFrom, sessionId: "smoke_manager_2" })
+  assert.deepEqual(noteIds(managerSync), [onManagers.id])
+  manager.ws.close()
+
+  // Руководитель из другой вкладки получает обе.
+  const adminSync = await rpc(adminWs, adminMessages, "sync", { from: notesFrom, sessionId: "smoke_admin_tab2" })
+  assert.deepEqual(noteIds(adminSync).sort(), [onManagers.id, onOwn.id].sort())
+
+  // --- Наблюдатель: читает заказы, полномочий нет --------------------------
+  const viewer = await connectAs("viewer")
+  assert.deepEqual(viewer.login.access, {
+    order: { read: {}, read_fields: ["number", "status", "client", "total", "ownerId"] }
+  })
+  assert.equal(await rpc(viewer.ws, viewer.messages, "count", { table: "order", filter: {} }), 4)
+  await assert.rejects(
+    () => rpc(viewer.ws, viewer.messages, "order.next-number", {}),
+    /Недостаточно прав для выдачи номера/
+  )
+  // Ни одного заказа он не правит — ни одной заметки не видит, ни списком,
+  // ни синхронизацией; изменения заказов приходят без скрытых полей.
+  assert.deepEqual(await rpc(viewer.ws, viewer.messages, "getIds", { table: "order_note" }), [])
+  const viewerSync = await rpc(viewer.ws, viewer.messages, "sync", { from: syncFrom, sessionId: "smoke_viewer" })
+  assert.ok(viewerSync.changes.some((change) => change.table === "order"))
+  assert.deepEqual(noteIds(viewerSync), [])
+  assert.equal(viewerSync.changes.some((change) => "margin" in (change.obj ?? {}) || "margin" in (change.set ?? {})), false)
+  viewer.ws.close()
 
   // Восстановление сессии по hash, без пароля.
   const authWs = new WebSocket(`ws://127.0.0.1:${port}/db-state/ws`)
@@ -260,6 +345,21 @@ async function waitForServer(child) {
   }
 
   throw new Error(`server did not start: ${output}`)
+}
+
+// Новое соединение под пользователем demo (пароль совпадает с логином).
+async function connectAs(name) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/db-state/ws`)
+  const messages = []
+  ws.on("message", (raw) => messages.push(JSON.parse(String(raw))))
+  await onceOpen(ws)
+  const login = await system(ws, messages, "dbstate:login", { login: name, password: name })
+  assert.equal(login.ok, true, `вход ${name}`)
+  return { ws, messages, login }
+}
+
+function noteIds(sync) {
+  return sync.changes.filter((change) => change.table === "order_note").map((change) => change.id)
 }
 
 function onceOpen(ws) {

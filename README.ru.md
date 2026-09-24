@@ -351,7 +351,7 @@ npm run demo2:client
 npm run demo2:smoke
 ```
 
-- `demo/` - минимальная Vue-страница с in-memory Mongo-like сервером.
+- `demo/` - минимальная Vue-страница с in-memory Mongo-like сервером: права групп и слияние полномочий (`order.number` из отдельной группы), хуки файлами, заметки к заказам с правилом через другую таблицу — `beforeRead` для списков и `readChange` для синхронизации. `demo:smoke` проверяет всё это через настоящий WebSocket и входит в `npm test`.
 - `demo2/` - полноценная админка заказов, пользователей, групп, прав, real MongoDB и offline PWA shell.
 
 Демо-пользователи:
@@ -359,7 +359,7 @@ npm run demo2:smoke
 ```text
 admin / admin
 manager / manager
-viewer / viewer    // demo2
+viewer / viewer    // только чтение: без номеров и заметок
 ```
 
 ## Документация

@@ -58,6 +58,10 @@ class MemoryCollection {
     return { deletedCount: before - this.#items.length }
   }
 
+  async countDocuments(filter = {}) {
+    return this.#items.filter((item) => matches(item, filter)).length
+  }
+
   find(filter = {}) {
     let items = this.#items.filter((item) => matches(item, filter))
 
@@ -75,6 +79,10 @@ class MemoryCollection {
         })
         return this
       },
+      skip(count) {
+        if (count > 0) items = items.slice(count)
+        return this
+      },
       limit(count) {
         if (count > 0) items = items.slice(0, count)
         return this
@@ -86,17 +94,36 @@ class MemoryCollection {
   }
 }
 
+// Подмножество фильтров Mongo, которое строит сама библиотека: условие права
+// она кладёт в запрос как { $and: [фильтр клиента, { $or: [фильтры права] }] },
+// а хуки сужают списки через $in. Без $and/$or/$in права в demo проверялись
+// бы не так, как на настоящей базе.
 function matches(item, filter = {}) {
   return Object.entries(filter).every(([key, expected]) => {
+    if (key === "$and") return expected.every((part) => matches(item, part))
+    if (key === "$or") return expected.some((part) => matches(item, part))
+    if (key === "$nor") return !expected.some((part) => matches(item, part))
+
     const value = getByPath(item, key)
     if (expected && typeof expected === "object" && !Array.isArray(expected)) {
+      if ("$eq" in expected && !equals(value, expected.$eq)) return false
+      if ("$ne" in expected && equals(value, expected.$ne)) return false
+      if ("$in" in expected && !expected.$in.some((entry) => equals(value, entry))) return false
+      if ("$nin" in expected && expected.$nin.some((entry) => equals(value, entry))) return false
+      if ("$exists" in expected && (value !== undefined) !== Boolean(expected.$exists)) return false
       if ("$gt" in expected && !(value > expected.$gt)) return false
+      if ("$gte" in expected && !(value >= expected.$gte)) return false
+      if ("$lt" in expected && !(value < expected.$lt)) return false
       if ("$lte" in expected && !(value <= expected.$lte)) return false
-      if ("$ne" in expected && value === expected.$ne) return false
       return true
     }
-    return value === expected
+    return equals(value, expected)
   })
+}
+
+// Как в Mongo: поле-массив совпадает, если совпал любой элемент.
+function equals(value, expected) {
+  return Array.isArray(value) && !Array.isArray(expected) ? value.includes(expected) : value === expected
 }
 
 function setByPath(target, path, value) {

@@ -32,6 +32,21 @@ const loadingPercent = computed(() => Math.round(loading.percent))
 const status = ref("")
 const comment = ref("")
 
+// --- Заметки к заказу -------------------------------------------------------
+// Права на order_note в группах нет: заметку видит тот, кто может править
+// заказ, — это решают хуки сервера, одним правилом для списка (beforeRead) и
+// для синхронизации (readChange). Заметка, добавленная руководителем к
+// заказу менеджера, придёт менеджеру сама; к чужому заказу — не придёт.
+const notes = computed(() => state.order_note.listRef(
+  { filter: { orderId: selectedId.value }, sort: { _id: 1 } }, "заметки"
+).value ?? [])
+const noteText = ref("")
+
+// Полномочие order.number приходит группой numbering — не read и не write.
+// Кнопка «Создать заказ» прячется по тем же правам, что проверяет сервер.
+const canNumber = computed(() => Boolean(state.auth.access?.fullaccess || state.auth.access?.order?.number))
+const accessJson = computed(() => JSON.stringify(state.auth.access ?? {}, null, 2))
+
 // login, groups и access приходят от сервера при входе и лежат в state.auth.
 const AUTH_LABELS = {
   anonymous: "не выполнена",
@@ -40,7 +55,7 @@ const AUTH_LABELS = {
   authorized: "выполнена"
 }
 
-const ROLES = { admin: "руководитель", manager: "менеджер" }
+const ROLES = { admin: "руководитель", manager: "менеджер", numbering: "выдача номеров", viewer: "наблюдатель" }
 
 const authLabel = computed(() => {
   const label = AUTH_LABELS[state.auth.status] ?? state.auth.status
@@ -170,6 +185,13 @@ const removeOrder = () => run(async () => {
   selectedId.value = ids.value.find((item) => item !== id) ?? ""
   return result
 }, "Заказ удалён")
+
+// Автора заметки ставит сервер (хук beforeWrite), клиент шлёт заказ и текст.
+const addNote = () => run(async () => {
+  const result = await state.order_note.add({ orderId: selectedId.value, text: noteText.value }, "заметки")
+  noteText.value = ""
+  return result
+}, "Заметка добавлена")
 </script>
 
 <template>
@@ -197,6 +219,7 @@ const removeOrder = () => run(async () => {
             <select v-model="login" class="mt-1 w-full rounded border border-gray-300 bg-white px-3 py-2">
               <option value="manager">manager</option>
               <option value="admin">admin</option>
+              <option value="viewer">viewer</option>
             </select>
           </label>
           <label class="mt-3 block text-sm font-medium text-gray-700">
@@ -209,6 +232,7 @@ const removeOrder = () => run(async () => {
           <p class="mt-3 text-xs text-gray-500">
             Пароль совпадает с логином и подставляется сам при выборе пользователя.
             У менеджера поле «маржа» скрыто и защищено от записи.
+            Наблюдатель только читает: номеров не выдаёт, заметок не видит.
           </p>
           <div class="mt-3 flex flex-wrap gap-2">
             <button type="button" class="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50" @click="signOut">
@@ -247,6 +271,15 @@ const removeOrder = () => run(async () => {
           </ul>
           <p v-else class="mt-3 text-xs text-gray-400">Пока пусто — измените заказ.</p>
         </section>
+
+        <section class="rounded border border-gray-200 bg-white p-4 shadow-sm">
+          <h2 class="text-base font-semibold text-gray-950">Права после входа</h2>
+          <p class="mt-1 text-xs text-gray-500">
+            state.auth.access — права всех групп пользователя, слитые сервером. Сливаются все
+            действия, не только read и write: order.number у менеджера приходит из группы numbering.
+          </p>
+          <pre class="mt-3 max-h-64 overflow-auto rounded bg-gray-950 p-3 text-xs text-gray-100">{{ accessJson }}</pre>
+        </section>
       </div>
 
       <div class="space-y-4">
@@ -258,7 +291,13 @@ const removeOrder = () => run(async () => {
                 countRef: {{ total }} · idsRef: {{ ids.length }}
               </span>
             </h2>
-            <button type="button" class="rounded bg-gray-950 px-3 py-2 text-sm font-medium text-white hover:bg-gray-800" @click="addOrder">
+            <button
+              type="button"
+              :disabled="!canNumber"
+              :title="canNumber ? '' : 'Нет полномочия order.number'"
+              class="rounded bg-gray-950 px-3 py-2 text-sm font-medium text-white enabled:hover:bg-gray-800 disabled:opacity-40"
+              @click="addOrder"
+            >
               Создать заказ
             </button>
           </div>
@@ -349,6 +388,30 @@ const removeOrder = () => run(async () => {
 
           <p v-if="info" class="mt-4 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{{ info }}</p>
           <p v-if="error" class="mt-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{{ error }}</p>
+        </section>
+
+        <section class="rounded border border-gray-200 bg-white p-4 shadow-sm">
+          <h2 class="text-base font-semibold text-gray-950">
+            Заметки к заказу {{ selectedId }}
+            <span class="ml-2 rounded bg-gray-100 px-2 py-1 text-xs font-normal text-gray-600">readChange</span>
+          </h2>
+          <p class="mt-1 text-xs text-gray-500">
+            Заметку видит тот, кто может править заказ. Это правило через другую таблицу, фильтром права
+            его не записать — поэтому оно в хуках сервера: beforeRead для списка и readChange для
+            синхронизации. Откройте админа и менеджера в двух окнах: заметка руководителя к заказу
+            менеджера придёт менеджеру сама, к чужому заказу — не придёт.
+          </p>
+          <ul v-if="notes.length" class="mt-3 space-y-1 text-sm text-gray-800">
+            <li v-for="item in notes" :key="item._id" class="rounded bg-gray-50 px-2 py-1">
+              {{ item.text ?? "…" }}
+              <span class="text-xs text-gray-400">— {{ item.authorId ?? "?" }}</span>
+            </li>
+          </ul>
+          <p v-else class="mt-3 text-xs text-gray-400">Заметок нет или они вам не видны.</p>
+          <form class="mt-3 flex gap-2" @submit.prevent="addNote">
+            <input v-model="noteText" class="min-w-0 flex-1 rounded border border-gray-300 px-3 py-2 text-sm" placeholder="Текст заметки" />
+            <button class="rounded bg-gray-950 px-3 py-2 text-sm font-medium text-white hover:bg-gray-800">Добавить</button>
+          </form>
         </section>
       </div>
     </section>

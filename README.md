@@ -351,7 +351,7 @@ npm run demo2:client
 npm run demo2:smoke
 ```
 
-- `demo/` - minimal Vue page with an in-memory Mongo-like server.
+- `demo/` - minimal Vue page with an in-memory Mongo-like server: group access and merged permissions (`order.number` from a separate group), file hooks, order notes with a rule through another table — `beforeRead` for lists and `readChange` for sync. `demo:smoke` checks all of it over a real WebSocket and runs as part of `npm test`.
 - `demo2/` - full admin console for orders, users, groups, permissions, real MongoDB, and offline PWA shell.
 
 Default demo users:
@@ -359,7 +359,7 @@ Default demo users:
 ```text
 admin / admin
 manager / manager
-viewer / viewer    // demo2
+viewer / viewer    // read-only: no numbers, no notes
 ```
 
 ## Documentation

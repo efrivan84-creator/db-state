@@ -18,7 +18,16 @@ const mongo = createMemoryMongo({
       _id: "u_manager",
       login: "manager",
       passwordHash: "demo:manager",
-      groups: ["manager"],
+      // Две группы: права складываются при входе. «Выдавать номера» — своё
+      // полномочие order.number, не read и не write, приходит из numbering.
+      groups: ["manager", "numbering"],
+      disabled: false
+    },
+    {
+      _id: "u_viewer",
+      login: "viewer",
+      passwordHash: "demo:viewer",
+      groups: ["viewer"],
       disabled: false
     }
   ],
@@ -26,7 +35,21 @@ const mongo = createMemoryMongo({
     {
       _id: "admin",
       name: "Руководитель",
-      access: { order: { read: {}, write: {} } }
+      access: { order: { read: {}, write: {}, number: {} } }
+    },
+    {
+      _id: "numbering",
+      name: "Выдача номеров",
+      // Полномочие именованного метода order.next-number. Библиотека сливает
+      // при входе все действия группы, а не только read и write.
+      access: { order: { number: {} } }
+    },
+    {
+      _id: "viewer",
+      name: "Наблюдатель",
+      // Только читает заказы. Номеров не выдаёт, заметок не видит: заметки
+      // видны тому, кто может править заказ (hooks/order_note/access.js).
+      access: { order: { read: {}, read_fields: ["number", "status", "client", "total", "ownerId"] } }
     },
     {
       _id: "manager",
@@ -86,12 +109,18 @@ const mongo = createMemoryMongo({
       margin: 620,
       ownerId: "u_admin"
     }
+  ],
+  // Заметки к заказам. Права на эту таблицу в группах нет вовсе: кто видит
+  // заметку, решает её заказ — хуки в hooks/order_note/.
+  order_note: [
+    { _id: "n1", orderId: "o1", text: "Клиент просил счёт на почту", authorId: "u_manager" },
+    { _id: "n2", orderId: "o3", text: "Скидка согласована директором", authorId: "u_admin" }
   ]
 })
 
 const dbState = createDbStateServer({
   mongo,
-  tables: ["order"],
+  tables: ["order", "order_note"],
 
   // Права целиком в access групп (см. _group выше): руководитель видит и
   // правит всё, менеджер читает все заказы без поля margin, а пишет только
@@ -99,6 +128,8 @@ const dbState = createDbStateServer({
   //
   // Хуки — для того, что фильтром не выразить. Лежат файлами: hooks/afterWrite.js
   // действует на все таблицы, hooks/order/beforeRead.js — только на order.
+  // hooks/order_note/ — правило через другую таблицу: списки (beforeRead),
+  // синхронизация (readChange) и запись (beforeWrite) из одного access.js.
   hooksDir: new URL("./hooks/", import.meta.url),
 
   // Именованные RPC-методы: "order.next-number" → rpc/order/next-number.js.
@@ -121,4 +152,4 @@ wss.on("connection", (ws) => {
 })
 
 console.log(`сервер demo db-state: ws://127.0.0.1:${port}/db-state/ws`)
-console.log("пользователи: admin/admin, manager/manager")
+console.log("пользователи: admin/admin, manager/manager, viewer/viewer")
