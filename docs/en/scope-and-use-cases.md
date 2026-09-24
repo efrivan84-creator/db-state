@@ -4,7 +4,7 @@
 
 This page answers a question that comes up before anyone tries the library: **«Is db-state the right tool for *my* project?»**
 
-The short answer: **db-state covers 70-90% of the realtime state in almost any project — including ones where you also need ultra-low-latency channels (games, voice, live cursors)**. The library is designed to be the **foundation layer**; speed-critical features are added as a thin custom layer over the same socket.
+The short answer: **db-state fits best for internal admin panels and staff workplaces** — dozens of tables, lists, record cards, several people editing the same records, permissions by group. In other realtime projects it covers most of the persistent state, and ultra-low-latency channels (games, voice, live cursors) get a thin custom layer next to it. The library is designed to be the **foundation layer**; speed-critical features are added as a thin custom layer over the same socket.
 
 This page explains that layering model, shows where db-state fits in different kinds of projects, and is honest about where the line stops.
 

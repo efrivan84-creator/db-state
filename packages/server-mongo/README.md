@@ -349,7 +349,9 @@ Permissions are stored as data on a group (`_group`), an object of arbitrary nes
 At login the server merges the `access` of all the user's groups (plus a
 personal `access` on the `_user` document, if any) and attaches the result as
 `user.access`. Merging is additive only, there are no deny rules: filters from different
-groups combine into an any-of set, `{}` (all rows) beats any filter. The object is returned in `login_result`/`auth_result`, so the
+groups combine into an any-of set, `{}` (all rows) beats any filter. Every
+action is merged, not only `read` and `write`: permissions of named methods
+(`bill: { pay: {} }`) survive login and are checked with `accessAllows`. The object is returned in `login_result`/`auth_result`, so the
 client can hide UI sections without extra requests. Changing a group's rights
 applies on the next login or reconnect.
 
@@ -439,7 +441,7 @@ export default (ctx) => {
 Hook names:
 
 ```text
-beforeRead   afterRead   errorRead
+beforeRead   afterRead   errorRead   readChange
 beforeWrite  afterWrite  errorWrite
 ```
 
@@ -482,6 +484,29 @@ original error still reaches the caller.
 
 Hooks contributed by mounted modules run before the application hook of the same
 name; the first explicit decision stops the chain.
+
+### Sync: `readChange`
+
+`sync` checks every change against the group access for its table. The table
+`beforeRead` is not called per change: it narrows `ctx.filter` and allows the
+request, and a change has no filter. A row rule that a filter cannot express —
+membership in another collection, access to a parent document — goes into
+`readChange`, called for every change with `table`, `id`, `change` and
+`loadDoc()`:
+
+```js
+// hooks/message/readChange.js
+export default async (ctx) => {
+  const row = await ctx.loadDoc()          // for a delete — the document before it
+  if (!await isMember(ctx.db, row.box, ctx.user)) return false  // drop the change
+  ctx.fields = ["box", "subject"]          // narrow fields
+  return true                              // send without group access
+}
+```
+
+`false` drops the change, `true` sends it without the group access, no decision
+leaves it to the group access; `ctx.fields` intersects with `read_fields`.
+`fullaccess` does not bypass it. Without the file `sync` behaves as before.
 
 ## Delete Logs
 
@@ -541,7 +566,7 @@ Every successful write appends one compact log row:
 }
 ```
 
-Clients call `sync({ from, sessionId })`. The server reads at most 12 hours of log time, excludes the caller session, applies read permissions, filters forbidden fields, and returns `{ to, changes, hasMore? }`. The client follows `hasMore` windows automatically.
+Clients call `sync({ from, sessionId })`. The server reads at most 12 hours of log time, excludes the caller session, applies `readChange` hooks and read permissions, filters forbidden fields, and returns `{ to, changes, hasMore? }`. The client follows `hasMore` windows automatically.
 
 When `from` is more than 20 days old, the server returns `reset: true`; the client clears its local cache and reloads current state instead of replaying old log rows.
 

@@ -45,7 +45,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@db-state/core": "^0.3.5"
+    "@db-state/core": "^0.3.6"
   },
   "peerDependencies": {
     "mongodb": ">=5.0.0"
