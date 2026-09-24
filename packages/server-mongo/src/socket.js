@@ -17,7 +17,9 @@ export function createSocketHub(adapter, onMessage, options = {}) {
     addClient(client, meta = {}) {
       Object.assign(client, meta)
       clients.add(client)
-      client.on?.("message", (message) => this.handleMessage(client, message))
+      // ws передаёт вторым аргументом признак бинарного фрейма — он решает,
+      // команда это или кусок файла (см. handleMessage).
+      client.on?.("message", (message, isBinary) => this.handleMessage(client, message, isBinary))
       client.on?.("close", () => this.handleClose(client))
       client.send?.(JSON.stringify(hello))
       return () => clients.delete(client)
@@ -47,14 +49,19 @@ export function createSocketHub(adapter, onMessage, options = {}) {
     handleConnection(client, meta = {}) {
       Object.assign(client, meta)
       clients.add(client)
-      client.on?.("message", (message) => this.handleMessage(client, message))
+      client.on?.("message", (message, isBinary) => this.handleMessage(client, message, isBinary))
       client.on?.("close", () => this.handleClose(client))
       this._onConnection?.(client, meta)
       return () => clients.delete(client)
     },
 
-    async handleMessage(client, raw) {
-      const message = parseMessage(raw)
+    // Бинарный фрейм — всегда сырые данные (кусок файла), даже если его байты
+    // случайно читаются как JSON: иначе .json-файл или текст «12345» ушли бы
+    // командой, и загрузка зависла бы. Признак даёт ws; без него (свой
+    // адаптер, тест) командой считается только JSON-объект — число или
+    // строка командой не бывают.
+    async handleMessage(client, raw, isBinary) {
+      const message = isBinary === true ? undefined : parseMessage(raw)
       if (message) {
         await onMessage?.(client, message)
         return
@@ -91,9 +98,12 @@ export function createSocketHub(adapter, onMessage, options = {}) {
   }
 }
 
+// Команда протокола — всегда JSON-объект с type. Число, строка или массив
+// командой не бывают: такие данные уходят обработчикам сырых сообщений.
 function parseMessage(raw) {
   try {
-    return JSON.parse(String(raw))
+    const value = JSON.parse(String(raw))
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? value : undefined
   } catch {
     return undefined
   }

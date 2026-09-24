@@ -38,6 +38,14 @@ export interface FileModuleOptions {
   maxSize?: number
   chunkSize?: number
   defaultPolicy?: DownloadPolicy
+  /**
+   * Deduplicate by SHA-256 (default `true`). When the client sends a hash that
+   * matches a stored file, no bytes are transferred: a new file row with its
+   * own owner, token and policy points to the same stored object. Identical
+   * uploads without a hash are also stored once. Anyone who knows a stored
+   * file's SHA-256 can obtain it this way, so the hash never leaves the server.
+   */
+  dedupe?: boolean
 }
 
 export interface FileModule {

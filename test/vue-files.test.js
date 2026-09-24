@@ -1,8 +1,57 @@
 import assert from "node:assert/strict"
+import { createHash } from "node:crypto"
 import test from "node:test"
 
 import { createDbState, createMemoryCache } from "../packages/vue/src/index.js"
 import { createFileClient } from "../packages/vue-files/src/index.js"
+
+test("vue file client sends the SHA-256 and skips bytes when the server already has the file", async () => {
+  const OriginalWebSocket = globalThis.WebSocket
+  globalThis.WebSocket = FakeWebSocket
+
+  try {
+    const state = createDbState({
+      autoAuth: false,
+      cache: createMemoryCache(),
+      reconnectDelay: 0,
+      safetySyncInterval: 0,
+      ...testStorage(),
+      tables: [],
+      wsUrl: "ws://example.test/db-state/ws"
+    })
+    const files = createFileClient(state)
+    state.auth.status = "authorized"
+
+    const progress = []
+    const blob = new Blob(["hello"], { type: "text/plain" })
+    blob.name = "a.txt"
+    const uploadedPromise = files.upload(blob, { onProgress: (item) => progress.push(item) })
+
+    const ws = FakeWebSocket.instances.at(-1)
+    await waitFor(() => ws.sent.length === 1)
+    const start = JSON.parse(ws.sent[0])
+    assert.equal(start.sha256, createHash("sha256").update("hello").digest("hex"))
+
+    // Сервер нашёл такой же файл — сразу «готово», без upload_next.
+    ws.emitMessage({
+      type: "dbfile:upload_done", id: start.id, fileId: "f2", token: "tok2", deduplicated: true,
+      file: { _id: "f2", token: "tok2", name: "a.txt", mime: "text/plain", size: 5, status: "ready" }
+    })
+    const uploaded = await uploadedPromise
+    assert.equal(uploaded.deduplicated, true)
+    assert.equal(uploaded.token, "tok2")
+    assert.equal(ws.sent.length, 1)
+    assert.deepEqual(progress.map((item) => item.percent), [0, 100])
+
+    // hash: false — хэш не считается и не отправляется.
+    files.upload(blob, { hash: false })
+    await waitFor(() => ws.sent.length === 2)
+    assert.equal("sha256" in JSON.parse(ws.sent[1]), false)
+  } finally {
+    globalThis.WebSocket = OriginalWebSocket
+    FakeWebSocket.instances = []
+  }
+})
 
 test("vue file client registers state.file and uploads with server-driven chunks", async () => {
   const OriginalWebSocket = globalThis.WebSocket

@@ -1,6 +1,10 @@
 import { createPrefixedTableName } from "@db-state/core"
 
 const DEFAULT_CHUNK_SIZE = 512 * 1024
+// Хэш для дедупликации считается целиком в памяти (crypto.subtle не умеет
+// по частям), поэтому только для файлов до этого размера. Больше — грузим
+// без хэша: сервер всё равно склеит одинаковые бинари на диске.
+const DEFAULT_HASH_MAX_SIZE = 256 * 1024 * 1024
 
 export function createFileClient(state, options = {}) {
   const table = options.table ?? createPrefixedTableName(options.servicePrefix ?? options.prefix, "file", "file")
@@ -22,7 +26,12 @@ export function createFileClient(state, options = {}) {
     if (message.file) {
       await state.applyChange({ table, id: message.fileId, action: "insert", obj: message.file })
     }
-    upload.resolve({ id: message.fileId, token: message.token, file: message.file })
+    // Сервер нашёл такой же файл — байты не передавались, прогресс сразу 100%.
+    if (message.deduplicated) {
+      upload.loaded = upload.total
+      upload.onProgress?.(progress(upload))
+    }
+    upload.resolve({ id: message.fileId, token: message.token, file: message.file, deduplicated: Boolean(message.deduplicated) })
   })
 
   state.socket.on("dbfile:download_info", (message) => {
@@ -82,14 +91,18 @@ export function createFileClient(state, options = {}) {
       })
 
       uploadOptions.onProgress?.(progress(upload))
-      sendJson(state, {
+      // Хэш — чтобы сервер мог отдать ссылку на уже лежащий такой же файл
+      // без передачи байтов. hash: false отключает для одной загрузки.
+      const wantsHash = uploadOptions.hash !== false && size <= (options.hashMaxSize ?? DEFAULT_HASH_MAX_SIZE)
+      Promise.resolve(wantsHash ? sha256Hex(file) : undefined).then((sha256) => sendJson(state, {
         type: "dbfile:upload_start",
         id,
         name: uploadOptions.name || file.name || "file",
         mime: uploadOptions.mime || file.type || "application/octet-stream",
         size,
-        policy: uploadOptions.policy
-      }).catch((error) => {
+        policy: uploadOptions.policy,
+        ...(sha256 ? { sha256 } : {})
+      })).catch((error) => {
         const current = uploads.get(id)
         uploads.delete(id)
         current?.reject?.(error)
@@ -144,6 +157,19 @@ export function createFileClient(state, options = {}) {
     await state.socket.sendRaw(await chunk.arrayBuffer())
     upload.loaded = end
     upload.onProgress?.(progress(upload))
+  }
+}
+
+// SHA-256 содержимого в hex. Нет crypto.subtle (страница не по https и не
+// localhost) или файл не читается — хэша нет, загрузка идёт как обычно.
+async function sha256Hex(file) {
+  const subtle = globalThis.crypto?.subtle
+  if (!subtle || typeof file.arrayBuffer !== "function") return undefined
+  try {
+    const digest = await subtle.digest("SHA-256", await file.arrayBuffer())
+    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("")
+  } catch {
+    return undefined
   }
 }
 

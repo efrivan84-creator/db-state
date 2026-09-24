@@ -27,6 +27,10 @@ const blob = await files.download(uploaded.token, {
 files.url(uploaded.token) // /f/<token>
 ```
 
+`upload` сначала считает SHA-256 файла; если такой файл на сервере уже есть,
+байты не отправляются, а в результате `deduplicated: true`. `{ hash: false }`
+отключает хэш; файлы больше `hashMaxSize` (256 МБ) грузятся без хэша.
+
 Progress передачи файлов идет через `onProgress`. Он специально отделен от
 `state.getKeyRef(key)`, который остается loading/helper-объектом для обычных
 db-state чтений и записей.

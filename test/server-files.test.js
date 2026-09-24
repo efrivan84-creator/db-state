@@ -238,12 +238,13 @@ class FakeSocketClient {
     this.sent.push(raw)
   }
 
+  // Как ws: вторым аргументом — признак бинарного фрейма.
   async receiveJson(message) {
-    await this.listeners.get("message")?.(JSON.stringify(message))
+    await this.listeners.get("message")?.(JSON.stringify(message), false)
   }
 
-  async receiveBinary(buffer) {
-    await this.listeners.get("message")?.(buffer)
+  async receiveBinary(buffer, isBinary = true) {
+    await this.listeners.get("message")?.(buffer, isBinary)
   }
 
   async close() {

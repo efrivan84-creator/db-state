@@ -27,6 +27,11 @@ const blob = await files.download(uploaded.token, {
 files.url(uploaded.token) // /f/<token>
 ```
 
+`upload` hashes the file with SHA-256 first; when the server already has the
+same file, no bytes are sent and the result has `deduplicated: true`. Pass
+`{ hash: false }` to skip hashing; files over `hashMaxSize` (256 MB) upload
+without a hash.
+
 File transfer progress is reported through `onProgress`. It is intentionally
 separate from `state.getKeyRef(key)`, which remains a db-state read/write
 loading helper.

@@ -1,5 +1,6 @@
-import { randomBytes } from "node:crypto"
-import { appendFile, mkdir, readFile, rename, rm, stat } from "node:fs/promises"
+import { createHash, randomBytes } from "node:crypto"
+import { createReadStream } from "node:fs"
+import { appendFile, mkdir, rename, rm, stat } from "node:fs/promises"
 import path from "node:path"
 
 import { createPrefixedTableName, normalizeServicePrefix } from "@db-state/core"
@@ -7,7 +8,9 @@ import { createPrefixedTableName, normalizeServicePrefix } from "@db-state/core"
 const DEFAULT_CHUNK_SIZE = 512 * 1024
 const DEFAULT_MAX_SIZE = 50 * 1024 * 1024
 // Поля таблицы файлов, которые можно отдавать клиенту. storageKey сюда не
-// входит: путь в хранилище не должен покидать сервер.
+// входит: путь в хранилище не должен покидать сервер. sha256 — тоже: при
+// дедупликации хэш сам открывает файл (см. startUpload), он такой же ключ,
+// как token, и отдавать его наружу нельзя.
 //
 // Экспортируется, чтобы hooksDir-версия защиты не переписывала список вручную
 // и не разъезжалась с библиотекой — см. hooks в module ниже.
@@ -36,6 +39,14 @@ export function createFileModule(input = {}) {
         // storageKey не покидает сервер даже при внутреннем чтении.
         ctx.fields = FILE_FIELDS
         if (ctx.req?.__dbStateFileInternal) return true
+      },
+
+      // sync: beforeRead на изменения не вызывается, и без этого хука
+      // изменение строки файла ушло бы как есть — со storageKey и sha256.
+      // Кто получает изменение, по-прежнему решает право группы.
+      readChange: (ctx) => {
+        if (ctx.table !== options.table) return
+        ctx.fields = FILE_FIELDS
       },
 
       beforeWrite: (ctx) => {
@@ -104,6 +115,23 @@ export function createFileModule(input = {}) {
     const uploadId = safeId(message.id ?? createId("upload"))
     const fileId = createId("file")
     const policy = message.policy ?? options.defaultPolicy
+
+    // Дедупликация: клиент прислал хэш, и такой файл уже лежит — байты не
+    // принимаем, заводим новую строку на тот же бинарь со своим владельцем,
+    // token и политикой. Хэш клиента — только ключ поиска: найденный sha256
+    // сервер посчитал сам по байтам, поэтому подложить чужой хэш под свой
+    // мусор нельзя. Цена: кто знает хэш файла, получает сам файл — поэтому
+    // sha256 наружу не отдаётся никогда (FILE_FIELDS). dedupe: false выключает.
+    const claimed = sha256Hex(message.sha256)
+    if (claimed && options.dedupe !== false) {
+      const existing = await config.mongo.collection(options.table)
+        .findOne({ sha256: claimed, size, status: "ready" })
+      if (existing) {
+        await linkExisting(client, message, { fileId, policy, size, existing })
+        return
+      }
+    }
+
     const obj = {
       _id: fileId,
       ownerId: client.userId ?? client.user._id,
@@ -123,13 +151,52 @@ export function createFileModule(input = {}) {
       sessionId: client.sessionId
     })
 
-    const upload = { id: message.id, uploadId, fileId, offset: 0, size }
+    // Хэш считаем сами по мере прихода кусков: он и проверяет заявленный
+    // клиентом, и становится ключом дедупликации для следующих загрузок.
+    const upload = { id: message.id, uploadId, fileId, offset: 0, size, claimed, hash: createHash("sha256") }
     uploads.set(client, upload)
     if (size === 0) {
-      await finishUpload(client, upload)
+      try {
+        await finishUpload(client, upload)
+      } catch (error) {
+        await failUpload(client, upload)
+        throw error
+      }
       return
     }
     sendUploadNext(client, upload)
+  }
+
+  // Ссылка на уже лежащий бинарь вместо загрузки: новая строка, свои
+  // ownerId, token и политика, тот же storageKey и серверный sha256.
+  async function linkExisting(client, message, { fileId, policy, size, existing }) {
+    const token = createToken()
+    await api.add({
+      table: options.table,
+      obj: {
+        _id: fileId,
+        ownerId: client.userId ?? client.user._id,
+        name: String(message.name ?? existing.name ?? "file"),
+        mime: String(message.mime ?? existing.mime ?? "application/octet-stream"),
+        size,
+        storageKey: existing.storageKey,
+        sha256: existing.sha256,
+        status: "ready",
+        downloadPolicy: policy,
+        token
+      },
+      req: internalReq(client),
+      sessionId: client.sessionId
+    })
+    const file = await api.load({ table: options.table, id: fileId, req: internalReq(client) })
+    sendJson(client, {
+      type: "dbfile:upload_done",
+      id: message.id,
+      fileId,
+      token,
+      file,
+      deduplicated: true
+    })
   }
 
   async function receiveUploadChunk(client, raw, upload) {
@@ -143,6 +210,7 @@ export function createFileModule(input = {}) {
       offset: upload.offset,
       chunk
     })
+    upload.hash.update(chunk)
     upload.offset += chunk.length
 
     if (upload.offset < upload.size) {
@@ -154,15 +222,34 @@ export function createFileModule(input = {}) {
   }
 
   async function finishUpload(client, upload) {
+    const sha256 = upload.hash.digest("hex")
+    // Клиент заявил один хэш, а прислал другие байты — файл повреждён в пути
+    // или подменён. Такой бинарь не сохраняем: под ним искали бы дубли.
+    if (upload.claimed && upload.claimed !== sha256) throw new Error("File checksum mismatch")
+
     const result = await options.storage.finish({ uploadId: upload.uploadId })
+    let storageKey = result.storageKey
+    // Такие же байты уже лежат — второй копии на диске не держим, строка
+    // ссылается на прежний бинарь. Экономит место и тогда, когда клиент хэш
+    // не прислал и загрузка прошла целиком.
+    if (options.dedupe !== false) {
+      const existing = await config.mongo.collection(options.table)
+        .findOne({ sha256, size: result.size, status: "ready" })
+      if (existing?.storageKey && existing.storageKey !== storageKey) {
+        await options.storage.remove({ storageKey })
+        storageKey = existing.storageKey
+      }
+    }
+
     const token = createToken()
     await api.update({
       table: options.table,
       id: upload.fileId,
       set: {
         status: "ready",
-        storageKey: result.storageKey,
+        storageKey,
         size: result.size,
+        sha256,
         token
       },
       req: internalReq(client),
@@ -298,9 +385,18 @@ export function localFileStorage(root) {
       return { storageKey, size: (await stat(to)).size }
     },
 
+    // Читаем с диска только запрошенный диапазон. Прежде на каждый кусок
+    // скачивания файл читался целиком и резался в памяти: 50 МБ кусками по
+    // 512 КБ — сотня полных чтений и 50 МБ памяти на каждое.
     async *read({ storageKey, range }) {
-      const file = await readFile(path.join(base, ...String(storageKey).split("/")))
-      yield file.subarray(range?.start ?? 0, range?.end ?? file.length)
+      const start = range?.start ?? 0
+      const end = range?.end
+      if (end !== undefined && end <= start) return
+      yield* createReadStream(path.join(base, ...String(storageKey).split("/")), {
+        start,
+        // У потока end включительный, у range — нет.
+        ...(end !== undefined ? { end: end - 1 } : {})
+      })
     },
 
     async remove({ storageKey }) {
@@ -373,6 +469,13 @@ function createId(prefix) {
 
 function createToken() {
   return randomBytes(32).toString("hex")
+}
+
+// Хэш от клиента: 64 hex-символа SHA-256, иначе его нет. Строка другой формы
+// в поиск дубликатов не попадает.
+function sha256Hex(value) {
+  const hex = String(value ?? "").trim().toLowerCase()
+  return /^[a-f0-9]{64}$/.test(hex) ? hex : undefined
 }
 
 function safeId(value) {

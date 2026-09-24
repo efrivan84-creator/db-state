@@ -4,6 +4,18 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.3.8
+
+- **File deduplication by SHA-256.** `@db-state/vue-files` hashes the file before uploading and sends the hash in `upload_start`. When the same file is already stored, the server accepts no bytes: the uploader gets a new `file` row with its own `ownerId`, `token` and policy pointing to the same stored object, and `upload_done` arrives immediately with `deduplicated: true`. The client's hash is only a lookup key: the server hashes the received bytes itself, rejects the upload on a mismatch (`File checksum mismatch`) and keeps no second copy of identical bytes even when the client sent no hash. Knowing a stored file's hash yields that file, so `sha256`, like `storageKey`, never reaches the client. Turned off with `createFileModule({ dedupe: false })`; on the client — `upload(file, { hash: false })` and `createFileClient(state, { hashMaxSize })` (256 MB by default).
+
+- A binary WebSocket frame is no longer parsed as a command. The socket tried to parse every incoming message as JSON, so a file chunk that happened to be valid JSON (a small `.json`, a text file with a single number) was routed as a command and the upload hung. The binary flag from `ws` now decides: binary is always raw data. Without the flag (a custom adapter) only a JSON object counts as a command.
+
+- A file row's `storageKey` no longer leaks through `sync`. The module hook narrowed fields only on regular reads, while sync changes are checked separately — the module now has a `readChange` hook. Who sees file rows is still decided by group access; the docs are corrected: they claimed the module itself shows rows only to their owner.
+
+- Local storage reads only the requested byte range from disk. Each download chunk used to read the whole file and slice it in memory: 50 MB in 512 KB chunks meant a hundred full reads.
+
+- `publish.cmd` also publishes `@db-state/server-files` and `@db-state/vue-files`: all five packages ship at one version.
+
 ## 0.3.7
 
 - A change that replaces a parent object as a whole no longer disappears from `sync` when only its nested fields are allowed. A `set: { sip: {...} }` patch under `read_fields: ["sip.extension"]` (or the same `ctx.fields` from `readChange`) used to be dropped entirely — only the `sip` path was checked, and it is not in the list. Nothing leaked, but the client silently missed what it was entitled to: the new `sip.extension` value never reached the open page. Such a path is now projected onto the allowed nested fields: they go into `set`, the rest does not, and an allowed field missing from the new object goes into `unset` — the object was replaced as a whole. An `unset` of the parent likewise becomes an `unset` of the allowed nested fields. Inserts and deletes were already projected correctly.

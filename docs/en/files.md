@@ -261,6 +261,42 @@ files.url(token) // /f/<token>
 
 `files.url(token)` only formats a URL string. It does not add an HTTP download endpoint by itself. A typical app can route `/f/:token` to a Vue page, call `files.download(token)`, and show login UI if the policy requires auth.
 
+## Deduplication
+
+Identical files are stored once, and a repeated upload sends no bytes.
+
+1. The client (`@db-state/vue-files`) hashes the file with SHA-256 before the
+   upload and sends the hash in `upload_start`.
+2. When a ready file with the same hash and size is already stored, no bytes
+   are requested: a new `file` row with its own `ownerId`, `token` and
+   `downloadPolicy` points to the same stored object. `upload_done` arrives
+   immediately, with `deduplicated: true`.
+3. Otherwise the upload runs as usual and the server hashes the received bytes
+   itself. A mismatch with the claimed hash rejects the upload (`File checksum
+   mismatch`) and nothing is stored. When the bytes match an already stored
+   object, the second copy is not kept and the row points to the existing one.
+
+The client's hash is only a lookup key: the database stores the hash computed
+by the server, so a foreign hash cannot be attached to other bytes.
+
+**The cost.** Anyone who knows the SHA-256 of a stored file obtains that file:
+they claim the hash and size and get their own `token`. The hash becomes a key
+just like `token`, which is why `sha256` never reaches the client. If that risk
+is unacceptable, set `dedupe: false` on the server.
+
+Settings:
+
+| Where | Option | Default | Meaning |
+|---|---|---|---|
+| server | `dedupe` | `true` | `false` — no hash lookup and no merging of identical objects |
+| client | `upload(file, { hash })` | `true` | `false` — do not hash this upload |
+| client | `createFileClient(state, { hashMaxSize })` | 256 MB | larger files upload without a hash: `crypto.subtle` hashes in memory |
+
+Hashing needs `crypto.subtle` (https or localhost).
+
+One stored object may belong to several rows. There is no delete API yet; a
+future delete must remove the object only when no row references it.
+
 ## Download Policy
 
 ```ts
@@ -303,12 +339,24 @@ Token is always required. Policy is the second layer.
 
 ## `state.file` Access
 
-The file module adds access rules for the `file` table:
+Who sees `file` rows is decided by **group access**, like for any table. The
+module only protects the table itself:
 
-- owner can read their own file metadata;
-- owner can see `token` only as a metadata field after the file is ready;
-- `storageKey` is always hidden;
+- `storageKey` and `sha256` never reach the client — not in `load`/`getIds`,
+  not in `sync` (the module's `readChange` hook), not in the upload reply;
+- `token` appears only on a ready file;
 - direct writes are denied unless the call is an internal file-module write.
+
+A personal file list is an access filter by owner:
+
+```js
+{ file: { read: { ownerId: "$adminid" } } }
+```
+
+A row carries `token`, the download key. Whoever sees someone else's row can
+download that file (if the policy allows). If rows must be visible only to
+their owner under any access, `fullaccess` included, add table `beforeRead` and
+`readChange` hooks for the file table in the application.
 
 These calls are rejected for normal clients:
 
@@ -338,7 +386,7 @@ The same socket carries two namespaces:
 Upload:
 
 ```text
-client -> JSON   { type: "dbfile:upload_start", id, name, mime, size, policy }
+client -> JSON   { type: "dbfile:upload_start", id, name, mime, size, policy, sha256? }
 server -> JSON   { type: "dbfile:upload_next", id, offset, chunkSize }
 client -> binary <chunk bytes>
 server -> JSON   { type: "dbfile:upload_next", id, offset, chunkSize }
@@ -386,6 +434,7 @@ function localFileStorage(root: string): FileStorage
 | `maxSize` | `50 * 1024 * 1024` | Max upload size in bytes. |
 | `chunkSize` | `512 * 1024` | Server-requested upload chunk size. |
 | `defaultPolicy` | `{ mode: "registered" }` | Policy used when upload does not provide one. |
+| `dedupe` | `true` | SHA-256 deduplication, see above. |
 
 `FileStorage` adapter:
 
@@ -433,6 +482,7 @@ Options:
 |---|---:|---|
 | `table` | `"file"` | Table name to register on the client. |
 | `urlPrefix` | `"/f"` | Prefix used by `files.url(token)`. |
+| `hashMaxSize` | 256 MB | Larger files upload without a hash. |
 
 `FileClient`:
 
@@ -516,7 +566,7 @@ const myFiles = state.file.listRef({
 })
 ```
 
-The server-side file access rule returns only files owned by the current user.
+The list returns only the user's own files under an owner filter in the group access: `{ file: { read: { ownerId: "$adminid" } } }` (see "`state.file` Access").
 
 ## Operational Notes
 

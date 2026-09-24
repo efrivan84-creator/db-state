@@ -1,9 +1,9 @@
 @echo off
 setlocal
 
-rem Публикация @db-state/core, server-mongo и vue в npm.
+rem Публикация пакетов @db-state в npm: core, server-mongo, vue, server-files, vue-files.
 rem
-rem   publish.cmd               все три пакета по порядку
+rem   publish.cmd               все пять пакетов по порядку
 rem   publish.cmd server-mongo  только один (когда остальные уже уехали)
 rem
 rem Токен спрашивается на месте и живёт только в этом окне: пишется во
@@ -15,12 +15,12 @@ rem иначе npm запросит одноразовый код и падёт 
 
 cd /d "%~dp0" || exit /b 1
 
-rem Что публикуем: аргумент или все три.
+rem Что публикуем: аргумент или все пять.
 rem
 rem Один пакет нужен, когда общий прогон уехал наполовину: повторно
 rem опубликовать ту же версию npm не даст, и общий запуск упал бы на первом
 rem же шаге, не дойдя до недостающего.
-set "TARGETS=core server-mongo vue"
+set "TARGETS=core server-mongo vue server-files vue-files"
 if not "%~1"=="" (
   set "TARGETS=%~1"
   call :known "%~1" || exit /b 1
@@ -36,8 +36,9 @@ rem Не публикуем сломанное: сначала весь прог
 call npm test
 if errorlevel 1 goto :failed
 
-rem Порядок важен: core первым, остальные два от него зависят — если он не
-rem уйдёт, зависимость ^x.y.z у них повиснет в воздухе. Список TARGETS уже
+rem Порядок важен: core первым — от него зависят все; server-files после
+rem server-mongo, vue-files после vue: это их peer-зависимости. Если
+rem предыдущий не уйдёт, ^x.y.z у следующего повиснет в воздухе. Список TARGETS уже
 rem в нужном порядке, а один пакет порядка не требует.
 rem
 rem Путь обязательно с .\ — голое packages/core npm принимает за
@@ -68,9 +69,9 @@ exit /b 1
 rem Опечатка в имени не должна кончаться попыткой опубликовать
 rem несуществующую папку: список короткий, проверить его дешевле.
 :known
-for %%K in (core server-mongo vue) do if "%~1"=="%%K" exit /b 0
+for %%K in (core server-mongo vue server-files vue-files) do if "%~1"=="%%K" exit /b 0
 echo Неизвестный пакет: %~1
-echo Ожидается core, server-mongo или vue.
+echo Ожидается core, server-mongo, vue, server-files или vue-files.
 exit /b 1
 
 :cleanup

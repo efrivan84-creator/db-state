@@ -29,6 +29,12 @@ export interface UploadOptions {
   mime?: string
   policy?: DownloadPolicy
   onProgress?: (progress: FileProgress) => void
+  /**
+   * Send the file's SHA-256 so the server can link an identical stored file
+   * instead of receiving the bytes again. Default `true`; skipped for files
+   * larger than `hashMaxSize` or without `crypto.subtle`.
+   */
+  hash?: boolean
 }
 
 export interface DownloadOptions {
@@ -40,6 +46,8 @@ export interface UploadResult {
   id: string
   token: string
   file: FileRecord
+  /** `true` when the server already had identical bytes and no data was sent. */
+  deduplicated: boolean
 }
 
 export interface FileClient {
@@ -50,5 +58,12 @@ export interface FileClient {
 
 export function createFileClient<TState extends DbState>(
   state: TState & { file?: TableApi<FileRecord> },
-  options?: { table?: string; servicePrefix?: string; prefix?: string; urlPrefix?: string }
+  options?: {
+    table?: string
+    servicePrefix?: string
+    prefix?: string
+    urlPrefix?: string
+    /** Largest file hashed for deduplication, bytes. Default 256 MB. */
+    hashMaxSize?: number
+  }
 ): FileClient
