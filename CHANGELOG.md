@@ -4,6 +4,12 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.3.9
+
+- **The browser cache no longer keeps a stale copy of a record.** A `sync` change for a record that is not in memory (not open on the page) was not written to the cache — a partial record must not be stored — but the previous full copy stayed there. The next `load` served it as current, so an edit made by another user or by the server while the record was not open never reached the browser until the cache was cleared by hand. Such a change now evicts the cached copy, and the next `load` fetches the record from the server.
+
+- A change that arrives while a record is loading is no longer lost. If `load` was reading the cache at that moment, the copy it read does not contain the change — it is now discarded and the record is fetched from the server. If the change arrives while the server response is in flight, the record is re-read (at most three times in a row).
+
 ## 0.3.8
 
 - **File deduplication by SHA-256.** `@db-state/vue-files` hashes the file before uploading and sends the hash in `upload_start`. When the same file is already stored, the server accepts no bytes: the uploader gets a new `file` row with its own `ownerId`, `token` and policy pointing to the same stored object, and `upload_done` arrives immediately with `deduplicated: true`. The client's hash is only a lookup key: the server hashes the received bytes itself, rejects the upload on a mismatch (`File checksum mismatch`) and keeps no second copy of identical bytes even when the client sent no hash. Knowing a stored file's hash yields that file, so `sha256`, like `storageKey`, never reaches the client. Turned off with `createFileModule({ dedupe: false })`; on the client — `upload(file, { hash: false })` and `createFileClient(state, { hashMaxSize })` (256 MB by default).

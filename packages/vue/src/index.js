@@ -142,6 +142,11 @@ export function createDbState(input) {
 
     async applyChange(change, { refreshQueries = true } = {}) {
       const wasLoaded = Boolean(tables[change.table]?.[change.id]?.__loaded)
+      // Запись ещё грузится (из кэша или с сервера): то, что она получит, уже
+      // может не включать это изменение. Помечаем — load возьмёт её с сервера.
+      if (change.action === "update" && !wasLoaded && tables[change.table]?.[change.id]) {
+        tables[change.table][change.id].__stale = true
+      }
       const oldObj = change.action === "delete" ? (change.old ?? tables[change.table]?.[change.id]) : undefined
       applyReactiveChange(tables, change)
       const obj = tables[change.table]?.[change.id]
@@ -468,6 +473,12 @@ async function writeCache(cache, change, obj, wasLoaded) {
     await cache.set(change.table, change.id, cleanRecord(obj))
   } else if (change.action === "update" && wasLoaded && obj) {
     await cache.set(change.table, change.id, cleanRecord(obj))
+  } else if (change.action === "update") {
+    // Записи нет в памяти — целиком её не собрать, частичную класть нельзя.
+    // Но в кэше могла остаться прежняя полная копия: без изменения она
+    // осталась бы там навсегда, и load отдавал бы старое. Выбрасываем —
+    // следующий load возьмёт запись с сервера.
+    await cache.delete(change.table, change.id)
   }
 }
 

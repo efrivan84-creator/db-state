@@ -1,6 +1,6 @@
 {
   "name": "@db-state/vue-files",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "Vue client file upload/download module for db-state over the same WebSocket.",
   "keywords": [
     "db-state",

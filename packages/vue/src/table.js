@@ -315,14 +315,25 @@ async function queueLoad(input) {
   try {
     const cached = await options.cache.get(table, id)
     target.__cacheChecked = true
-    if (cached) {
+    // Пока читали кэш, пришло изменение этой записи: копия из кэша его не
+    // содержит — идём на сервер.
+    if (cached && !target.__stale) {
       Object.assign(target, cached, { __cacheChecked: true, __loaded: true })
       return
     }
 
     if (state.auth.status !== "authorized") return
 
-    const obj = await state.socket.rpc("load", { table, id: rawId })
+    // Изменение пришло, пока ответ сервера был в пути, — ответ мог его не
+    // застать. Перечитываем, но не бесконечно: частая правка не должна
+    // держать загрузку в цикле.
+    let obj
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      delete target.__stale
+      obj = await state.socket.rpc("load", { table, id: rawId })
+      if (!target.__stale) break
+    }
+    delete target.__stale
     if (obj) {
       Object.assign(target, obj, { __cacheChecked: true, __loaded: true })
       await options.cache.set(table, id, obj)

@@ -26,6 +26,65 @@ test("sync update does not cache partial unloaded records", async () => {
   assert.equal(state.order.items.o1, undefined)
 })
 
+test("sync update drops a stale cached copy of an unloaded record", async () => {
+  const cache = createMemoryCache()
+  await cache.set("order", "o1", { _id: "o1", status: "old" })
+  const state = createDbState({
+    autoConnect: false,
+    cache,
+    safetySyncInterval: 0,
+    ...testStorage(),
+    tables: ["order"]
+  })
+  const calls = []
+  state.socket.rpc = async (method, payload) => {
+    calls.push(method)
+    return method === "load" ? { _id: payload.id, status: "done" } : undefined
+  }
+  state.auth.status = "authorized"
+
+  // Изменение пришло, пока записи нет в памяти: частичную не кладём, но и
+  // прежнюю полную копию не оставляем — иначе load вечно отдавал бы старое.
+  await state.applyChange({ table: "order", id: "o1", action: "update", set: { status: "done" } })
+  assert.equal(await cache.get("order", "o1"), undefined)
+
+  const order = state.order.load("o1")
+  await waitFor(() => order.__loaded)
+  assert.equal(order.status, "done")
+  assert.deepEqual(calls, ["load"])
+})
+
+test("update arriving while the cached copy is being read loads the record from the server", async () => {
+  const inner = createMemoryCache()
+  await inner.set("order", "o1", { _id: "o1", status: "old" })
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const cache = {
+    ...inner,
+    async get(...args) {
+      const value = await inner.get(...args)
+      await gate
+      return value
+    }
+  }
+  const state = createDbState({
+    autoConnect: false,
+    cache,
+    safetySyncInterval: 0,
+    ...testStorage(),
+    tables: ["order"]
+  })
+  state.socket.rpc = async (method, payload) => (method === "load" ? { _id: payload.id, status: "done" } : undefined)
+  state.auth.status = "authorized"
+
+  const order = state.order.load("o1")
+  await state.applyChange({ table: "order", id: "o1", action: "update", set: { status: "done" } })
+  release()
+  await waitFor(() => order.__loaded)
+  assert.equal(order.status, "done", "копия из кэша прочитана до изменения — её не берём")
+  assert.equal(order.__stale, undefined)
+})
+
 test("sync update caches records that were already fully loaded", async () => {
   const cache = createMemoryCache()
   const state = createDbState({

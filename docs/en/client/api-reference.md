@@ -143,7 +143,7 @@ await state.applyChange({
 })
 ```
 
-Updates the reactive store, writes/deletes cache row, schedules `countRef` / `idsRef` refresh. `update` changes patch only already-loaded local documents; they do not create partial objects. `insert` changes create the local document because the log carries the full object.
+Updates the reactive store, writes/deletes cache row, schedules `countRef` / `idsRef` refresh. `update` changes patch only already-loaded local documents; they do not create partial objects. For a document that is not loaded, the cached copy is deleted instead, so the next `load` fetches it from the server rather than serving a stale copy. `insert` changes create the local document because the log carries the full object.
 
 ### `onChange(callback)`
 
