@@ -404,6 +404,6 @@ viewer / viewer    // read-only: no numbers, no notes
 
 ## Project status
 
-Current release line: `0.3.0`. The API is intentionally small and still pre-1.0, so breaking changes remain possible before `1.0`. See [CHANGELOG.md](CHANGELOG.md) for release notes and current limitations.
+Current release: `0.3.10`. The API is intentionally small and still pre-1.0, so breaking changes remain possible before `1.0`. See [CHANGELOG.md](CHANGELOG.md) for release notes and current limitations.
 
 License: MIT.

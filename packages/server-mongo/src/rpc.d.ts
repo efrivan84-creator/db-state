@@ -35,6 +35,7 @@ export function createHandlers(api: {
   count: RpcHandler
   getIds: RpcHandler
   getUnique: RpcHandler
+  history: RpcHandler
   load: RpcHandler
   remove: RpcHandler
   sync: RpcHandler

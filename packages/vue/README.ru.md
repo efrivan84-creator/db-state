@@ -335,3 +335,7 @@ import {
 - `cache.js` — адаптеры кэша.
 - `keys.js` — трекинг прогресса по page-key.
 - `storage.js` — хелперы session и storage.
+
+## История записи
+
+`await state.order.history({ id: 123, limit: 50 })` возвращает `{ changes, next }`. Передайте `before: next` для предыдущей страницы. История не применяется к текущему состоянию; обновлять открытую ленту можно через `onChange`. Нужна серверная версия db-state с командой `history`.

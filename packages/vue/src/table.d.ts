@@ -1,6 +1,6 @@
 import type { ComputedRef, Ref } from "vue"
 
-import type { BaseDoc, Change, Filter, ListQuery, UpdateArgs } from "@db-state/core"
+import type { BaseDoc, Change, Filter, HistoryQuery, HistoryResult, ListQuery, UpdateArgs } from "@db-state/core"
 
 export type { Filter, ListQuery, SortSpec, UpdateArgs } from "@db-state/core"
 
@@ -89,6 +89,9 @@ export interface TableApi<T extends BaseDoc = BaseDoc> {
    * Use `idsRef` for reactive needs.
    */
   getIds(query?: ListQuery<T>, key?: PageKey): Promise<string[]>
+
+  /** Reads persisted history without mutating live records, caches or the sync cursor. */
+  history(query: HistoryQuery, key?: PageKey): Promise<HistoryResult>
 
   /** Fetches distinct values for a single field on the server. Waits for authorization before RPC. */
   getUnique<V = unknown>(

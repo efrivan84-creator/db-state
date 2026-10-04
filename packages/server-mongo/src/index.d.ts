@@ -1,4 +1,4 @@
-import type { BaseDoc, Change, Filter, ListQuery, UpdatePatch } from "@db-state/core"
+import type { BaseDoc, Change, Filter, HistoryQuery, HistoryResult, ListQuery, UpdatePatch } from "@db-state/core"
 import type { AccessUser } from "./access.js"
 import type { AuthRateLimitContext, AuthWarning, PasswordHasher } from "./auth.js"
 import type { RpcHandler } from "./rpc.js"
@@ -207,7 +207,9 @@ export interface ServerHookContext<T extends BaseDoc = BaseDoc> {
   req?: unknown
   user?: AccessUser
   table?: string
-  method: "load" | "getIds" | "getUnique" | "count" | "sync" | "add" | "update" | "remove"
+  method: "load" | "getIds" | "getUnique" | "count" | "sync" | "history" | "add" | "update" | "remove"
+  /** beforeHistory only: trusted server-defined related records. Every readAs target is authorized. */
+  sources?: Array<{ table: string; id: string | number; readAs?: { table: string; id: string | number }; fields?: string[] }>
   id?: string
   action?: Change<T>["action"]
   obj?: T
@@ -269,6 +271,9 @@ export type ServerHook<T extends BaseDoc = BaseDoc> =
  * inside the hook when a rule applies to one table only.
  */
 export interface ServerHooks<T extends BaseDoc = BaseDoc> {
+  /** Runs after the requested record has passed normal read authorization. */
+  beforeHistory?: ServerHook<T>
+  afterHistory?: ServerHook<T>
   beforeRead?: ServerHook<T>
   afterRead?: ServerHook<T>
   errorRead?: ServerHook<T>
@@ -380,6 +385,8 @@ export interface SyncResult {
 
 /** Object returned by {@link createDbStateServer}. */
 export interface DbStateServer {
+  /** Reads the configured log collection with current row/field access and cursor pagination. */
+  history(input: HistoryQuery & RequestContext & { table: string }): Promise<HistoryResult>
   socket: SocketHub
 
   /** Inserts a new document, appends to the log, and broadcasts the change. */

@@ -79,6 +79,17 @@ export function createTableApi(ctx) {
       }
     },
 
+    async history(query, key) {
+      const token = `${table}:history:${JSON.stringify(query)}`
+      trackPendingKey({ key, loadingByKey, keyRefs, token })
+      try {
+        await state.waitForAuthorized()
+        return await state.socket.rpc("history", { id: query.id, before: query.before, limit: query.limit, table })
+      } finally {
+        trackLoadedKey({ key, loadingByKey, keyRefs, token })
+      }
+    },
+
     async getUnique(query = {}, key) {
       const token = `${table}:getUnique:${JSON.stringify(query)}`
       trackPendingKey({ key, loadingByKey, keyRefs, token })

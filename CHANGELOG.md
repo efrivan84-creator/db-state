@@ -4,6 +4,12 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.3.10
+
+- **Record history from the existing change log.** `state.table.history({ id, before, limit })` and server-side `api.history(...)` read the configured `logCollection` with stable time/id cursor pagination. History includes the current session and neither advances sync nor replays old patches into live state.
+- Current record permissions, field whitelists and `readChange` hooks apply, including to old values. Server-only `beforeHistory`/`afterHistory` hooks support related records and archive transitions through trusted `sources`/`readAs` configuration.
+- Added history types, documentation and tests. All five packages and internal dependencies now use `0.3.10`.
+
 ## 0.3.9
 
 - **The browser cache no longer keeps a stale copy of a record.** A `sync` change for a record that is not in memory (not open on the page) was not written to the cache — a partial record must not be stored — but the previous full copy stayed there. The next `load` served it as current, so an edit made by another user or by the server while the record was not open never reached the browser until the cache was cleared by hand. Such a change now evicts the cached copy, and the next `load` fetches the record from the server.

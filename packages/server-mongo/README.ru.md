@@ -531,3 +531,7 @@ export default async (ctx) => {
 - `rpc.js` — диспатчер WebSocket RPC.
 - `socket.js` — реестр WebSocket-клиентов и broadcast.
 - `auth.js` — login/hash-аут и адаптер паролей.
+
+## История записи
+
+`api.history({ table, id, before, limit, req })` читает настроенный `logCollection` с правами текущего документа и ограничением полей. Связанные записи задаются серверными хуками `beforeHistory` и `afterHistory`. Подробнее: [история](../../docs/ru/history.md).

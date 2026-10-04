@@ -26,6 +26,7 @@ import { createMethodsDirResolver, isPublicMethod } from "./methods-dir.js"
 import { DEFAULT_COUNTER_COLLECTION, nextNumericId, useNumericId } from "./numeric-id.js"
 import { createHandlers, handleRpc } from "./rpc.js"
 import { createSocketHub } from "./socket.js"
+import { readHistory } from "./history.js"
 
 export { accessAllows, matchesAccessFilter } from "./access.js"
 export { createAuth, defaultAuthHash, defaultPassword, hashValue, mergeUserAccess } from "./auth.js"
@@ -228,9 +229,14 @@ export function createDbStateServer(options) {
   }
 
   async function load({ table, id, req }) {
-    const ctx = { req, table, id, method: "load" }
+    return (await readRecord({ table, id, req })).doc
+  }
 
-    return runRead(ctx, async (plan) => {
+  async function readRecord({ table, id, req }) {
+    const ctx = { req, table, id, method: "load" }
+    let fields
+    const doc = await runRead(ctx, async (plan) => {
+      fields = plan.fields
       // Право и поля — в самом запросе: фильтр проверяет Mongo,
       // projection отдаёт только разрешённые поля.
       if (plan.mode === "none") throw denied("Read", ctx)
@@ -242,7 +248,10 @@ export function createDbStateServer(options) {
       // Повторная проекция — no-op для реальной Mongo, гарантия для duck-typed баз.
       return projectFields(ctx.obj, plan.fields)
     })
+    return { doc, fields, user: ctx.user }
   }
+
+  const history = input => readHistory(config, input, readRecord)
 
   async function getIds({ table, filter = {}, sort, skip = 0, limit = 0, req }) {
     const ctx = { req, table, method: "getIds", filter, sort, skip, limit }
@@ -441,7 +450,7 @@ export function createDbStateServer(options) {
     }
   }
 
-  router = createHandlers({ add, count, getIds, getUnique, load, remove, sync, update })
+  router = createHandlers({ add, count, getIds, getUnique, history, load, remove, sync, update })
 
   // Сигнал клиентам «есть изменения» — тот же, что шлёт обычная запись.
   //
@@ -460,7 +469,7 @@ export function createDbStateServer(options) {
     changesBroadcaster.schedule()
   }
 
-  const api = { add, count, getIds, getUnique, load, notifyChanges, remove, socket, sync, update }
+  const api = { add, count, getIds, getUnique, history, load, notifyChanges, remove, socket, sync, update }
   if (fileMethodsContext) Object.assign(fileMethodsContext, { api }, config.methodsContext)
   // methodsContext достаётся и хукам: то, что нужно методу для работы —
   // вторая база, транзакция, внешний клиент, — нужно и хуку, который делает

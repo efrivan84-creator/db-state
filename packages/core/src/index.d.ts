@@ -9,6 +9,11 @@
 // Protocol constants
 // ---------------------------------------------------------------------------
 
+/** Stable descending journal pagination, including changes sharing a timestamp. */
+export interface HistoryCursor { createdAt: string; id: string | number }
+export interface HistoryQuery { id: string | number; before?: HistoryCursor; limit?: number }
+export interface HistoryResult { changes: Change[]; next: HistoryCursor | null }
+
 /** Prefix reserved for library-internal WebSocket events. User events MUST NOT start with this. */
 export const DB_STATE_EVENT_PREFIX: "dbstate:"
 

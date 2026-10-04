@@ -6,6 +6,7 @@ export function createHandlers(api) {
     count: async (req) => withMeta(req, await api.count({ ...(await readBody(req)), req })),
     getIds: async (req) => withMeta(req, await api.getIds({ ...(await readBody(req)), req })),
     getUnique: async (req) => withMeta(req, await api.getUnique({ ...(await readBody(req)), req })),
+    history: async (req) => withMeta(req, await api.history({ ...(await readBody(req)), req })),
     load: async (req) => withMeta(req, await api.load({ ...(await readBody(req)), req })),
     remove: async (req) => withMeta(req, await api.remove({ ...(await readBody(req)), req })),
     sync: async (req) => withMeta(req, await api.sync({ ...(await readBody(req)), req })),
