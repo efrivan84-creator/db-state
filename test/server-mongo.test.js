@@ -2441,6 +2441,76 @@ test("pub methods stay closed without methodsDir", async () => {
 })
 
 
+test("update keeps ctx.old intact: nested paths do not leak into it before access check or afterWrite", async () => {
+  // Настоящий драйвер отдаёт из findOne отдельный объект, тестовая база —
+  // сам хранимый. Заворачиваем, иначе ctx.old менялся бы уже самой записью.
+  const store = createMemoryMongo()
+  const mongo = {
+    collection(name) {
+      return new Proxy(store.collection(name), {
+        get(target, key) {
+          if (key === "findOne") return async (...args) => structuredClone(await target.findOne(...args))
+          const value = target[key]
+          return typeof value === "function" ? value.bind(target) : value
+        }
+      })
+    }
+  }
+  const server = createDbStateServer({
+    mongo,
+    tables: ["order"],
+    now: () => "2026-05-21T10:00:01.000Z",
+    createLogId: idSeq(),
+    hooksDir: await writeDir({
+      afterWrite: `export default async (ctx) => {
+        ctx.req.seen.push({ old: structuredClone(ctx.old), obj: structuredClone(ctx.obj) })
+      }`
+    })
+  })
+  const createdAt = new Date("2026-05-01T00:00:00.000Z")
+  await store.collection("order").insertOne({
+    _id: "o1",
+    tariff: { sum: 900, group: 1 },
+    owner: { id: "u1" },
+    lines: [{ name: "a" }, { name: "b" }],
+    createdAt,
+    info: { editid: "u0", editdata: "2026-01-01T00:00:00.000Z" }
+  })
+
+  const seen = []
+  await server.update({
+    table: "order",
+    id: "o1",
+    set: { "tariff.group": 5, "tariff.extra.note": "x" },
+    unset: ["lines.0.name"],
+    req: { seen, user: { _id: "u1", groups: [], access: { order: { write: {} } } } }
+  })
+
+  const [{ old, obj }] = seen
+  assert.deepEqual(old.tariff, { sum: 900, group: 1 })
+  assert.deepEqual(old.lines, [{ name: "a" }, { name: "b" }])
+  // info библиотека дописывает в каждую правку — прежний автор тоже цел.
+  assert.deepEqual(old.info, { editid: "u0", editdata: "2026-01-01T00:00:00.000Z" })
+  assert.deepEqual(obj.tariff, { sum: 900, group: 5, extra: { note: "x" } })
+  assert.deepEqual(obj.lines, [{}, { name: "b" }])
+  assert.deepEqual(obj.info, { editid: "u1", editdata: "2026-05-21T10:00:01.000Z" })
+  assert.deepEqual((await store.collection("order").findOne({ _id: "o1" })).tariff, { sum: 900, group: 5, extra: { note: "x" } })
+
+  // Право на запись по вложенному полю: прислать это же поле со своим
+  // значением и пройти проверку нельзя — она смотрит прежний документ.
+  const stranger = { seen: [], user: { _id: "u2", groups: [], access: { order: { write: { "owner.id": "$adminid" } } } } }
+  await assert.rejects(
+    () => server.update({ table: "order", id: "o1", set: { "owner.id": "u2" }, req: stranger }),
+    /Write denied/
+  )
+  assert.deepEqual((await store.collection("order").findOne({ _id: "o1" })).owner, { id: "u1" })
+  const owner = { seen: [], user: { _id: "u1", groups: [], access: { order: { write: { "owner.id": "$adminid" } } } } }
+  assert.equal((await server.update({ table: "order", id: "o1", set: { "owner.name": "Ivan" }, req: owner })).ok, true)
+
+  // Значения драйвера по дороге не портятся: Date остаётся Date.
+  assert.equal(owner.seen[0].obj.createdAt instanceof Date, true)
+})
+
 function createMemoryMongo() {
   const collections = new Map()
 

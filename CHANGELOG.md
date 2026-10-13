@@ -4,6 +4,11 @@ Release notes and project status for db-state.
 
 ## Unreleased
 
+## 0.3.11
+
+- **`ctx.old` is the previous document again during `update`.** The server built the patched document from a shallow copy, so a dotted path (`"tariff.group"`) was written into the nested object shared with `ctx.old` before the write. The write-access check and `afterWrite` then saw the new value as the old one: a write filter on a nested field (`{ "owner.id": "$adminid" }`) could be passed by sending that same field in the change, and an `afterWrite` hook comparing a nested field with `ctx.old` never saw a difference. `ctx.old.info` was overwritten on every update for the same reason. Objects and arrays along each changed path are now detached from the original; driver values such as `ObjectId` and `Date` are left as they are.
+- No API changes. All five packages and internal dependencies now use `0.3.11`.
+
 ## 0.3.10
 
 - **Record history from the existing change log.** `state.table.history({ id, before, limit })` and server-side `api.history(...)` read the configured `logCollection` with stable time/id cursor pagination. History includes the current session and neither advances sync nor replays old patches into live state.

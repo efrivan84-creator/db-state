@@ -126,7 +126,10 @@ export function createDbStateServer(options) {
         ctx.unset = ctx.clientUnset
       },
       apply: () => {
-        ctx.obj = applyPatch({ ...(ctx.old ?? { _id: id }) }, { set: ctx.set, unset: ctx.unset })
+        ctx.obj = applyPatch(
+          detachPaths(ctx.old ?? { _id: id }, [...Object.keys(ctx.set ?? {}), ...(ctx.unset ?? [])]),
+          { set: ctx.set, unset: ctx.unset }
+        )
       },
       paths: () => changeWritePaths({ set: ctx.clientSet, unset: ctx.clientUnset }),
       write: async () => {
@@ -521,6 +524,42 @@ async function appendLog(config, change) {
 
 function getDoc(config, table, id) {
   return config.mongo.collection(table).findOne({ _id: id })
+}
+
+// Копия документа, на которую можно накладывать правку, не задевая оригинал.
+//
+// Поверхностной копии мало: точечный путь ("tariff.group") пишется во
+// вложенный объект, а он у копии и оригинала общий. Правка попадала в ctx.old
+// ещё до записи — проверка права на запись и afterWrite видели вместо
+// прежнего документа уже изменённый.
+//
+// Отделяем только объекты и массивы на пути каждого поля, а не весь документ:
+// глубокая копия превратила бы ObjectId, Date и прочие значения драйвера в
+// голые объекты. Такие значения не трогаем — на них путь и обрывается.
+function detachPaths(doc, paths) {
+  const copy = { ...doc }
+
+  for (const path of paths) {
+    const parts = String(path).split(".").filter(Boolean)
+    let cursor = copy
+
+    for (let i = 0; i < parts.length - 1; i += 1) {
+      const child = cursor[parts[i]]
+      if (Array.isArray(child)) cursor[parts[i]] = [...child]
+      else if (isPlainRecord(child)) cursor[parts[i]] = { ...child }
+      else break
+
+      cursor = cursor[parts[i]]
+    }
+  }
+
+  return copy
+}
+
+function isPlainRecord(value) {
+  if (value == null || typeof value !== "object") return false
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
 }
 
 function stripInfoObject(obj = {}) {
